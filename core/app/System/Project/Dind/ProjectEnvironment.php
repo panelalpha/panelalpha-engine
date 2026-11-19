@@ -813,16 +813,17 @@ class ProjectEnvironment
     }
 
     /**
-     * The env file without the keys the compose file defaults (`${VAR:-default}`), commented out;
-     * a bare `${VAR}` keeps the template's value.
+     * The env file without the keys the compose file defaults (`${VAR:-default}`) to something else, commented out;
+     * a bare `${VAR}` keeps the template's value, and so does one equal to every default: deferring it changes no
+     * interpolation, and takes it from a service that reads `.env` whole (ClickHouse's password, which its own
+     * health check interpolates as `${CLICKHOUSE_PASSWORD:-clickhouse}`).
      *
      * @return array{0: string, 1: list<string>} contents, the keys deferred
      */
     public static function deferToComposeDefaults(string $envContents, string $composeRaw): array
     {
-        preg_match_all('/\$\{([A-Za-z_][A-Za-z0-9_]*):-/', $composeRaw, $matches);
-        $defaulted = array_flip($matches[1] ?? []);
-        if ($defaulted === []) {
+        $defaults = self::composeDefaults($composeRaw);
+        if ($defaults === []) {
             return [$envContents, []];
         }
 
@@ -830,7 +831,7 @@ class ProjectEnvironment
         $rows = [];
         foreach (EnvFile::parse($envContents) as $row) {
             $key = self::variableKey($row);
-            if ($key !== '' && isset($defaulted[$key])) {
+            if ($key !== '' && isset($defaults[$key]) && ! self::equalsEveryDefault($row, $defaults[$key])) {
                 $dropped[] = $key;
                 $rows[] = [
                     'type' => 'comment',
@@ -843,6 +844,33 @@ class ProjectEnvironment
         }
 
         return $dropped === [] ? [$envContents, []] : [EnvFile::serialise($rows), $dropped];
+    }
+
+    /**
+     * Each variable the compose file defaults, with every default it is given.
+     *
+     * @return array<string, list<string>>
+     */
+    private static function composeDefaults(string $composeRaw): array
+    {
+        preg_match_all('/\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}?/', $composeRaw, $matches, PREG_SET_ORDER);
+        $defaults = [];
+        foreach ($matches as $match) {
+            $defaults[$match[1]][] = $match[2];
+        }
+
+        return $defaults;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @param  list<string>  $defaults
+     */
+    private static function equalsEveryDefault(array $row, array $defaults): bool
+    {
+        $value = trim(trim((string) ($row['value'] ?? '')), '"\'');
+
+        return array_values(array_unique($defaults)) === [$value];
     }
 
     /**

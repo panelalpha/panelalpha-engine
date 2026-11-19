@@ -79,20 +79,61 @@ class ComposeDefaultsWinTest extends TestCase
         );
     }
 
-    /** Every `${VAR:-default}` key goes, and only those. */
+    /** Every `${VAR:-default}` key the template sets to something else goes, and only those. */
     public function test_only_defaulted_keys_are_deferred(): void
     {
         [$trimmed, $dropped] = ProjectEnvironment::deferToComposeDefaults(self::ENV_EXAMPLE, self::COMPOSE);
 
         sort($dropped);
         $this->assertSame(
-            ['DB_CONNECTION', 'DB_DATABASE', 'DB_HOST', 'DB_PASSWORD', 'DB_USERNAME'],
+            ['DB_CONNECTION', 'DB_HOST', 'DB_PASSWORD', 'DB_USERNAME'],
             $dropped
         );
 
         $kept = $this->valuesOf($trimmed);
         $this->assertSame('Lychee', $kept['APP_NAME'], 'a key compose never mentions is untouched');
         $this->assertSame('UTC', $kept['TIMEZONE']);
+        $this->assertSame('lychee', $kept['DB_DATABASE'], 'the template agrees with the default');
+    }
+
+    /**
+     * AgenticResourceRegistry: ClickHouse reads `.env` whole and its health check interpolates
+     * `${CLICKHOUSE_PASSWORD:-clickhouse}`. Deferring the template's equal `clickhouse` left the server with no
+     * password and the check with one, and the check's `Authentication failed` kept the stack down.
+     */
+    public function test_a_template_value_equal_to_every_default_is_kept(): void
+    {
+        $compose = <<<'YAML'
+            services:
+              observal-clickhouse:
+                env_file: [../.env]
+                healthcheck:
+                  test: ["CMD-SHELL", "clickhouse-client --password ${CLICKHOUSE_PASSWORD:-clickhouse} --query 'SELECT 1'"]
+              observal-api:
+                environment:
+                  CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-clickhouse}"
+                  API_WORKERS: "${API_WORKERS:-2}"
+                  CLICKHOUSE_HOST_PORT: "${CLICKHOUSE_HOST_PORT:-8123}"
+            YAML;
+
+        [$trimmed, $dropped] = ProjectEnvironment::deferToComposeDefaults(
+            "CLICKHOUSE_USER=default\nCLICKHOUSE_PASSWORD=\"clickhouse\"\nAPI_WORKERS=4\n",
+            $compose
+        );
+
+        $this->assertSame(['API_WORKERS'], $dropped);
+        $this->assertSame('clickhouse', $this->valuesOf($trimmed)['CLICKHOUSE_PASSWORD']);
+    }
+
+    /** Two defaults that disagree still leave the key to compose. */
+    public function test_a_value_equal_to_only_one_of_two_defaults_is_deferred(): void
+    {
+        [, $dropped] = ProjectEnvironment::deferToComposeDefaults(
+            "PORT=3000\n",
+            "a: \"\${PORT:-3000}\"\nb: \"\${PORT:-8080}\"\n"
+        );
+
+        $this->assertSame(['PORT'], $dropped);
     }
 
     /**
