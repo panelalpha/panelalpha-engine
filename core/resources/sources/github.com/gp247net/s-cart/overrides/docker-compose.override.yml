@@ -15,10 +15,16 @@
 # rather than leaving them for this file to fight with.
 services:
   app:
+    # SCART_ADMIN_USER / SCART_ADMIN_PASSWORD, generated and kept by the
+    # engine; panelalpha/set-admin-password.php gives the seeded admin that
+    # login.
+    env_file:
+      - .env
+      - ../.panelalpha/app-credentials.env
     # ~/project is emptied on every deploy; ~/.panelalpha is not. Uploads (the
-    # `public` and `gp247` disks, served via public/storage) and the admin
-    # password note live there. Sources are relative to ~/project; prepare.sh
-    # creates them as the account user first.
+    # `public` and `gp247` disks, served via public/storage) and an older
+    # version's admin password note live there. Sources are relative to
+    # ~/project; prepare.sh creates them as the account user first.
     volumes:
       - ../.panelalpha/scart:/panelalpha
       - ../.panelalpha/scart/uploads:/app/storage/app/public
@@ -29,8 +35,8 @@ services:
     # 2-core host is most of a minute on its own), `migrate`, then
     # `gp247:install` -- core, front and shop in turn, each migrating a large
     # schema and running its seeders, publishing the GP247Front template into
-    # app/GP247 and public/GP247, and linking storage -- and then the admin
-    # password. The engine runs `docker compose up -d` without --wait and probes
+    # app/GP247 and public/GP247, and linking storage -- and then the engine's
+    # login on the admin. The engine runs `docker compose up -d` without --wait and probes
     # as soon as it returns, which is while all of that is still going: nothing
     # is listening and the probe reads `Failed to connect to 127.0.0.1 port
     # 8000`.

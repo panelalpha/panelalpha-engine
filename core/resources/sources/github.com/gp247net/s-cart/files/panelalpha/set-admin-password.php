@@ -1,28 +1,33 @@
 <?php
 
 /*
- * Replaces S-Cart's seeded admin credential, once, while it is still the one
- * upstream shipped.
+ * Gives S-Cart's seeded administrator the login the engine generated, on an
+ * install whose admin password is still one nobody chose.
  *
- * GP247\Core\Database\Seeders\DataDefaultSeeder creates the only administrator
- * with a hardcoded bcrypt hash:
+ * The engine generates the login (`credentials:` in panelalpha.yaml:
+ * SCART_ADMIN_USER and SCART_ADMIN_PASSWORD, which the container gets from
+ * ~/.panelalpha/app-credentials.env and GET /projects/{name}/app-credentials
+ * returns). On a new install panelalpha/install.sh hands the password to
+ * `gp247:install --admin-password`, GP247's own way, and this finds it set.
+ * It is for installs that predate that, whose admin `admin` has:
  *
- *     public $adminUser     = 'admin';
- *     public $adminPassword = '$2y$10$JcmAHe5eUZ2rS0jU1GWr/.xhwCnh2RU13qwjTPcqfmtZXjZxcryPO';
+ *   - `admin`. GP247\Core\Database\Seeders\DataDefaultSeeder seeds a
+ *     hardcoded bcrypt hash of it, and older gp247/core releases left it there
+ *     and printed "User/password: admin/admin" to the deploy log;
+ *   - the password an older version of this recipe generated and recorded in
+ *     /panelalpha/admin-password (~/.panelalpha/scart/admin-password,
+ *     `password: ...`), which nobody deploying it was told. That record is
+ *     removed once the account has the engine's login;
+ *   - a random password gp247:install generated itself (current releases,
+ *     without --admin-password) and printed only to the deploy log. GP247
+ *     sets it with a query that leaves `updated_at` empty, and every save
+ *     through the admin panel (a password change included) fills it, so a row
+ *     whose `updated_at` is still empty has never been touched by anyone.
  *
- * which is the password `admin` -- password_verify() says so -- and
- * GP247\Core\Commands\Install prints "User/password: admin/admin" to the
- * console when it finishes, so the deploy log says it too. That is a reasonable
- * default for the local evaluation install upstream documents, and the wrong
- * one for an account the engine has just given a public HTTPS address and a
- * certificate.
- *
- * Guarded on the password still verifying as `admin` rather than on a
- * first-boot marker: re-running this must never reset a password somebody has
- * since chosen in the admin panel. Rotate what upstream shipped, never what
- * somebody chose. The credentials file is written before the UPDATE, so there
- * is never a password in the database that nothing recorded, and the UPDATE
- * repeats the old hash in its WHERE clause to close the gap between the two.
+ * Any other password was chosen in the admin panel and is left alone, so a
+ * restart or a redeploy never resets it. The account is renamed when
+ * SCART_ADMIN_USER is not `admin`. The UPDATE repeats the old hash in its
+ * WHERE clause, so a password changed while this runs is not overwritten.
  *
  * Boots the framework rather than speaking raw PDO: the connection is whatever
  * config/database.php resolves (a sidecar today, an operator's managed MySQL
@@ -33,6 +38,13 @@
  */
 
 $root = dirname(__DIR__);
+
+$login = (string) getenv('SCART_ADMIN_USER');
+$password = (string) getenv('SCART_ADMIN_PASSWORD');
+if ($login === '' || $password === '') {
+    fwrite(STDERR, "[s-cart] SCART_ADMIN_USER or SCART_ADMIN_PASSWORD is not in the environment (~/.panelalpha/app-credentials.env); the admin login was not set\n");
+    exit(1);
+}
 
 require $root . '/vendor/autoload.php';
 
@@ -46,57 +58,66 @@ $app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 $prefix = defined('GP247_DB_PREFIX') ? GP247_DB_PREFIX : (string) env('GP247_DB_PREFIX', 'gp247_');
 $table = $prefix . 'admin_user';
 // ~/.panelalpha/scart, mounted by the compose override; ~/project is wiped on redeploy.
-$file = '/panelalpha/admin-password';
+$legacyFile = '/panelalpha/admin-password';
+
+$legacy = '';
+if (is_file($legacyFile)) {
+    foreach (file($legacyFile, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+        if (str_starts_with($line, 'password: ')) {
+            $legacy = substr($line, strlen('password: '));
+        }
+    }
+}
 
 try {
     $admin = \Illuminate\Support\Facades\DB::table($table)->where('username', 'admin')->first();
 } catch (\Throwable $e) {
     fwrite(STDERR, "[s-cart] could not read {$table}: " . $e->getMessage() . "\n");
-    fwrite(STDERR, "[s-cart] the admin account still has the password `admin` -- change it in the panel.\n");
-    exit(0);
+    exit(1);
 }
 
 if ($admin === null) {
-    echo "[s-cart] no seeded `admin` account; nothing to rotate\n";
+    echo "[s-cart] no seeded `admin` account; nothing to set\n";
     exit(0);
 }
 
 $current = (string) ($admin->password ?? '');
-if ($current === '' || !password_verify('admin', $current)) {
-    echo "[s-cart] the admin account no longer has the seeded password; left alone\n";
+if ($current !== '' && $admin->username === $login && password_verify($password, $current)) {
+    if (is_file($legacyFile)) {
+        @unlink($legacyFile);
+    }
+    echo "[s-cart] the admin account has the login the engine generated\n";
     exit(0);
 }
-
-// 24 hex characters. Hex rather than a mixed alphabet because this value is
-// read back out of a file by a human and typed into a login form.
-$password = bin2hex(random_bytes(12));
-
-$written = @file_put_contents(
-    $file,
-    "S-Cart administrator, generated on first install by PanelAlpha.\n"
-    . "Admin panel: /gp247_admin\n"
-    . "username: admin\n"
-    . "password: {$password}\n"
-);
-if ($written === false) {
-    fwrite(STDERR, "[s-cart] could not write {$file}; refusing to change a password nothing would record.\n");
-    fwrite(STDERR, "[s-cart] the admin account still has the password `admin` -- change it in the panel.\n");
+$unchosen = $current === ''
+    || password_verify('admin', $current)
+    || ($legacy !== '' && password_verify($legacy, $current))
+    || ($admin->updated_at ?? null) === null;
+if (!$unchosen) {
+    echo "[s-cart] the admin account has a password chosen in the panel; left alone\n";
     exit(0);
 }
-@chmod($file, 0600);
 
 // The old hash in the WHERE clause: if anything else set a password between the
 // read above and here, this updates nothing rather than overwriting it.
 $updated = \Illuminate\Support\Facades\DB::table($table)
-    ->where('username', 'admin')
+    ->where('id', $admin->id)
     ->where('password', $current)
-    ->update(['password' => \Illuminate\Support\Facades\Hash::make($password), 'updated_at' => now()]);
+    ->update([
+        'username' => $login,
+        'password' => \Illuminate\Support\Facades\Hash::make($password),
+        'updated_at' => now(),
+    ]);
 
 if ($updated === 0) {
-    @unlink($file);
     echo "[s-cart] the admin password changed while this ran; left alone\n";
     exit(0);
 }
 
-echo "[s-cart] set a generated password for `admin`; it is in ~/.panelalpha/scart/admin-password (0600)\n";
+// The older record names a password that no longer works.
+if (is_file($legacyFile)) {
+    @unlink($legacyFile);
+}
+
+echo "[s-cart] gave the admin account the login the engine generated ({$login})\n";
 exit(0);

@@ -13,6 +13,14 @@ about everything that follows from it — PHP 8.3 against `"php": "^8.3"`,
 account's public https URL in `APP_URL`. Without the recipe the deploy reports
 success, nothing answers on 8000 and the domain gives 502.
 
+## Signing in
+
+Open `/gp247_admin` (a 302 to `/gp247_admin/auth/login`) and sign in with the
+login the engine generates, `SCART_ADMIN_USER` (default `admin`) and
+`SCART_ADMIN_PASSWORD`: read it with `GET /projects/{name}/app-credentials`
+(MCP `app_credentials_get`). See
+[3. The admin account](#3-the-admin-account-is-admin--admin).
+
 ## Why the generic platform fails
 
 ### 1. Half of the workstation compose file was adopted
@@ -129,15 +137,34 @@ when it finishes, so the deploy log says it as well. On an account that has just
 been given a public HTTPS name, that is a shop whose administration is open to
 anyone who has read the manual.
 
-`files/panelalpha/set-admin-password.php` generates a 24-character password,
-writes it to `~/.panelalpha/scart/admin-password` (0600) and sets it with
-`Hash::make()` — **only while the password still verifies as `admin`**. Rotate
-what upstream shipped, never what somebody chose: re-running it on an account
-whose operator has since picked their own password prints *"the admin account no
-longer has the seeded password; left alone"* and changes nothing. The file is
-written before the `UPDATE`, so there is never a password in the database that
-nothing recorded, and the `UPDATE` repeats the old hash in its `WHERE` clause to
-close the gap between the two.
+Current gp247/core releases no longer leave it there: `gp247:install`
+generates a random password and prints it, once, to the console, which on a
+deploy is the deploy log. That is not open to anyone, and not usable either:
+nobody deploying the shop reads it there. Either way the visitor had no way
+in, and an earlier version of this recipe added a third: it generated a
+password into `~/.panelalpha/scart/admin-password` and told nobody.
+
+So the engine generates the login (`credentials:` in `panelalpha.yaml`:
+`SCART_ADMIN_USER`, default `admin`, and `SCART_ADMIN_PASSWORD`), keeps it on
+the project and writes it to `~/.panelalpha/app-credentials.env`, which the
+compose override adds to the app's `env_file`.
+
+- `files/panelalpha/install.sh` passes the password to
+  `gp247:install --admin-password`, GP247's own way: `InitialAdminPassword::assign`
+  sets it only while the account still has the seeded hash, and the install
+  then prints "the one you passed with --admin-password" instead of a password.
+- `files/panelalpha/set-admin-password.php` (install and upgrade stages, after
+  the install) is for installs that predate that. It gives the seeded `admin`
+  the engine's login (and renames it when `SCART_ADMIN_USER` is not `admin`)
+  only while its password is still one nobody chose: `admin`; the one the
+  older recipe recorded in `~/.panelalpha/scart/admin-password` (that record is
+  then removed); or the random one `gp247:install` printed, which GP247 sets
+  with a query that leaves `updated_at` empty, while every save through the
+  admin panel, a password change included, fills it. Any other password was
+  chosen in the panel and is left alone (*"the admin account has a password
+  chosen in the panel; left alone"*), so a restart or a redeploy never resets
+  it. The `UPDATE` repeats the old hash in its `WHERE` clause, so a password
+  changed while it runs is not overwritten.
 
 It boots the framework rather than speaking raw PDO, because all three things it
 needs are things a hand-rolled script would have to guess: the connection
@@ -243,7 +270,7 @@ writes at runtime is kept under `~/.panelalpha/scart/` (created by
 | Path on the account | In the container | What |
 |---|---|---|
 | `~/.panelalpha/scart/uploads/` | `/app/storage/app/public` | uploads: the `public` and `gp247` disks (product, banner, logo, avatar ... images from the file manager), served as `/storage/...` through the `public/storage` symlink that `storage:link` recreates on every deploy |
-| `~/.panelalpha/scart/admin-password` | `/panelalpha/admin-password` | the generated admin password note (0600) |
+| `~/.panelalpha/scart/admin-password` | `/panelalpha/admin-password` | an older version's admin password note, gone once its admin moves to the engine's login |
 | `~/.panelalpha/scart/secrets.env` | `/panelalpha/secrets.env` | `APP_KEY`, `GP247_ENCRYPTION_KEY`, the MariaDB password |
 
 The database is on the `dbdata` volume. Not kept: `storage/logs` (logs go to
@@ -256,7 +283,7 @@ re-publishes from the vendor packages on every deploy.
 `AppLauncher` runs `docker compose up -d` without `--wait` and the deploy is
 finished when that returns, which for S-Cart is minutes before it answers: the
 database's first boot, `migrate`, then three package installs each with a large
-schema and its seeders, then the template publish and the password rotation, all
+schema and its seeders, then the template publish and the engine's login, all
 in the install stage before Apache binds.
 
 `overrides/docker-compose.override.yml` adds a healthcheck and a no-op `ready`
@@ -273,13 +300,12 @@ which is a 200 to an anonymous client and renders from the seeded schema. `start
 
 **Mail.** `.env.example` ships `MAIL_MAILER=log`, so password-reset and order
 mail is written to the log rather than sent. Set `MAIL_*` through the account's
-env vars to add a server. Nothing in this recipe depends on mail — the one
-password there is goes into a file.
+env vars to add a server. Nothing in this recipe depends on mail.
 
 **The admin URL.** `GP247_ADMIN_PREFIX=gp247_admin` is upstream's default and
-the recipe leaves it alone, because the healthcheck and the credentials file
-both name that path. Changing it in `.env` works; the healthcheck then probes a
-path that 404s, so change the override too.
+the recipe leaves it alone, because the healthcheck and the credentials'
+`login_path` both name that path. Changing it in `.env` works; the healthcheck
+then probes a path that 404s, so change the override too.
 
 **`GP247_API_LICENSE`** is empty, which is upstream's default. The extension
 marketplace (`gp247:ext-*`) needs one; nothing in a plain shop does.
@@ -294,8 +320,23 @@ queued mail or scheduled jobs needs them back.
 
 | File | Why |
 |---|---|
-| `panelalpha.yaml` | the whole manifest (so `key-generate` is not inherited), the `env:` the container needs, and the install and password commands |
+| `panelalpha.yaml` | the whole manifest (so `key-generate` is not inherited), the `env:` the container needs, the install and password commands, and the `credentials:` |
 | `hooks/prepare.sh` | moves both workstation compose files out of the root before detection, creates `~/.panelalpha/scart/uploads`, and writes a `.env` with the keys and database password kept in `~/.panelalpha/scart/` |
-| `files/panelalpha/install.sh` | runs `gp247:install --force=1` exactly once, guarded on GP247's own marker and on a seeded database, as `APP_ENV=local` so its unforced migrations are not cancelled; on a redeploy re-publishes the install's files and restores the marker |
-| `files/panelalpha/set-admin-password.php` | replaces the seeded `admin`/`admin` credential and records the new one |
-| `overrides/docker-compose.override.yml` | bind-mounts `~/.panelalpha/scart` (uploads, password note) into the app; a two-request healthcheck plus a `ready` gate, so the deploy waits for the database, the three installs and the template publish |
+| `files/panelalpha/install.sh` | runs `gp247:install --force=1 --admin-password` (the engine's password) exactly once, guarded on GP247's own marker and on a seeded database, as `APP_ENV=local` so its unforced migrations are not cancelled; on a redeploy re-publishes the install's files and restores the marker |
+| `files/panelalpha/set-admin-password.php` | gives an older install's admin the engine's login while its password is still one nobody chose |
+| `overrides/docker-compose.override.yml` | the engine's login as `env_file`; bind-mounts `~/.panelalpha/scart` (uploads, an older password note) into the app; a two-request healthcheck plus a `ready` gate, so the deploy waits for the database, the three installs and the template publish |
+
+The engine's login, checked locally (2026-11-19, 338bbb9a, gp247/core 3.15,
+PHP 8.3 with the recipe's install and start commands, MariaDB 11, this
+override):
+
+- a fresh install: the deploy log says "Password: the one you passed with
+  --admin-password"; `POST /gp247_admin/auth/login` with the generated login
+  302 to `/gp247_admin`, which is then 200 (the dashboard); `admin`/`admin`
+  is refused (302 back to the form).
+- an install from before (the random password `gp247:install` printed), one
+  with the older recipe's recorded password (the record was removed) and one
+  still on the seeded `admin`: each moved to the generated login, and the old
+  password was refused after it.
+- a password changed the way the admin panel saves it survived a restart that
+  ran the install stage again, and the generated one was refused after it.

@@ -93,4 +93,16 @@ echo "[s-cart] installing GP247 (core -> front -> shop)"
 #
 # Nothing in the install depends on the environment name otherwise -- the store
 # domain the seeders record comes from APP_URL, not from APP_ENV.
-APP_ENV=local php artisan gp247:install --force=1
+#
+# --admin-password is GP247's own way to give the seeded `admin` a password
+# (InitialAdminPassword::assign, only while it still has the seeded hash):
+# the one the engine generated (`credentials:`, SCART_ADMIN_PASSWORD from
+# ~/.panelalpha/app-credentials.env). Without it gp247:install makes up a
+# random one and prints it to the deploy log, where nobody deploying the shop
+# looks; panelalpha/set-admin-password.php would then replace it.
+if [ -n "${SCART_ADMIN_PASSWORD:-}" ]; then
+    APP_ENV=local php artisan gp247:install --force=1 --admin-password="$SCART_ADMIN_PASSWORD"
+else
+    echo "[s-cart] no SCART_ADMIN_PASSWORD from the engine; gp247:install picks the admin password" >&2
+    APP_ENV=local php artisan gp247:install --force=1
+fi
