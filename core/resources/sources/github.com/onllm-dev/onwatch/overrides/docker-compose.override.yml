@@ -1,0 +1,9 @@
+# Layers over the compose file the dockerfile strategy generates (service `app`,
+# the repository's Dockerfile, env_file .env written from .env.example).
+services:
+  app:
+    env_file:
+      - .env
+      # ONWATCH_ADMIN_USER / ONWATCH_ADMIN_PASS, generated and kept by the
+      # engine. Listed after .env, so they win over its admin / changeme.
+      - ../.panelalpha/app-credentials.env

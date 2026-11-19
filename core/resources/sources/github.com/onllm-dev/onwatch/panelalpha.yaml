@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  onWatch, a usage and quota tracker for AI API subscriptions: one Go binary
+  in a distroless image, SQLite under /data. The engine builds the
+  repository's Dockerfile (its docker-compose.yml is a workstation one) and
+  writes .env from .env.example, whose ONWATCH_ADMIN_USER /
+  ONWATCH_ADMIN_PASS are admin / changeme, so every preview signed in with a
+  login anyone can read in the repository. So the engine generates the login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
+  overrides/docker-compose.override.yml hands it to the container after .env,
+  under the names onWatch reads natively. onWatch stores the password's hash
+  in its database on the first start and from then on prefers the stored one,
+  so a password changed under Settings > Security stays changed; a database
+  still holding the published changeme takes the generated one. Everything
+  else is the repository's Dockerfile and .env as before.
+credentials:
+  login_path: /login
+  fields:
+    ONWATCH_ADMIN_USER: {kind: username}
+    ONWATCH_ADMIN_PASS: {kind: password}
