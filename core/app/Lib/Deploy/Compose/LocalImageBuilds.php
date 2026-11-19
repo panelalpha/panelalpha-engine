@@ -71,7 +71,8 @@ final class LocalImageBuilds
 
     /**
      * The one Dockerfile beside the compose file, for the one unbuilt tag no registry has: two such tags could each
-     * be its image, so neither gets it.
+     * be its image, so neither gets it. Only a bare name is claimed: a Docker Hub `owner/name` the hub lacks was
+     * published by someone and withdrawn (MinIO's `minio/minio`), not the repository's own build.
      *
      * @param  array<string, list<string>>  $unbuilt
      * @param  array<string, array{build: array<string, mixed>, dockerfile: string, evidence: string}>  $assigned
@@ -91,7 +92,13 @@ final class LocalImageBuilds
         }
         $claimants = array_values(array_filter(array_keys($unbuilt), $isMissing));
 
-        return count($claimants) === 1 ? [$claimants[0] => $sole] : [];
+        return count($claimants) === 1 && self::isBareName($claimants[0]) ? [$claimants[0] => $sole] : [];
+    }
+
+    /** Whether $image names no owner, as `go-admin:latest` does and `minio/minio:latest` does not. */
+    private static function isBareName(string $image): bool
+    {
+        return ! str_contains($image, '/');
     }
 
     /**

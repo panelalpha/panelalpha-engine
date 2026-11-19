@@ -106,6 +106,24 @@ class LocalImageBuildsTest extends TestCase
         $this->assertSame([], $result['built']);
     }
 
+    public function test_the_only_dockerfile_never_goes_to_an_owned_tag_its_registry_withdrew(): void
+    {
+        $this->repository(['Dockerfile' => "FROM golang\nCOPY . .\n"]);
+
+        $result = LocalImageBuilds::apply(
+            ['services' => [
+                'app' => ['image' => '${DOCKER_IMAGE:-notes-app:latest}', 'depends_on' => ['minio']],
+                'minio' => ['image' => 'minio/minio:latest'],
+            ]],
+            new LocalImageEvidence($this->root, '', ['docker-compose.yml']),
+            ['DOCKER_IMAGE' => ['someone/notes:latest', null]],
+            static fn (string $image): bool => $image === 'someone/notes:latest'
+        );
+
+        $this->assertSame([], $result['built']);
+        $this->assertArrayNotHasKey('build', $result['compose']['services']['minio']);
+    }
+
     public function test_a_dockerfile_another_service_builds_is_not_the_only_one(): void
     {
         $this->repository(['Dockerfile' => "FROM node\n"]);
