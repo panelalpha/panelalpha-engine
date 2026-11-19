@@ -1,0 +1,14 @@
+# Layers over the repository's own docker-compose.yml, which is otherwise used
+# as it is.
+#
+# A new database has no dashboard user and only `collector -add-user` makes
+# one. The wrapper creates it with the login the engine generated while there
+# is none, then runs the collector.
+services:
+  collector:
+    env_file:
+      # SYMON_ADMIN_USER / SYMON_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
+    volumes:
+      - ./panelalpha-symon-start.sh:/panelalpha-symon-start.sh:ro
+    command: ["/bin/sh", "/panelalpha-symon-start.sh"]

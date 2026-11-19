@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SyMon, a system monitor (Go collector, dashboard and agent on TimescaleDB),
+  on the compose stack its own repository ships, with one change: the
+  dashboard has a user before the collector serves. A new database has none,
+  and the dashboard stays locked behind "Create the first user", which only
+  the collector's CLI on the server can do (`collector -add-user <name>`), so
+  nobody deploying it could get in. The engine generates the login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
+  overrides/docker-compose.override.yml runs files/panelalpha-symon-start.sh in
+  place of the collector's command: while the database has no user it creates
+  one with that username and password through the collector's own
+  `-add-user -password-stdin`, then runs the collector. A database that
+  already has a user is left alone, so a password changed in the dashboard
+  stays changed.
+credentials:
+  login_path: /
+  fields:
+    SYMON_ADMIN_USER: {kind: username}
+    SYMON_ADMIN_PASSWORD: {kind: password}
