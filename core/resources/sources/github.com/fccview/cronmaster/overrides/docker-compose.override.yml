@@ -1,0 +1,16 @@
+# Layers over the repository's docker-compose.yml: only the login changes.
+services:
+  cronmaster:
+    env_file:
+      # CRONMASTER_AUTH_PASSWORD, the password the engine generates.
+      - ../.panelalpha/app-credentials.env
+    # The compose file's `environment:` sets AUTH_PASSWORD=very_strong_password,
+    # which beats any env_file, so the generated password goes into
+    # AUTH_PASSWORD in the process itself, then the image's own command runs.
+    # Without one (never on the engine) the compose file's value stays.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - '[ -z "$$CRONMASTER_AUTH_PASSWORD" ] || export AUTH_PASSWORD="$$CRONMASTER_AUTH_PASSWORD"; exec "$$@"'
+      - --
+    command: ["node", "server.js"]

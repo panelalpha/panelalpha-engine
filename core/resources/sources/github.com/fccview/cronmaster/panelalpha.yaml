@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Cr*nMaster, a web UI for cron jobs (Next.js, the published
+  ghcr.io/fccview/cronmaster image). The repository's docker-compose.yml runs
+  that image and the engine runs it as is. Its only login is the password in
+  AUTH_PASSWORD, which that compose file sets to `very_strong_password`, the
+  value printed in its README: anyone with the URL could sign in and nobody
+  deploying it was told. So the engine generates a password (`credentials:`
+  below, returned by GET /projects/{name}/app-credentials) and
+  overrides/docker-compose.override.yml hands it to the container, where a
+  one-line entrypoint puts it in AUTH_PASSWORD before the image's own
+  `node server.js` starts; the published password no longer signs in. The
+  password lives in the environment only (the web UI has no password
+  change), so the engine's stored value stays the login across restarts and
+  redeploys. Everything else is the repository's compose file, whose host
+  crontab access (pid: host, privileged) the engine drops anyway.
+credentials:
+  login_path: /login
+  fields:
+    CRONMASTER_AUTH_PASSWORD: {kind: password}
