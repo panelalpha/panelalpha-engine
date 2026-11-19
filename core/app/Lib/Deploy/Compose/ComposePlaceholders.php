@@ -373,7 +373,8 @@ class ComposePlaceholders
             || preg_match('/^(.)\1{7,}$/', $value) === 1;
     }
 
-    private static function namesOwnSecret(string $key): bool
+    /** A key the app signs or encrypts with itself, not a credential another service issues. */
+    public static function namesOwnSecret(string $key): bool
     {
         return preg_match(self::PUBLISHED_SECRET_KEY_PATTERN, $key) === 1
             && (preg_match(self::THIRD_PARTY_KEY_PATTERN, $key) !== 1 || self::isOwnSalt($key));
@@ -451,6 +452,12 @@ class ComposePlaceholders
     public static function generatedSecret(string $token, string $seed): string
     {
         return substr(hash_hmac('sha256', 'compose-placeholder:'.$token, $seed), 0, 48);
+    }
+
+    /** Hex of exactly $length characters, shorter than {@see generatedSecret()} too, for a key of a fixed size. */
+    public static function hexSecretOfLength(string $token, string $seed, int $length): string
+    {
+        return self::generatedSecretOfLength($token, $seed, $length);
     }
 
     /** Hex of exactly $length characters, starting with {@see generatedSecret()}. */

@@ -12,6 +12,7 @@ use App\Lib\Deploy\Compose\PublicUrlEnvironment;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\Lib\Deploy\Env\EnvTemplates;
+use App\Lib\Deploy\Env\TemplateSecretHints;
 use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Project\ApiAccess;
@@ -286,10 +287,11 @@ class ProjectEnvironment
      */
     private function baseFromExample(string $example, string $exampleName, array $overrides, ?DeployLogger $logger): string
     {
-        [$contents, $replaced] = $this->withTemplateSecretsReplaced($example, $overrides);
+        [$contents, $replaced, $shaped] = $this->withTemplateSecretsReplaced($example, $overrides);
         foreach ($replaced as $key) {
             $logger?->info("Replaced the published placeholder in {$key} from {$exampleName} with a generated secret");
         }
+        self::logShapedSecrets($shaped, $exampleName, $logger);
         $contents = $this->withoutComposeDefaultedKeys($contents);
         $contents = $this->fillPublicUrlBlanks($contents, $exampleName, $overrides, $logger);
         [$contents, $blanks] = self::withoutTemplatePlaceholders($contents, $overrides);
@@ -304,16 +306,33 @@ class ProjectEnvironment
     }
 
     /**
-     * A template's APP_KEY and published signing keys, replaced with values seeded per account.
+     * A template's APP_KEY, the secrets its comments describe ({@see TemplateSecretHints}) and its published
+     * signing keys, replaced with values seeded per account.
      *
      * @param  array<string, string>  $overrides
-     * @return array{0: string, 1: list<string>} contents, the published keys replaced
+     * @return array{0: string, 1: list<string>, 2: array<string, string>} contents, the published keys replaced,
+     *                                                                     key => the format its comment asked for
      */
     private function withTemplateSecretsReplaced(string $contents, array $overrides = []): array
     {
         $seed = $this->secretSeed();
+        [$contents, $shaped] = TemplateSecretHints::fill(
+            self::withGeneratedSecrets($contents, $seed),
+            $seed,
+            $overrides
+        );
 
-        return self::withoutPublishedSecrets(self::withGeneratedSecrets($contents, $seed), $seed, $overrides);
+        return [...self::withoutPublishedSecrets($contents, $seed, $overrides), $shaped];
+    }
+
+    /**
+     * @param  array<string, string>  $shaped
+     */
+    private static function logShapedSecrets(array $shaped, string $template, ?DeployLogger $logger): void
+    {
+        foreach ($shaped as $key => $format) {
+            $logger?->info("Generated {$key} as {$template} describes it ({$format})");
+        }
     }
 
     /**
@@ -1066,7 +1085,8 @@ class ProjectEnvironment
             : (EnvFile::asUtf8((string) $fs->fileGetContents($copy['example'])) ?? '');
         $replaced = [];
         if ($contents !== '' && self::isTemplateFile($copy['example'])) {
-            [$contents, $replaced] = $this->withTemplateSecretsReplaced($contents);
+            [$contents, $replaced, $shaped] = $this->withTemplateSecretsReplaced($contents);
+            self::logShapedSecrets($shaped, $copy['relative'], $logger);
         }
         if ($contents !== '') {
             $contents = self::withoutComposeRejectedLines(
