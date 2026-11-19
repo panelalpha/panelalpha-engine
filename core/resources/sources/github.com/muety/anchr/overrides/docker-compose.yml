@@ -18,6 +18,8 @@ services:
       ANCHR_DB_USER: anchr
       ANCHR_DB_NAME: anchr
       ANCHR_UPLOAD_DIR: /app/data
+      # .env.example turns it on; with no SMTP no account could ever be verified.
+      ANCHR_VERIFY_USERS: ${ANCHR_VERIFY_USERS:-false}
     ports:
       - "3000:3000"
     volumes:

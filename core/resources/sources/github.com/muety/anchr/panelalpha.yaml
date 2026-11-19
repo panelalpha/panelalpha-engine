@@ -25,4 +25,7 @@ description: >-
   database password) and mongo.env (root and app credentials), 0600 in a
   0700 dir, so logins and the database survive a redeploy. Everything else
   is upstream's code default: sign-up open, e-mail verification off (it
-  needs SMTP the customer can add as ANCHR_SMTP_* variables).
+  needs SMTP the customer can add as ANCHR_SMTP_* variables, then
+  ANCHR_VERIFY_USERS=true). .env.example sets it to true, so the compose
+  file defaults it to false: with it on, every sign-up stays "User not
+  active." with no mail to activate it.
