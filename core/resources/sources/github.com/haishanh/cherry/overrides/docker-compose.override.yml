@@ -1,0 +1,14 @@
+# Layers over the compose file the dockerfile strategy generates (service `app`,
+# the repository's Dockerfile, /data on a named volume, PA_INSTANCE_SECRET in
+# its environment).
+services:
+  app:
+    # Sets JWT_SECRET and creates the first admin, then execs the image's
+    # own entrypoint (/init, s6-overlay), which starts nginx and Cherry.
+    entrypoint: ["/bin/sh", "/panelalpha/cherry-start.sh"]
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+      # CHERRY_ADMIN_EMAIL / CHERRY_ADMIN_PASSWORD, generated and kept by the
+      # engine. Mounted rather than an env_file, so only the seeding step reads
+      # them and the running server's environment never has them.
+      - ../.panelalpha/app-credentials.env:/pa/app-credentials.env:ro

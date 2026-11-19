@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Cherry, a bookmark manager: SvelteKit on Node behind nginx, s6-overlay as
+  the entrypoint, SQLite under /data. The repository's own Dockerfile is how
+  upstream ships it and the engine builds it as is (the dockerfile strategy, as
+  detection already chose). Upstream has no default login and public sign-up
+  is off unless ENABLE_PUBLIC_REGISTRATION=1, so a new instance showed a
+  sign-in form nobody could pass: upstream makes the first user with the image's
+  `cherry create-user ... --admin` CLI. And with no JWT_SECRET, which upstream
+  ships no default for, signing in fails even then (an HMAC with no key).
+
+  So the engine generates the admin's login (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials) and files/panelalpha/cherry-start.sh,
+  before Cherry's own /init, puts PORT back to the image's 5173 (its nginx
+  serves 8000 and proxies to Node there; the generated PORT=8000 made the two
+  race for 8000), gives JWT_SECRET a value derived from the
+  account's PA_INSTANCE_SECRET (stable across deploys, so sessions survive;
+  a JWT_SECRET the customer sets wins) and creates that admin with Cherry's
+  CLI, only while the database has no user at all: a password changed in
+  Cherry, or users added there, are never touched. Sign-up stays as upstream
+  ships it (off).
+extends: dockerfile
+extra:
+  # A source recipe is applied without probe data; state what the probe finds:
+  # the repository's Dockerfile and the nginx port it EXPOSEs.
+  dockerfile: Dockerfile
+  port_hint: 8000
+credentials:
+  login_path: /signin
+  fields:
+    # Cherry's username is an email address (its CLI refuses anything else).
+    CHERRY_ADMIN_EMAIL: {kind: email}
+    CHERRY_ADMIN_PASSWORD: {kind: password}
