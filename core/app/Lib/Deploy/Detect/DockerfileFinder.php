@@ -39,6 +39,12 @@ final class DockerfileFinder
 
     private const PORT_TOKEN_PATTERN = '/\b(\d{1,5})(?:\/(tcp|udp))?\b/i';
 
+    /** A `HEALTHCHECK` line, after continuations have been joined. */
+    private const HEALTHCHECK_LINE_PATTERN = '/^[ \t]*HEALTHCHECK[ \t]+(.+)$/mi';
+
+    /** The port of an HTTP URL on the container's own loopback, as a health check probes it. */
+    private const LOOPBACK_HTTP_PORT_PATTERN = '#\bhttps?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\d{1,5})\b#i';
+
     /** A whole `COPY` or `ADD` line, after continuations have been joined. */
     private const COPY_LINE_PATTERN = '/^[ \t]*(?:COPY|ADD)[ \t]+(.+)$/mi';
 
@@ -78,14 +84,20 @@ final class DockerfileFinder
     }
 
     /**
-     * The first `EXPOSE`d port, in written order, that could be a web front door (a `/udp` one cannot serve HTTP), else the
-     * first port found, so a Dockerfile exposing only 22 still reports something.
+     * The `EXPOSE`d port the image's own `HEALTHCHECK` probes over HTTP, else the first one, in written order, that could
+     * be a web front door (a `/udp` one cannot serve HTTP), else the first port found, so a Dockerfile exposing only 22
+     * still reports something. evcc exposes EEBus on 4712 before its UI on 7070, which its health check fetches.
      */
     public static function exposedPortIn(string $contents): ?int
     {
         $declared = self::exposedDeclarations($contents);
         if ($declared === []) {
             return null;
+        }
+
+        $probed = self::healthCheckedPort($contents);
+        if ($probed !== null && (in_array([$probed, 'tcp'], $declared, true) || in_array([$probed, ''], $declared, true))) {
+            return $probed;
         }
 
         foreach ($declared as [$port, $protocol]) {
@@ -95,6 +107,22 @@ final class DockerfileFinder
         }
 
         return $declared[0][0];
+    }
+
+    /** The port the last `HEALTHCHECK` fetches an HTTP URL from on the container's loopback; null when it does not. */
+    private static function healthCheckedPort(string $contents): ?int
+    {
+        $joined = preg_replace('/\\\\\r?\n/', ' ', $contents) ?? $contents;
+        if (preg_match_all(self::HEALTHCHECK_LINE_PATTERN, $joined, $lines) === 0) {
+            return null;
+        }
+        $line = self::substitute((string) end($lines[1]), self::declaredValues($contents));
+        if (preg_match(self::LOOPBACK_HTTP_PORT_PATTERN, $line, $m) !== 1) {
+            return null;
+        }
+        $port = (int) $m[1];
+
+        return $port > 0 && $port <= 65535 ? $port : null;
     }
 
     /**

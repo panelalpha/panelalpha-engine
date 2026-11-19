@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy;
 
 use App\Lib\Deploy\Detect\DockerfileFinder;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * `EXPOSE 22 3000` published SSH as the website.
@@ -70,6 +71,31 @@ class ExposedPortSelectionTest extends TestCase
     public function test_an_only_excluded_port_is_still_reported(): void
     {
         $this->assertSame(22, DockerfileFinder::exposedPortIn("EXPOSE 22\n"));
+    }
+
+    /** evcc, verbatim: EEBus on 4712 is exposed before the UI, and the health check fetches the UI on 7070. */
+    public function test_the_port_the_health_check_fetches_wins_over_an_earlier_one(): void
+    {
+        $dockerfile = "FROM alpine\n# EEBus\nEXPOSE 4712/tcp\n# mDNS\nEXPOSE 5353/udp\n# UI and /api\nEXPOSE 7070/tcp\n"
+            ."HEALTHCHECK \\\n  --interval=30s \\\n  --timeout=5s \\\n  CMD wget -qO /dev/null http://localhost:7070 || exit 1\n";
+
+        $this->assertSame(7070, DockerfileFinder::exposedPortIn($dockerfile));
+    }
+
+    public function test_a_health_check_port_set_through_env_is_resolved(): void
+    {
+        $dockerfile = "ENV PORT=8080\nEXPOSE 9000 \$PORT\nHEALTHCHECK CMD curl -f http://" . TestNetwork::LOOPBACK . ":\${PORT}/health\n";
+
+        $this->assertSame(8080, DockerfileFinder::exposedPortIn($dockerfile));
+    }
+
+    /** A probe of a port the image does not expose, or of another host, says nothing about the front door. */
+    public function test_a_health_check_of_a_port_not_exposed_or_not_local_changes_nothing(): void
+    {
+        $this->assertSame(3000, DockerfileFinder::exposedPortIn("EXPOSE 3000\nHEALTHCHECK CMD curl -f http://localhost:9999/\n"));
+        $this->assertSame(3000, DockerfileFinder::exposedPortIn("EXPOSE 3000 8080\nHEALTHCHECK CMD curl -f http://api.example.com:8080/\n"));
+        $this->assertSame(3000, DockerfileFinder::exposedPortIn("EXPOSE 3000 8080/udp\nHEALTHCHECK CMD curl -f http://localhost:8080/\n"));
+        $this->assertSame(3000, DockerfileFinder::exposedPortIn("EXPOSE 3000 8080\nHEALTHCHECK NONE\n"));
     }
 
     /** No EXPOSE, and a variable-substituted one, both answer nothing. */
