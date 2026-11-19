@@ -692,6 +692,44 @@ YAML
         $this->assertSame('unless-stopped', $services['app']['restart']);
     }
 
+    /** Docs' `createbuckets`: yhub waits for it to finish, the backend only for it to start; it exits 0 and must stay down. */
+    public function test_a_job_waited_on_to_finish_by_one_service_and_to_start_by_another_is_not_restarted(): void
+    {
+        $compose = ['services' => [
+            'minio' => ['image' => 'minio/minio', 'healthcheck' => ['test' => ['CMD', 'mc', 'ready', 'local']]],
+            'createbuckets' => [
+                'image' => 'pgsty/mc',
+                'depends_on' => ['minio' => ['condition' => 'service_healthy']],
+                'entrypoint' => 'sh -c "/usr/bin/mc mb --ignore-existing impress/impress-media-storage && exit 0;"',
+            ],
+            'backend' => ['image' => 'acme/backend', 'depends_on' => ['createbuckets' => ['condition' => 'service_started']]],
+            'yhub' => [
+                'image' => 'acme/yhub',
+                'ports' => ['3002:3002'],
+                'depends_on' => ['createbuckets' => ['condition' => 'service_completed_successfully']],
+            ],
+        ]];
+
+        $services = ComposeHarden::apply($compose)['services'];
+
+        $this->assertSame(['createbuckets'], ComposeHarden::oneShotServices($compose));
+        $this->assertSame('no', $services['createbuckets']['restart']);
+        $this->assertSame('unless-stopped', $services['minio']['restart']);
+    }
+
+    /** One service needing it healthy says it keeps running, whatever another waits for. */
+    public function test_a_service_waited_on_to_finish_and_to_be_healthy_is_not_a_one_shot(): void
+    {
+        $compose = ['services' => [
+            'db' => ['image' => 'postgres:17', 'healthcheck' => ['test' => ['CMD', 'pg_isready']]],
+            'seed' => ['image' => 'acme/seed', 'depends_on' => ['db' => ['condition' => 'service_completed_successfully']]],
+            'app' => ['image' => 'acme/app', 'ports' => ['80:80'], 'depends_on' => ['db' => ['condition' => 'service_healthy']]],
+        ]];
+
+        $this->assertNotContains('db', ComposeHarden::oneShotServices($compose));
+        $this->assertSame('unless-stopped', ComposeHarden::apply($compose)['services']['db']['restart']);
+    }
+
     /** Baserow's permissions fixer chowns a volume and exits 0; restarted, it looked like a crash loop. */
     public function test_a_file_setup_command_nobody_waits_on_is_one_shot(): void
     {

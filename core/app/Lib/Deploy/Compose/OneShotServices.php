@@ -12,11 +12,14 @@ final class OneShotServices
 {
     private const COMPLETED = 'service_completed_successfully';
 
+    private const HEALTHY = 'service_healthy';
+
     /** Commands that fix up files and return; a script of only these ends. */
     private const FINITE_COMMANDS = ['chown', 'chmod', 'chgrp', 'mkdir', 'cp', 'touch', 'ln', 'rm', 'install', 'echo', 'true'];
 
     /**
-     * Something waits for it to finish and nothing waits for it to run, or nothing waits on it at all.
+     * Something waits for it to finish and nothing waits for it to be healthy, or nothing waits on it at all. A
+     * `service_started` wait beside the finish one is met by a job that ran (Docs' `createbuckets`).
      *
      * @param  array<string, mixed>  $compose
      * @return list<string>
@@ -33,8 +36,7 @@ final class OneShotServices
         foreach ($services as $name => $service) {
             $name = (string) $name;
             $waitedOn = $conditions[$name] ?? [];
-            $completes = $waitedOn !== [] && array_unique($waitedOn) === [self::COMPLETED];
-            if ($completes
+            if (self::isAwaitedToFinish($waitedOn)
                 || ($waitedOn === [] && (self::isBaseService($name, $service, $services)
                     || self::isJob($name, $service)
                     || self::runsOnlyFileSetup($service)))) {
@@ -43,6 +45,12 @@ final class OneShotServices
         }
 
         return $oneShot;
+    }
+
+    /** @param  list<string>  $waitedOn  the conditions the other services wait on it with */
+    private static function isAwaitedToFinish(array $waitedOn): bool
+    {
+        return in_array(self::COMPLETED, $waitedOn, true) && ! in_array(self::HEALTHY, $waitedOn, true);
     }
 
     /**
