@@ -34,11 +34,19 @@ description: >-
   about a gigabyte, and a stack that serves the web UI is worth more than one
   that tries to bring up everything and fails inside a 2.5 GB account.
 
-  hooks/prepare.sh writes the two secrets nothing else can supply --
-  PAPERLESS_SECRET_KEY, and an admin password, because paperless has no
-  sign-up page and would otherwise come up on a login form nobody holds an
-  account for -- and resolves the image tag from the checkout's own
+  hooks/prepare.sh writes the secret nothing else can supply,
+  PAPERLESS_SECRET_KEY, and resolves the image tag from the checkout's own
   src/paperless/version.py, using it only when ghcr.io actually has that tag.
+  Paperless has no sign-up page and would otherwise come up on a login form
+  nobody holds an account for, so the engine generates the admin's login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
+  the webserver reads it from app-credentials.env: init-superuser creates
+  that superuser on first boot, only while no user of that name and no
+  superuser exists, so a password changed in paperless is never overwritten.
+  The hook used to generate that password itself into
+  ~/.panelalpha/paperless/secrets.env, where nobody deploying it was told it;
+  an account seeded that way has its login adopted from there (`adopt_from:`),
+  so the login the engine reports is the one its database already has.
   The third value the recipe cannot generate is PAPERLESS_URL, which has to be
   the account's public address: the compose file ships http://localhost, the
   shape ComposePlaceholders rewrites to the account's https URL before the
@@ -52,3 +60,11 @@ description: >-
   migrations against an empty SQLite file and builds the whoosh index. `ready`
   waits on the webserver's healthcheck and nothing else, which makes `up -d`
   block until the site is really up.
+credentials:
+  login_path: /accounts/login/
+  # The PAPERLESS_ADMIN_USER / PAPERLESS_ADMIN_PASSWORD an older deploy of this
+  # recipe generated, so an account it seeded keeps the password it has.
+  adopt_from: .panelalpha/paperless/secrets.env
+  fields:
+    PAPERLESS_ADMIN_USER: {kind: username}
+    PAPERLESS_ADMIN_PASSWORD: {kind: password}

@@ -57,11 +57,8 @@ services:
       PAPERLESS_URL: http://localhost
       PAPERLESS_TIME_ZONE: ${PAPERLESS_TIME_ZONE:-UTC}
       PAPERLESS_OCR_LANGUAGE: ${PAPERLESS_OCR_LANGUAGE:-eng}
-      # There is no sign-up page: without these the site comes up on a login
-      # form nobody holds an account for. init-superuser creates this one on
-      # first boot and never touches it again.
-      PAPERLESS_ADMIN_USER: ${PAPERLESS_ADMIN_USER:-admin}
-      PAPERLESS_ADMIN_PASSWORD: ${PAPERLESS_ADMIN_PASSWORD}
+      # PAPERLESS_ADMIN_USER / PAPERLESS_ADMIN_PASSWORD come from env_file
+      # below, not from here: `environment:` would beat it.
       PAPERLESS_ADMIN_MAIL: ${PAPERLESS_ADMIN_MAIL:-admin@localhost}
       # One of everything. The container runs six processes under s6 (gunicorn,
       # celery worker, beat, the consumer, ...) and the defaults size the
@@ -70,6 +67,14 @@ services:
       PAPERLESS_WEBSERVER_WORKERS: "1"
       PAPERLESS_TASK_WORKERS: "1"
       PAPERLESS_THREADS_PER_WORKER: "1"
+    # There is no sign-up page: without an admin the site comes up on a login
+    # form nobody holds an account for. PAPERLESS_ADMIN_USER /
+    # PAPERLESS_ADMIN_PASSWORD are the login the engine generates;
+    # init-superuser (manage_superuser) creates that user on first boot, only
+    # while no user of that name and no superuser exists, so a password changed
+    # in paperless is never overwritten.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     # Named volumes throughout, including consume and export, which the
     # upstream file binds to host directories. The container starts as root and
     # chowns these to its own paperless user (init-folders), which is the wrong

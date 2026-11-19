@@ -23,11 +23,17 @@ fi
 
 # The repository ships a root .env of its own (COMPOSE_PROJECT_NAME=paperless),
 # which compose reads for interpolation -- so append to it rather than replace
-# it. The values come from ~/.panelalpha/paperless/secrets.env, generated once:
+# it. The value comes from ~/.panelalpha/paperless/secrets.env, generated once:
 # ~/project, .env included, is emptied on every deploy, while the data volume
-# outlives it. A regenerated PAPERLESS_SECRET_KEY would log every session out,
-# and a regenerated admin password would be one the database never learns
-# (manage_superuser refuses to touch a user that already exists).
+# outlives it, and a regenerated PAPERLESS_SECRET_KEY would log every session
+# out.
+#
+# The admin's login is not generated here any more: the engine generates it
+# (`credentials:` in panelalpha.yaml) and the webserver reads it from
+# ~/.panelalpha/app-credentials.env. An account an older deploy of this recipe
+# seeded keeps its PAPERLESS_ADMIN_USER / PAPERLESS_ADMIN_PASSWORD lines in
+# secrets.env, which is where the engine adopts them from (`adopt_from:`), so
+# the login it reports is the one that database already has.
 STORE="${HOME}/.panelalpha/paperless"
 mkdir -p "${STORE}"
 chmod 700 "${HOME}/.panelalpha" "${STORE}"
@@ -41,12 +47,11 @@ store() {
       grep -m1 "^$1=." .env >> "${STORE}/secrets.env" || printf '%s=%s\n' "$1" "$2" >> "${STORE}/secrets.env" )
 }
 store PAPERLESS_SECRET_KEY "$(openssl rand -hex 32)"
-store PAPERLESS_ADMIN_USER admin
-store PAPERLESS_ADMIN_PASSWORD "$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)"
-for key in PAPERLESS_SECRET_KEY PAPERLESS_ADMIN_USER PAPERLESS_ADMIN_PASSWORD; do
-    sed -i "/^${key}=/d" .env
-    grep -m1 "^${key}=" "${STORE}/secrets.env" >> .env
-done
+sed -i "/^PAPERLESS_SECRET_KEY=/d" .env
+grep -m1 "^PAPERLESS_SECRET_KEY=" "${STORE}/secrets.env" >> .env
+# Never in .env: the compose file no longer interpolates them, and a stale
+# copy there would only be a second, wrong place to read a password from.
+sed -i '/^PAPERLESS_ADMIN_USER=/d; /^PAPERLESS_ADMIN_PASSWORD=/d' .env
 
 # The image tag is the one line that is rewritten every deploy, so a redeploy
 # after an upstream release actually moves. Secrets above never do.
