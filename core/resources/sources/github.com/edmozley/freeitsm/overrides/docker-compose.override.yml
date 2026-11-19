@@ -1,0 +1,16 @@
+# Layers over the repository's own docker-compose.yml, which is otherwise used
+# as it is.
+#
+# The schema the db service imports seeds the analyst admin with the published
+# password freeitsm. The wrapper gives it the engine's login while it still has
+# that password, then runs the image's own entrypoint (under tini, as the image
+# does).
+services:
+  app:
+    entrypoint: ["tini", "--", "/bin/bash", "/panelalpha-freeitsm/freeitsm-start.sh"]
+    volumes:
+      - ./panelalpha:/panelalpha-freeitsm:ro
+      # FREEITSM_ADMIN_USER / FREEITSM_ADMIN_PASSWORD, generated and kept by the
+      # engine. Mounted rather than an env_file, so only the seeding step reads
+      # them and Apache's environment never has them.
+      - ../.panelalpha/app-credentials.env:/pa/app-credentials.env:ro

@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  FreeITSM, an IT service desk (PHP on Apache, MySQL 8), on the compose stack
+  its own repository ships, with one change: its seeded admin. The schema the
+  MySQL container imports on its first start (database/freeitsm.sql) creates
+  the analyst admin with the password freeitsm, published in the README,
+  which nobody deploying it was told and anyone with the address could use
+  (FreeITSM asks for a new password at that first sign-in, so whoever signed
+  in first took the instance). The engine generates the login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
+  overrides/docker-compose.override.yml runs files/panelalpha/freeitsm-start.sh
+  before the image's own entrypoint: once the schema is there it gives that
+  admin the generated username and password, hashed with PHP's
+  password_hash() as FreeITSM's own password change does, and clears its
+  must-change flag, only while the admin still has the published password. A
+  password changed in FreeITSM is never touched.
+credentials:
+  login_path: /auth/login.php
+  fields:
+    FREEITSM_ADMIN_USER: {kind: username}
+    FREEITSM_ADMIN_PASSWORD: {kind: password}
