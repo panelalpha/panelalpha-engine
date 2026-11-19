@@ -1,0 +1,18 @@
+# Compose-replace: the repository's compose file (docker/docker-compose.yml) is a
+# workstation one (loopback port, ./workspace bind), so the engine built
+# docker/Dockerfile with the dockerfile strategy. Builds it the same way, with the
+# engine's access token.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8048:8048"
+    env_file:
+      # ZASPER_ACCESS_TOKEN, the access token the engine generates.
+      - ../.panelalpha/app-credentials.env
+      # The project's environment variables, last so they still win.
+      - path: .env
+        required: false

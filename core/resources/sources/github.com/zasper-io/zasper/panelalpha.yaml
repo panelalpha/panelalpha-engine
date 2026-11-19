@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Zasper, a notebook IDE for Jupyter kernels (one Go binary with the React
+  frontend embedded, ipykernel in the image, the project in /home/zasper).
+  The repository's compose file is a workstation one, so the engine builds
+  docker/Dockerfile as the dockerfile strategy does. Every route needs
+  Zasper's access token, and with none set each start makes a random one that
+  only the container log shows, so nobody deploying it could sign in. So the
+  engine generates the token (`credentials:` below, returned by GET
+  /projects/{name}/app-credentials) and overrides/docker-compose.yml hands it
+  to the container as ZASPER_ACCESS_TOKEN, Zasper's own variable for it. It
+  lives in the environment only (Zasper has no form to change it), so the
+  engine's stored value stays the sign-in across restarts and redeploys.
+  Everything else is the image as the dockerfile strategy ran it.
+credentials:
+  login_path: /login
+  fields:
+    ZASPER_ACCESS_TOKEN: {kind: password}
