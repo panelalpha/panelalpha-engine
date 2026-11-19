@@ -53,12 +53,24 @@ services:
     entrypoint: ["/bin/sh", "/pa/render-config.sh"]
     mem_limit: 32m
 
-  # One-shot: upstream's install step (`libretime-api migrate`).
+  # One-shot: upstream's install step (`libretime-api migrate`), then the
+  # engine's login on the built-in admin while it still has the password
+  # `admin` (panelalpha/libretime/set-admin-login.py). A failure there leaves
+  # admin/admin and says so; it never holds the services back.
   migrate:
     <<: *libretime
     image: ghcr.io/libretime/libretime-api:4.5.0
     restart: "no"
-    command: libretime-api migrate
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        libretime-api migrate &&
+        { libretime-api shell -c "exec(open('/pa/set-admin-login.py').read())" ||
+        echo "[panelalpha] libretime: could not set the admin login; it stays admin/admin" >&2; }
+    env_file:
+      # LT_ADMIN_USERNAME / LT_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
     depends_on:
       config:
         condition: service_completed_successfully
@@ -66,6 +78,7 @@ services:
         condition: service_healthy
     volumes:
       - config:/etc/libretime:ro
+      - ./panelalpha/libretime:/pa:ro
 
   playout:
     <<: *libretime

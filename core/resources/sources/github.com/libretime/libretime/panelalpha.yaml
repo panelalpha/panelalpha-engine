@@ -18,6 +18,17 @@ description: >-
   development override (source builds, bind mounts, dev ports), which the
   engine would otherwise layer over the replacement. Media, the database and the playout cache are on named volumes.
 
-  Log in with upstream's default admin / admin and change it under
-  Settings. Only the web UI is published: the Icecast stream (8000) and the
-  live-input harbors (8001/8002) stay inside the account.
+  A new database gets LibreTime's built-in admin with the password `admin`,
+  which nobody deploying it is told and anyone with the address could use. So
+  the engine generates a login (`credentials:` below, returned by GET
+  /projects/{name}/app-credentials) and the migrate one-shot, after the
+  migration, sets it on that admin with LibreTime's own User model
+  (files/panelalpha/libretime/set-admin-login.py), only while the admin still
+  has the default password: a password changed in LibreTime is never touched.
+  Only the web UI is published: the Icecast stream (8000) and the live-input
+  harbors (8001/8002) stay inside the account.
+credentials:
+  login_path: /login
+  fields:
+    LT_ADMIN_USERNAME: {kind: username}
+    LT_ADMIN_PASSWORD: {kind: password}
