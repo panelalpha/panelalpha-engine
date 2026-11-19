@@ -154,6 +154,38 @@ class SidecarCredentialsTest extends TestCase
         ], $pinned['environment']);
     }
 
+    /** osm-export-tool's db checks `pg_isready -U ${POSTGRES_USER}` with nothing setting the variable: `-U app`, not `-U`. */
+    public function test_a_healthcheck_reads_the_credentials_the_container_was_given(): void
+    {
+        $passwords = SidecarPasswords::derived('account-seed');
+        $service = [
+            'image' => 'postgis/postgis:16-3.4',
+            'environment' => ['POSTGRES_USER=${POSTGRES_USER}', 'POSTGRES_PASSWORD=${DB_PASSWORD}', 'POSTGRES_DB=${POSTGRES_DB}'],
+            'healthcheck' => ['test' => ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d $POSTGRES_DB && psql "postgres://$${POSTGRES_USER}:${DB_PASSWORD}@localhost"']],
+        ];
+
+        $pinned = SidecarCredentials::pinSidecarCredentials('db', $service, [], $passwords);
+
+        $password = $passwords->for('POSTGRES_PASSWORD');
+        $this->assertSame(
+            ['CMD-SHELL', 'pg_isready -U app -d app && psql "postgres://$${POSTGRES_USER}:'.str_replace('$', '$$', $password).'@localhost"'],
+            $pinned['healthcheck']['test']
+        );
+    }
+
+    public function test_a_healthcheck_on_a_variable_the_file_sets_itself_is_left_alone(): void
+    {
+        $service = [
+            'image' => 'postgres:16',
+            'environment' => ['POSTGRES_USER' => 'keycloak', 'POSTGRES_PASSWORD' => 'secret'],
+            'healthcheck' => ['test' => 'pg_isready -U ${PGUSER:-keycloak}'],
+        ];
+
+        $pinned = SidecarCredentials::pinSidecarCredentials('db', $service, [], SidecarPasswords::derived('s'));
+
+        $this->assertSame('pg_isready -U ${PGUSER:-keycloak}', $pinned['healthcheck']['test']);
+    }
+
     public function test_pin_sidecar_credentials_gives_an_unset_password_the_accounts_own(): void
     {
         $passwords = SidecarPasswords::derived('account-seed');

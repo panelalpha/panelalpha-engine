@@ -15,6 +15,9 @@ class SidecarCredentials
     /** `${NAME}` with no default or `:?`; `$${...}` is compose's escape. */
     private const BARE_REFERENCE = '/(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)\}/';
 
+    /** A value that is one reference and nothing else: `${NAME}`, `${NAME:-default}`, `${NAME:?message}` or `$NAME`. */
+    private const WHOLE_REFERENCE = '/^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::?[-?][^}]*)?\}|([A-Za-z_][A-Za-z0-9_]*))$/';
+
     /**
      * A database's unresolved `${VAR}` credentials settled once, so the
      * sidecar and the application are configured from the same text.
@@ -36,10 +39,62 @@ class SidecarCredentials
             return $service;
         }
 
-        $env = self::settledEngineEnvironment(self::environmentMap($service['environment'] ?? null), $engine, $passwords);
+        $declared = self::environmentMap($service['environment'] ?? null);
+        $env = self::settledEngineEnvironment($declared, $engine, $passwords);
         $service['environment'] = $env;
+        $service = self::withHealthcheckSettled($service, self::settledVariables($declared, $env));
 
         return self::withServiceOverrides($service, $engine, $env);
+    }
+
+    /**
+     * Each compose variable a settled entry was one whole reference to, with the value it settled to:
+     * `POSTGRES_USER: ${POSTGRES_USER}` that nothing sets is `app`, for the container and for Compose alike.
+     *
+     * @param  array<string, string>  $declared
+     * @param  array<string, string>  $settled
+     * @return array<string, string>
+     */
+    private static function settledVariables(array $declared, array $settled): array
+    {
+        $variables = [];
+        foreach ($declared as $key => $value) {
+            if (isset($settled[$key]) && $settled[$key] !== $value
+                && preg_match(self::WHOLE_REFERENCE, trim($value), $m) === 1
+            ) {
+                $variables[$m[1] !== '' ? $m[1] : $m[2]] = $settled[$key];
+            }
+        }
+
+        return $variables;
+    }
+
+    /**
+     * The healthcheck's references to settled variables given their values: Compose would interpolate
+     * `pg_isready -U ${POSTGRES_USER}` with the variable unset, an empty `-U`, while the container runs as `app`.
+     *
+     * @param  array<string, mixed>  $service
+     * @param  array<string, string>  $variables
+     * @return array<string, mixed>
+     */
+    private static function withHealthcheckSettled(array $service, array $variables): array
+    {
+        if ($variables === [] || ! is_array($service['healthcheck'] ?? null) || ! array_key_exists('test', $service['healthcheck'])) {
+            return $service;
+        }
+        $fill = static function (string $text, ?string $key) use ($variables): string {
+            foreach ($variables as $name => $value) {
+                $text = (string) preg_replace_callback(
+                    '/(?<!\$)\$(?:\{'.$name.'(?::?[-?][^}]*)?\}|'.$name.'(?![A-Za-z0-9_]))/',
+                    static fn (): string => str_replace('$', '$$', $value),
+                    $text
+                );
+            }
+
+            return $text;
+        };
+
+        return self::withHealthcheckFilled($service, $fill);
     }
 
     /**
