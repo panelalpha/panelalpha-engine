@@ -1,0 +1,22 @@
+# Compose-replace: the repository ships no compose file at its root, so the engine
+# built its Dockerfile with the dockerfile strategy. Builds it the same way, with
+# the engine's sign-in secret.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # The site's https address: Versus Incident compares a signed-in browser's
+      # Origin with it on every admin change, and without it expects http://
+      # (the proxy talks plain HTTP to it), so the console's saves were refused.
+      # hooks/prepare.sh makes config/config.yaml read it: the file wins over
+      # the environment otherwise.
+      PUBLIC_HOST: ${PA_PUBLIC_URL}
+    env_file:
+      # GATEWAY_SECRET, the sign-in secret the engine generates.
+      - ../.panelalpha/app-credentials.env
+      # The project's environment variables, last so they still win.
+      - path: .env
+        required: false

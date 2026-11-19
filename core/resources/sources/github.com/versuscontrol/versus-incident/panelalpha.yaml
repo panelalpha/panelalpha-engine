@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Versus Incident, an incident alert gateway with a web console (one Go
+  binary with the React console embedded, incidents in a file under
+  /app/data). The repository has no compose file at its root, so the engine
+  builds its Dockerfile as the dockerfile strategy does. The console's only
+  sign-in is the gateway secret, GATEWAY_SECRET from the environment, and
+  with none set the sign-in fails closed: nobody deploying it could get in.
+  So the engine generates the secret (`credentials:` below, returned by GET
+  /projects/{name}/app-credentials) and overrides/docker-compose.yml hands it
+  to the container as GATEWAY_SECRET, Versus Incident's own variable for it.
+  It lives in the environment only (the console has no form to change it), so
+  the engine's stored value stays the sign-in across restarts and redeploys.
+  PUBLIC_HOST is the site's https address, so the console's admin changes pass
+  Versus Incident's same-origin check behind the engine's proxy; config.yaml's
+  public_host is pointed at it by hooks/prepare.sh, as the file's values win
+  over the environment. Alert
+  channels, on-call and the AI agent stay off until configured.
+credentials:
+  login_path: /
+  fields:
+    GATEWAY_SECRET: {kind: password}
