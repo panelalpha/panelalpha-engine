@@ -257,6 +257,32 @@ class EnvFileTest extends TestCase
         $this->assertSame('', $values['EMPTY']);
     }
 
+    /** OpenAlgo's `.sample.env`: `LOG_RETENTION='14'   # days` was rewritten as `"'14'"` and its int() failed. */
+    public function test_a_quoted_value_before_a_comment_loses_its_quotes(): void
+    {
+        $rows = EnvFile::parse(
+            "LOG_RETENTION='14'            # Number of days\n"
+            .'NAME="My \\"App\\""   # quoted'."\n"
+            ."HASH='a # b' # c\n"
+            ."PADDED='x'   \n"
+        );
+        $values = array_column($rows, 'value', 'key');
+
+        $this->assertSame('14', $values['LOG_RETENTION']);
+        $this->assertSame('My "App"', $values['NAME']);
+        $this->assertSame('a # b', $values['HASH']);
+        $this->assertSame('x', $values['PADDED']);
+        $this->assertSame(
+            "LOG_RETENTION=14\nNAME=\"My \\\"App\\\"\"\nHASH=\"a # b\"\nPADDED=x\n",
+            EnvFile::serialise($rows)
+        );
+    }
+
+    public function test_a_single_quoted_value_before_a_comment_keeps_its_dollar_literal(): void
+    {
+        $this->assertSame("PRICE='\$5'\n", EnvFile::serialise(EnvFile::parse("PRICE='\$5'   # dollars\n")));
+    }
+
     public function test_parse_ignores_spaces_around_the_equals_sign(): void
     {
         $rows = EnvFile::parse("HATSU_LOG = \"info,tokio::net=debug\"\nHATSU_DOMAIN =  hatsu.local\nSINGLE = 'a b'\n");

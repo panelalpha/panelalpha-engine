@@ -77,11 +77,38 @@ class EnvFile
             'key' => $m[1],
             'value' => self::unquote($m[2]),
         ];
-        if (strlen($m[2]) >= 2 && $m[2][0] === "'" && str_ends_with($m[2], "'")) {
+        if (self::isSingleQuoted($m[2])) {
             $row['literal'] = true;
         }
 
         return $row;
+    }
+
+    private static function isSingleQuoted(string $raw): bool
+    {
+        $quoted = self::quotedValue($raw);
+
+        return $quoted !== null
+            ? $quoted[0] === "'"
+            : strlen($raw) >= 2 && $raw[0] === "'" && str_ends_with($raw, "'");
+    }
+
+    /**
+     * A quoted value and what follows it on the line when that is only blanks and a comment, as Compose's
+     * dotenv reads `LOG_RETENTION='14'   # days`: `14`, where OpenAlgo got `'14'` and failed its int().
+     *
+     * @return array{0: string, 1: string}|null the quote, the text between the quotes
+     */
+    private static function quotedValue(string $raw): ?array
+    {
+        if (preg_match('/^\'([^\']*)\'[ \t]*(?:#.*)?$/s', rtrim($raw), $m) === 1) {
+            return ["'", $m[1]];
+        }
+        if (preg_match('/^"((?:\\\\.|[^"\\\\])*)"[ \t]*(?:#.*)?$/s', rtrim($raw), $m) === 1) {
+            return ['"', $m[1]];
+        }
+
+        return null;
     }
 
     /**
@@ -196,6 +223,10 @@ class EnvFile
 
     private static function unquote(string $raw): string
     {
+        $quoted = self::quotedValue($raw);
+        if ($quoted !== null) {
+            return $quoted[0] === '"' ? self::unescaped($quoted[1]) : $quoted[1];
+        }
         $value = $raw;
         $len = strlen($value);
         if ($len >= 2) {
@@ -203,15 +234,8 @@ class EnvFile
             $last = $value[$len - 1];
             if (($first === '"' && $last === '"') || ($first === "'" && $last === "'")) {
                 $value = substr($value, 1, -1);
-                if ($first === '"') {
-                    $value = str_replace(
-                        ['\\n', '\\r', '\\t', '\\"', '\\\\'],
-                        ["\n", "\r", "\t", '"', '\\'],
-                        $value,
-                    );
-                }
 
-                return $value;
+                return $first === '"' ? self::unescaped($value) : $value;
             }
         }
         $hashPos = strpos($value, ' #');
@@ -220,6 +244,15 @@ class EnvFile
         }
 
         return rtrim($value);
+    }
+
+    private static function unescaped(string $doubleQuoted): string
+    {
+        return str_replace(
+            ['\\n', '\\r', '\\t', '\\"', '\\\\'],
+            ["\n", "\r", "\t", '"', '\\'],
+            $doubleQuoted,
+        );
     }
 
     /**
