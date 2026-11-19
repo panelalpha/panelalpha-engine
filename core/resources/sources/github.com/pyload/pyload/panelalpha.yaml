@@ -9,5 +9,17 @@ description: >-
   This recipe runs the image upstream's README lists
   (linuxserver/pyload-ng, current release 0.5.0b3.dev101-ls255), which
   serves the web UI on 0.0.0.0:8000. /config (settings, database, accounts)
-  and /downloads are named volumes kept across redeploys. The login is the
-  one upstream ships (pyload/pyload); changing it is the customer's job.
+  and /downloads are named volumes kept across redeploys.
+
+  A new database gets pyLoad's built-in user pyload with the password
+  `pyload`, which nobody deploying it is told and anyone with the address
+  could use. So the engine generates a login (`credentials:` below, returned
+  by GET /projects/{name}/app-credentials) and files/panelalpha-pyload-login.sh,
+  a linuxserver custom init script, sets it on that user before pyLoad starts,
+  only while it still has the default password: a password changed in pyLoad
+  is never touched.
+credentials:
+  login_path: /login
+  fields:
+    PYLOAD_ADMIN_USERNAME: {kind: username}
+    PYLOAD_ADMIN_PASSWORD: {kind: password}

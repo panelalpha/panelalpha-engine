@@ -1,16 +1,27 @@
 # Compose-replace: the repo's image binds the web UI to localhost only. Runs
-# the image upstream's README lists, at the current release.
+# the image upstream's README lists, at the current release, with the login
+# the engine generates.
 services:
   app:
     image: linuxserver/pyload-ng:0.5.0b3.dev101-ls255
     restart: unless-stopped
+    # The image runs /custom-cont-init.d/* only when executable, and files/ is
+    # copied without modes: install the login script there, then run its /init.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - mkdir -p /custom-cont-init.d && install -m 0755 /panelalpha-pyload-login.sh /custom-cont-init.d/50-panelalpha-login && exec /init
     environment:
       PUID: "1000"
       PGID: "1000"
       TZ: Etc/UTC
+    env_file:
+      # PYLOAD_ADMIN_USERNAME / PYLOAD_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
     volumes:
       - pyload-config:/config
       - pyload-downloads:/downloads
+      - ./panelalpha-pyload-login.sh:/panelalpha-pyload-login.sh:ro
     ports:
       - "8000:8000"
     healthcheck:
