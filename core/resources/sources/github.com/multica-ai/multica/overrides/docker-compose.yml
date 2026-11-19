@@ -57,6 +57,9 @@ services:
         condition: service_healthy
     environment:
       HOSTNAME: "0.0.0.0"
+      # The engine hands every service the project's .env, and the one made
+      # from .env.example says PORT=8080 for the backend; Next.js reads PORT.
+      PORT: "3000"
       REMOTE_API_URL: http://backend:8080
     ports:
       - "3000:3000"
