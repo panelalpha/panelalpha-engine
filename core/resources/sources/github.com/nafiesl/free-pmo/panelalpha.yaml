@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Free PMO, project management for freelancers and agencies (Laravel 8,
+  MySQL). The laravel recipe deploys it as is; only its first admin is
+  missing. Upstream's installer is the /app-install form, which creates the
+  agency and its admin while there is no user; but / and every other page
+  send a visitor to /login, which links nowhere else, so nobody deploying it
+  found the installer (and whoever did first would own the instance), and the
+  login had no account.
+
+  So the engine generates the admin's login (`credentials:` below, returned
+  by GET /projects/{name}/app-credentials) and panelalpha/free-pmo-admin.php,
+  after migrate and only while the database has no user at all, does what
+  the installer's InstallationController does: the agency's name and email
+  in site_options and the admin with the admin and worker roles, from that
+  login. The installer then closes itself (it sends to /login once a user
+  exists), and a password changed in the app is never touched.
+extends: laravel
+commands:
+  # Appended after the laravel recipe's install and upgrade commands, so it
+  # runs once migrate has made the tables.
+  - id: free-pmo-admin
+    stage:
+      - install
+      - upgrade
+    description: >-
+      The installer's agency options and first admin from the login the
+      engine generated, only while the database has no user, so an account
+      changed or added in the app is never touched.
+    run: 'php panelalpha/free-pmo-admin.php'
+credentials:
+  login_path: /login
+  fields:
+    FREE_PMO_ADMIN_EMAIL: {kind: email}
+    FREE_PMO_ADMIN_PASSWORD: {kind: password}

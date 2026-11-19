@@ -1,0 +1,9 @@
+# Layers over the compose file the laravel strategy generates (the shared PHP
+# base image, ~/project at /app, the account's uid, the db sidecar and APP_URL).
+services:
+  app:
+    # FREE_PMO_ADMIN_EMAIL / FREE_PMO_ADMIN_PASSWORD, generated and kept by the
+    # engine; panelalpha/free-pmo-admin.php creates the first admin from them.
+    env_file:
+      - .env
+      - ../.panelalpha/app-credentials.env
