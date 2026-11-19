@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Mercator, information system mapping (ANSSI method) on Laravel 13 with
+  MySQL. The engine builds the repository's Dockerfile, whose entrypoint runs
+  migrate on every start but seeds only when SEED_DATABASE=1 or
+  USE_DEMO_DATA=1, so the database had no roles and no user and the login at
+  /login had no account to sign in with; there is no sign-up. Upstream's
+  seeders make the admin admin@admin.com with the password `password`,
+  published in its README. So the engine generates the admin's login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
+  files/panelalpha/mercator-start.sh, after the image's entrypoint has
+  migrated and before supervisord starts the site, runs
+  panelalpha/mercator-admin.php: only while the database has no user, it
+  runs upstream's DatabaseSeeder (perimeters, permissions, roles, the admin),
+  then gives that admin the generated login. The published login is never
+  left in place (one still found with its published password gets the
+  generated login), and a password changed in the app is never touched.
+credentials:
+  login_path: /login
+  fields:
+    # Mercator signs in with a `login`, which upstream's seeded admin has as
+    # its email address; both get this value.
+    MERCATOR_ADMIN_EMAIL: {kind: email, value: 'admin@{host}'}
+    MERCATOR_ADMIN_PASSWORD: {kind: password}

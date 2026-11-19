@@ -1,0 +1,15 @@
+# Layers over the compose file the dockerfile strategy generates (service `app`,
+# the repository's Dockerfile, env_file .env written from .env.example, the db
+# sidecar).
+services:
+  app:
+    env_file:
+      - .env
+      # MERCATOR_ADMIN_EMAIL / MERCATOR_ADMIN_PASSWORD, generated and kept by
+      # the engine; panelalpha/mercator-admin.php gives the first admin them.
+      - ../.panelalpha/app-credentials.env
+    # The image's entrypoint (docker/entrypoint.sh) migrates, then execs this
+    # command: the first admin, then the image's own supervisord.
+    command: ["/bin/sh", "/panelalpha/mercator-start.sh", "/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
+    volumes:
+      - ./panelalpha:/panelalpha:ro
