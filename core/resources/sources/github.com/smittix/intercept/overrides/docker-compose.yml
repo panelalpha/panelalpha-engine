@@ -1,0 +1,21 @@
+# Compose-replace: the repository's docker-compose.yml is for a workstation with
+# SDR hardware (privileged, /dev/bus/usb), which the engine does not run. Builds
+# its Dockerfile as the dockerfile strategy would, with the engine's login.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "5050:5050"
+    entrypoint: ["/bin/sh", "/panelalpha-intercept-start.sh"]
+    env_file:
+      - path: .env
+        required: false
+      # INTERCEPT_ADMIN_USERNAME / INTERCEPT_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
+    volumes:
+      - intercept-instance:/app/instance
+      - ./panelalpha-intercept-start.sh:/panelalpha-intercept-start.sh:ro
+
+volumes:
+  intercept-instance: {}

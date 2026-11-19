@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  INTERCEPT, an SDR signal monitoring web UI (Flask on gunicorn + gevent,
+  SQLite under instance/). The repository's docker-compose.yml is a workstation
+  file (privileged, the host's USB devices), so the engine builds its
+  Dockerfile as the dockerfile strategy does. With no
+  INTERCEPT_ADMIN_PASSWORD a new database gets an admin with a random
+  password that only the container log and instance/.initial_password hold,
+  so nobody deploying it could sign in. So the engine generates a login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
+  hands it over as INTERCEPT_ADMIN_USERNAME / INTERCEPT_ADMIN_PASSWORD,
+  INTERCEPT's own variables for its first admin (no forced change, as for a
+  password the operator chose). INTERCEPT also writes that variable over the
+  admin's password on every start, so files/panelalpha-intercept-start.sh
+  passes the password only while the database has no user yet: a password
+  changed in INTERCEPT is never touched. instance/ (users, settings) is on a
+  named volume, as the repository's compose file keeps it.
+credentials:
+  login_path: /login
+  fields:
+    INTERCEPT_ADMIN_USERNAME: {kind: username}
+    INTERCEPT_ADMIN_PASSWORD: {kind: password}
