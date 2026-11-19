@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Nepal Compliance, a Frappe app (ERPNext, HRMS and Nepal's payroll, tax and
+  fiscal-year rules) on the compose stack its repository ships: frappe_docker's
+  layout with upstream's published image (yarsalabs/nepal-compliance), MariaDB
+  and two Redis, and a one-shot create-site that runs `bench new-site`. Used as
+  it is with one change. create-site sets the Administrator's password from
+  ${ADMIN_PASSWORD}, which the .env the engine makes from .env.example has as
+  the published `your-admin-password`, so anyone opening the site could sign in
+  as Administrator.
+
+  The engine generates the password instead (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get), and
+  overrides/docker-compose.override.yml gives create-site upstream's own
+  command with that password: `bench new-site --admin-password` only while the
+  site does not exist. A site created before this recipe that still has the
+  published password gets the generated one with Frappe's own
+  `bench set-admin-password`; any other password, one changed in the app
+  included, is left alone. The field is named ADMIN_PASSWORD, upstream's own
+  name, so a project that sets ADMIN_PASSWORD keeps its own. The username is
+  always Frappe's built-in Administrator.
+credentials:
+  login_path: /login
+  fields:
+    # Frappe's built-in superuser; `bench new-site` names it, nothing reads this.
+    NEPAL_COMPLIANCE_ADMIN_USER: {kind: username, value: Administrator}
+    ADMIN_PASSWORD: {kind: password}

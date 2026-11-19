@@ -1,0 +1,51 @@
+# Layers over the repository's compose.yaml (frappe_docker's layout: one
+# image, a one-shot create-site that runs `bench new-site`). Only create-site
+# changes: its Administrator password is the one the engine generates instead
+# of ${ADMIN_PASSWORD} from the .env the engine makes from .env.example, whose
+# `your-admin-password` is published.
+services:
+  create-site:
+    env_file:
+      # ADMIN_PASSWORD (and NEPAL_COMPLIANCE_ADMIN_USER, always Administrator),
+      # generated and kept by the engine. In the container's environment, so
+      # the script reads it as $$ADMIN_PASSWORD; ${...} would be the .env value.
+      - ../.panelalpha/app-credentials.env
+    # Upstream's command, with two changes: new-site gets the generated
+    # password, and only when the site does not exist yet (upstream runs it on
+    # every start and lets it fail). A site made before this recipe that still
+    # has the published password gets the generated one with Frappe's own
+    # set-admin-password; any other password, one changed in the app
+    # included, is left alone. The `bench build` runs on every start, as
+    # upstream's does.
+    command:
+      - |
+        wait-for-it -t 120 db:3306;
+        wait-for-it -t 120 redis-cache:6379;
+        wait-for-it -t 120 redis-queue:6379;
+        export start=`date +%s`;
+        until [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".db_host // empty"` ]] && \
+          [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".redis_cache // empty"` ]] && \
+          [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".redis_queue // empty"` ]];
+        do
+          echo "Waiting for sites/common_site_config.json to be created";
+          sleep 5;
+          if (( `date +%s`-start > 120 )); then
+            echo "could not find sites/common_site_config.json with required keys";
+            exit 1
+          fi
+        done;
+        echo "sites/common_site_config.json found";
+        if [[ -z "$$ADMIN_PASSWORD" ]]; then
+          echo "[panelalpha] no ADMIN_PASSWORD in ~/.panelalpha/app-credentials.env; not creating the site";
+          exit 1
+        fi;
+        if [[ -f sites/frontend/site_config.json ]]; then
+          echo "[panelalpha] site frontend exists; not creating it again";
+          if bench --site frontend execute frappe.utils.password.check_password --kwargs '{"user": "Administrator", "pwd": "your-admin-password"}' >/dev/null 2>&1; then
+            bench --site frontend set-admin-password "$$ADMIN_PASSWORD" && echo "[panelalpha] the Administrator's published password replaced with the generated one";
+          fi
+        else
+          bench new-site --mariadb-user-host-login-scope='%' --admin-password="$$ADMIN_PASSWORD" --db-root-username=root --db-root-password=${DB_ROOT_PASSWORD} --install-app erpnext --install-app hrms --install-app nepal_compliance --set-default frontend;
+        fi;
+        echo "Building nepal_compliance app...";
+        bench build --app nepal_compliance;
