@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  pretalx, a conference planner: call for papers, review, schedule. The
+  django recipe deploys it as is (src/manage.py, migrate, SQLite under
+  src/data, the frontend built into static.dist by the build). Its public
+  pages work; the organiser area at /orga/ did not. It has a login form and
+  no account: the form hides the sign-up, speakers only register through an
+  event's call for papers and there is no event yet, and the first
+  administrator only comes from the `init` server command.
+
+  So the engine generates the administrator's login (`credentials:` below,
+  returned by GET /projects/{name}/app-credentials, MCP app_credentials_get)
+  and panelalpha/pretalx-admin.sh, after migrate and only while there is no
+  administrator at all, runs pretalx's own `init --noinput` with it: the
+  administrator (who may create events and see every event) and a first
+  organiser with a team holding that user. An administrator that exists is
+  never touched, so a password changed in the app stays changed.
+
+  Two more things the login needed. pretalx keeps its cache and its
+  sessions in Redis (redis://127.0.0.1:6379/1 by default) with no other
+  backend to choose, so saving the session of a login was a 500; the compose
+  override adds a Redis for cache and sessions only. And pretalx trusts only
+  its SITE_URL (http://localhost by default) as a CSRF origin, and Django
+  behind the account's web server sees plain http, so the browser's
+  `Origin: https://<domain>` failed the check and every form post was a 403;
+  PRETALX_SITE_URL is the site's public address.
+extends: django
+env:
+  PRETALX_SITE_URL: '${PA_PUBLIC_URL}'
+  PRETALX_REDIS: 'redis://redis:6379/1'
+commands:
+  # Appended after the django recipe's install and upgrade commands, so it
+  # runs once migrate has made the tables.
+  - id: pretalx-admin
+    stage:
+      - install
+      - upgrade
+    description: >-
+      pretalx's own `init --noinput` with the login the engine generated (the
+      first administrator and a first organiser), only while there is no
+      administrator, so an account changed or added in the app is never
+      touched.
+    run: 'sh panelalpha/pretalx-admin.sh'
+credentials:
+  login_path: /orga/login/
+  fields:
+    PRETALX_ADMIN_EMAIL: {kind: email}
+    PRETALX_ADMIN_PASSWORD: {kind: password}

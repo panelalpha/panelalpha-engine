@@ -1,0 +1,22 @@
+# Layers over the compose file the django strategy generates (the shared
+# Python base image, ~/project at /app, the empty .env).
+services:
+  app:
+    # PRETALX_ADMIN_EMAIL / PRETALX_ADMIN_PASSWORD, generated and kept by the
+    # engine; panelalpha/pretalx-admin.sh creates the first administrator
+    # from them.
+    env_file:
+      - .env
+      - ../.panelalpha/app-credentials.env
+    depends_on:
+      - redis
+
+  # pretalx keeps its cache and its sessions in Redis and has no setting
+  # for anything else: the cache backend is Django's RedisCache at
+  # PRETALX_REDIS (redis://127.0.0.1:6379/1 by default, which is nothing
+  # here), so a login, which saves a session, was a 500. Cache and
+  # sessions only, so nothing is persisted: a redeploy signs everyone out.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
