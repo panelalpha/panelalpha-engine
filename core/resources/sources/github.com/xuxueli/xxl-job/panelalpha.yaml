@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  XXL-JOB, a distributed task scheduler: xxl-job-admin is the Spring Boot web
+  console (port 8080) on MySQL, and executors register with it. A plain deploy
+  builds the Maven project with the java strategy and runs xxl-job-admin with
+  no database (application.properties points at 127.0.0.1:3306 as root), so its
+  login page renders and no login can work.
+
+  This recipe runs what upstream's docker/docker-compose.yml describes: MySQL
+  8.4 initialised with doc/db/tables_xxl_job.sql, and xxl-job-admin built from
+  this checkout (files/panelalpha-xxl-job-admin.Dockerfile compiles the jar the
+  upstream xxl-job-admin/Dockerfile expects to exist, then runs it the same
+  way), without the sample executor. hooks/prepare.sh generates the MySQL
+  passwords once in ~/.panelalpha/xxl-job/; Spring Boot gets the datasource
+  from SPRING_DATASOURCE_*. The database is a named volume kept across
+  redeploys.
+
+  The schema seeds the admin `admin` with the password `123456`, which
+  nobody deploying it is told and anyone with the address could use. So the
+  engine generates a login (`credentials:` below, returned by GET
+  /projects/{name}/app-credentials) and files/panelalpha-xxl-job-login.sh, run
+  by the MySQL image right after the schema on a new database only, sets it on
+  that admin while it still has the default password: a password changed in
+  XXL-JOB is never touched.
+credentials:
+  login_path: /auth/login
+  fields:
+    XXL_JOB_ADMIN_USERNAME: {kind: username}
+    XXL_JOB_ADMIN_PASSWORD: {kind: password}
