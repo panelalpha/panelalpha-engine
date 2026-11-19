@@ -40,6 +40,12 @@ class ComposePlaceholders
 
     private const THIRD_PARTY_KEY_PATTERN = '/API_?KEY|PUBLIC_KEY|ACCESS_KEY|CLIENT_SECRET/i';
 
+    /** A salt or pepper is the app's own even under a third-party word: OpenAlgo's API_KEY_PEPPER hashes its API keys. */
+    private const OWN_SECRET_SUFFIX_PATTERN = '/(SALT|PEPPER)$/i';
+
+    /** A blank for a credential another service issues (BROKER_API_SECRET) is left blank, not invented. */
+    private const ISSUED_CREDENTIAL_PATTERN = '/API_?(KEY|SECRET)/i';
+
     /** change-this-to-a-secure-random-string, your-jwt-secret-here. */
     private const PUBLISHED_SECRET_PHRASE = '/^(?:(?:change|replace)[-_ ]?(?:this|me|it)[-_ ]|replace[-_ ]with[-_ ]|your[-_ ].*[-_ ](?:here|secret|key)$|generate[-_ ])/';
 
@@ -347,14 +353,16 @@ class ComposePlaceholders
 
     /**
      * A signing/encryption key still set to a placeholder everyone can read; one character repeated is
-     * a fixed-length template value (Homarr's 64 zeroes), never a real secret.
+     * a fixed-length template value (Homarr's 64 zeroes), never a real secret. A fill-in blank counts too:
+     * left out, OpenAlgo's FERNET_SALT and API_KEY_PEPPER were set by no one and its start aborted.
      */
     public static function isPublishedSecret(string $key, string $value): bool
     {
-        if (preg_match(self::PUBLISHED_SECRET_KEY_PATTERN, $key) !== 1
-            || preg_match(self::THIRD_PARTY_KEY_PATTERN, $key) === 1
-        ) {
+        if (! self::namesOwnSecret($key)) {
             return false;
+        }
+        if (self::isTemplatePlaceholder($value)) {
+            return self::isOwnSalt($key) || preg_match(self::ISSUED_CREDENTIAL_PATTERN, $key) !== 1;
         }
         $value = strtolower(trim(trim($value), '"\''));
 
@@ -363,6 +371,17 @@ class ComposePlaceholders
             || preg_match('/^x{3,}$/', $value) === 1
             || preg_match('/^(django-)?insecure/', $value) === 1
             || preg_match('/^(.)\1{7,}$/', $value) === 1;
+    }
+
+    private static function namesOwnSecret(string $key): bool
+    {
+        return preg_match(self::PUBLISHED_SECRET_KEY_PATTERN, $key) === 1
+            && (preg_match(self::THIRD_PARTY_KEY_PATTERN, $key) !== 1 || self::isOwnSalt($key));
+    }
+
+    private static function isOwnSalt(string $key): bool
+    {
+        return preg_match(self::OWN_SECRET_SUFFIX_PATTERN, $key) === 1;
     }
 
     /**

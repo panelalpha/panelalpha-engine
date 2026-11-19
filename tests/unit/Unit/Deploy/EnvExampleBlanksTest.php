@@ -146,6 +146,33 @@ class EnvExampleBlanksTest extends TestCase
         $this->assertSame($first, $second);
     }
 
+    /**
+     * OpenAlgo's template: commented out as blanks for the image to fill, FERNET_SALT and API_KEY_PEPPER
+     * were set by nothing and every start aborted ("API_KEY_PEPPER environment variable is not set").
+     */
+    public function test_a_secret_left_as_a_blank_to_fill_in_is_generated(): void
+    {
+        $template = "BROKER_API_KEY = 'YOUR_BROKER_API_KEY'\n"
+            ."BROKER_API_SECRET = 'YOUR_BROKER_API_SECRET'\n"
+            ."API_KEY_PEPPER = 'OPENALGO_PLACEHOLDER_API_KEY_PEPPER_REGENERATE_BEFORE_USE'\n"
+            ."FERNET_SALT = 'OPENALGO_PLACEHOLDER_FERNET_SALT_REGENERATE_BEFORE_USE'\n"
+            ."SESSION_SECRET=<your session secret>\n";
+
+        [$filled, $replaced] = ProjectEnvironment::withoutPublishedSecrets($template, 'seed-for-tests');
+        [, $blanks] = ProjectEnvironment::withoutTemplatePlaceholders($filled);
+
+        $this->assertSame(['API_KEY_PEPPER', 'FERNET_SALT', 'SESSION_SECRET'], $replaced);
+        $this->assertSame(['BROKER_API_KEY', 'BROKER_API_SECRET'], $blanks);
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{48}$/', $this->values($filled)['FERNET_SALT'] ?? '');
+    }
+
+    public function test_a_third_party_credential_left_blank_is_still_not_invented(): void
+    {
+        $this->assertFalse(ComposePlaceholders::isPublishedSecret('STRIPE_API_KEY', 'YOUR_STRIPE_API_KEY'));
+        $this->assertFalse(ComposePlaceholders::isPublishedSecret('OAUTH_CLIENT_SECRET', '<client secret>'));
+        $this->assertFalse(ComposePlaceholders::isPublishedSecret('DB_URL', 'FULL_PATH_TO_YOUR_SQLITE_DB_FILE'));
+    }
+
     /** A real secret that happens to be short is not a placeholder. */
     public function test_a_real_secret_is_not_mistaken_for_one(): void
     {
