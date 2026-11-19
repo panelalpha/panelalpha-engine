@@ -226,69 +226,70 @@ case "$(cat "${WORK_DIR}/docker-args")" in
 esac
 DEPLOY_FULL_PRIVILEGES=0
 
-# --env-var pairs and the panel's admin + Hub code reach project:create.
+# --env-var pairs and the panel's Hub code with its address reach project:create; never a password.
 DEPLOY_ENV_VARS=('FOO=bar baz' 'EMPTY=')
-PANEL_ADMIN_EMAIL='ada@example.com'
-PANEL_ADMIN_PASSWORD=''
+DEPLOY_FULL_PRIVILEGES=1
+PANEL_HUB_EMAIL='ada@example.com'
 PANEL_HUB_CODE='WDJB-MJHT'
 DEPLOY_FAILED=0
+DEPLOY_UPDATED=0
 deploy_repository >/dev/null 2>&1
 args=$(cat "${WORK_DIR}/docker-args")
 case "$args" in
-*'--env-var=FOO=bar baz --env-var=EMPTY= --env-var=PANELALPHA_USER_EMAIL=ada@example.com --env-var=PANELALPHA_USER_PASSWORD='*) pass 'env vars and the panel admin reach project:create' ;;
-*) fail 'env vars and the panel admin reach project:create' '--env-var=… in order' "$args" ;;
+*'--env-var=FOO=bar baz --env-var=EMPTY= --env-var=PANELALPHA_HUB_CODE=WDJB-MJHT --env-var=PANELALPHA_USER_EMAIL=ada@example.com'*) pass 'env vars, the hub code and its address reach project:create' ;;
+*) fail 'env vars, the hub code and its address reach project:create' '--env-var=… in order' "$args" ;;
 esac
 case "$args" in
-*'--env-var=PANELALPHA_HUB_CODE=WDJB-MJHT'*) pass 'the hub code goes to the panel' ;;
-*) fail 'the hub code goes to the panel' 'PANELALPHA_HUB_CODE' "$args" ;;
+*PANELALPHA_USER_PASSWORD*) fail 'the panel gets no admin password' 'no PANELALPHA_USER_PASSWORD' "$args" ;;
+*) pass 'the panel gets no admin password' ;;
 esac
-if [[ "$PANEL_ADMIN_PASSWORD" =~ ^[A-Za-z0-9]{8}-[A-Za-z0-9]{8}$ ]] && [[ "$PANEL_ADMIN_PASSWORD" =~ [A-Z] ]] \
-    && [[ "$PANEL_ADMIN_PASSWORD" =~ [a-z] ]] && [[ "$PANEL_ADMIN_PASSWORD" =~ [0-9] ]]; then
-    pass 'the admin password meets the panel policy'
-else
-    fail 'the admin password meets the panel policy' 'Aa1 + a dash, 17 chars' "$PANEL_ADMIN_PASSWORD"
-fi
 reported=$(report_deployed_project 2>&1)
-case "$reported" in
-*"Log in as: ada@example.com    password: ${PANEL_ADMIN_PASSWORD}"*) pass 'the outro shows the panel login' ;;
-*) fail 'the outro shows the panel login' 'Log in as: …' "$reported" ;;
-esac
 case "$reported" in
 *'connects to PanelAlpha Hub on its first start'*) pass 'the outro says the panel connects to the Hub' ;;
 *) fail 'the outro says the panel connects to the Hub' 'connects to PanelAlpha Hub' "$reported" ;;
 esac
 case "$reported" in
-*WDJB-MJHT*) fail 'the outro never shows the hub code' 'no code' "$reported" ;;
-*) pass 'the outro never shows the hub code' ;;
+*WDJB-MJHT* | *'Log in as:'* | *'password:'*) fail 'the outro shows no code and no login' 'neither' "$reported" ;;
+*) pass 'the outro shows no code and no login' ;;
+esac
+
+# The panel without a Hub code: no address, no password; the outro sends its owner to the setup wizard.
+PANEL_HUB_EMAIL=''
+PANEL_HUB_CODE=''
+deploy_repository >/dev/null 2>&1
+args=$(cat "${WORK_DIR}/docker-args")
+case "$args" in
+*PANELALPHA_USER_* | *PANELALPHA_HUB_CODE*) fail 'without a hub code the panel gets no admin' 'no PANELALPHA_USER_*' "$args" ;;
+*) pass 'without a hub code the panel gets no admin' ;;
+esac
+reported=$(report_deployed_project 2>&1)
+case "$reported" in
+*'to create your account in the panel'"'"'s setup wizard'*) pass 'the outro sends the owner to the setup wizard' ;;
+*) fail 'the outro sends the owner to the setup wizard' 'setup wizard' "$reported" ;;
 esac
 DEPLOY_ENV_VARS=()
-PANEL_ADMIN_EMAIL=''
-PANEL_ADMIN_PASSWORD=''
-PANEL_HUB_CODE=''
 
-# Run a second time, the panel is updated: nothing generated for a new one is reported.
-DEPLOY_FULL_PRIVILEGES=1
-PANEL_ADMIN_EMAIL='ada@example.com'
-PANEL_ADMIN_PASSWORD=''
+# Run a second time, the panel is updated: no Hub or wizard line, its admin and settings stay.
+PANEL_HUB_EMAIL='ada@example.com'
 PANEL_HUB_CODE='WDJB-MJHT'
 DEPLOY_FAILED=0
 DEPLOY_UPDATED=0
 STUB_UPDATED=1 deploy_repository >/dev/null 2>&1
 expect 'an update is recorded' '1' "$DEPLOY_UPDATED"
 expect 'an update keeps the project name' 'n8n3163' "$DEPLOY_PROJECT_NAME"
-expect 'an update reports no generated password' '' "$PANEL_ADMIN_PASSWORD"
+expect 'an update does not send the hub code again' '' "$PANEL_HUB_CODE"
 reported=$(report_deployed_project 2>&1)
 case "$reported" in
 *'was already deployed as n8n3163: updated it'*) pass 'the report says the project was updated' ;;
 *) fail 'the report says the project was updated' 'was already deployed as n8n3163' "$reported" ;;
 esac
 case "$reported" in
-*'Log in as:'* | *'connects to PanelAlpha Hub'*) fail 'an update prints no login or Hub line' 'neither' "$reported" ;;
-*) pass 'an update prints no login or Hub line' ;;
+*'connects to PanelAlpha Hub'* | *'setup wizard'*) fail 'an update prints no Hub or wizard line' 'neither' "$reported" ;;
+*) pass 'an update prints no Hub or wizard line' ;;
 esac
 DEPLOY_FULL_PRIVILEGES=0
 DEPLOY_UPDATED=0
-PANEL_ADMIN_EMAIL=''
+PANEL_HUB_EMAIL=''
 PANEL_HUB_CODE=''
 
 # ---- site password helpers -------------------------------------------------

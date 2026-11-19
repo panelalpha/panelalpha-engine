@@ -143,9 +143,8 @@ DEPLOY_PASSWORD_SET=0
 DEPLOY_FULL_PRIVILEGES=0
 # --env-var KEY=VALUE pairs for the --repo project; values may be secrets, never printed.
 DEPLOY_ENV_VARS=()
-# With --full-privileges the project is the panel: --email is its admin, --hub-code its Hub code.
-PANEL_ADMIN_EMAIL=''
-PANEL_ADMIN_PASSWORD=''
+# With --full-privileges the project is the panel: --hub-code is its Hub code, made for --email.
+PANEL_HUB_EMAIL=''
 PANEL_HUB_CODE=''
 # 1 when --update-engine: with --repo on an existing host, update the engine
 # and deploy without asking.
@@ -217,10 +216,11 @@ Usage: bash installer.sh [options]
                            project: hidden from every other API token, and
                            protected (for a panel that manages the engine).
                            The project is taken to be the PanelAlpha panel:
-                           --email becomes its admin, with a generated password
-                           printed at the end, --hub-code goes to the panel
-                           (not to the engine), and no site password is set
-                           unless --password is given
+                           its owner creates the admin in the panel's setup
+                           wizard (--email does not make one); --hub-code goes
+                           to the panel (not to the engine), with --email, the
+                           address the code was made for; and no site password
+                           is set unless --password is given
       --env-var KEY=VALUE  environment variable for the --repo project
                            (repeatable); the value is never printed
       --update-engine      with --repo on an existing install, update the engine
@@ -541,16 +541,16 @@ if [ "${#DEPLOY_ENV_VARS[@]}" -gt 0 ]; then
     done
 fi
 
-# The panel, not the engine, pairs with the Hub; its admin comes from --email.
+# The panel, not the engine, pairs with the Hub; --email goes to it only with --hub-code.
 if [ "$DEPLOY_FULL_PRIVILEGES" = 1 ]; then
     if [ -n "$HUB_CODE" ] && [ -z "$INSTALL_EMAIL" ]; then
-        echo "--hub-code with --full-privileges needs --email: the panel's admin, whose PanelAlpha account made the code." >&2
+        echo "--hub-code with --full-privileges needs --email: the address of the PanelAlpha account that made the code." >&2
         trap - EXIT
         exit 1
     fi
     PANEL_HUB_CODE="$HUB_CODE"
     HUB_CODE=''
-    PANEL_ADMIN_EMAIL="$INSTALL_EMAIL"
+    [ -n "$PANEL_HUB_CODE" ] && PANEL_HUB_EMAIL="$INSTALL_EMAIL"
     # A site password would put HTTP auth in front of the panel's own login.
     [ -n "$DEPLOY_SITE_PASSWORD" ] || DEPLOY_NO_PASSWORD=1
 fi
@@ -2426,12 +2426,9 @@ deploy_repository() {
     for pair in "${DEPLOY_ENV_VARS[@]+"${DEPLOY_ENV_VARS[@]}"}"; do
         args+=("--env-var=${pair}")
     done
-    if [ -n "${PANEL_ADMIN_EMAIL:-}" ]; then
-        [ -n "$PANEL_ADMIN_PASSWORD" ] || PANEL_ADMIN_PASSWORD=$(generate_panel_admin_password)
-        args+=("--env-var=PANELALPHA_USER_EMAIL=${PANEL_ADMIN_EMAIL}" "--env-var=PANELALPHA_USER_PASSWORD=${PANEL_ADMIN_PASSWORD}")
-    fi
+    # No password: the panel makes no admin of its own.
     if [ -n "${PANEL_HUB_CODE:-}" ]; then
-        args+=("--env-var=PANELALPHA_HUB_CODE=${PANEL_HUB_CODE}")
+        args+=("--env-var=PANELALPHA_HUB_CODE=${PANEL_HUB_CODE}" "--env-var=PANELALPHA_USER_EMAIL=${PANEL_HUB_EMAIL}")
     fi
 
     # --json: JSON on stdout; the live deploy log, then any failure reason, on
@@ -2484,9 +2481,8 @@ deploy_repository() {
     fi
     DEPLOY_PROJECT_URL="https://${domain}"
     if printf '%s' "$json" | grep -q '"updated":true'; then
-        # Its admin, environment and Hub pairing stay: what this run generated for a new one was not applied.
+        # Its admin, environment and Hub pairing stay: what this run gave a new one was not applied.
         DEPLOY_UPDATED=1
-        PANEL_ADMIN_PASSWORD=''
         PANEL_HUB_CODE=''
         return 0
     fi
@@ -2536,24 +2532,16 @@ apply_deploy_site_password() {
     fi
 }
 
-# Two 8-character halves joined by a dash, drawn until both cases and a digit are in.
-generate_panel_admin_password() {
-    local pw=''
-    while :; do
-        pw=$(generate_deploy_site_password)
-        case "$pw" in *[A-Z]*) ;; *) continue ;; esac
-        case "$pw" in *[a-z]*) ;; *) continue ;; esac
-        case "$pw" in *[0-9]*) ;; *) continue ;; esac
-        break
-    done
-    printf '%s-%s' "${pw:0:8}" "${pw:8:8}"
-}
-
 # The command an operator retries a failed --repo deploy with.
 deploy_retry_command() {
     local cmd="pae project:create --repo ${DEPLOY_REPO_LABEL}"
     [ "${DEPLOY_FULL_PRIVILEGES:-0}" = 1 ] && cmd="${cmd} --full-privileges"
     printf '%s' "$cmd"
+}
+
+# A panel this run created: its setup wizard makes the first account.
+panel_awaits_setup() {
+    [ "${DEPLOY_FULL_PRIVILEGES:-0}" = 1 ] && [ "${DEPLOY_UPDATED:-0}" != 1 ] && [ "${DEPLOY_FAILED:-0}" != 1 ]
 }
 
 # Where the repository ended up — stdout for logs, and the same lines in the
@@ -2594,11 +2582,10 @@ report_deployed_project() {
     if [ "$DEPLOY_PASSWORD_SET" = 1 ] && [ -n "$DEPLOY_SITE_PASSWORD" ]; then
         echo_info "Password: ${DEPLOY_SITE_PASSWORD}"
     fi
-    if [ -n "${PANEL_ADMIN_PASSWORD:-}" ]; then
-        echo_info "Log in as: ${PANEL_ADMIN_EMAIL}    password: ${PANEL_ADMIN_PASSWORD}"
-    fi
     if [ -n "${PANEL_HUB_CODE:-}" ]; then
         echo_info "The panel connects to PanelAlpha Hub on its first start; watch the Hub page you copied the command from."
+    elif panel_awaits_setup; then
+        echo_info "Open ${DEPLOY_PROJECT_URL} to create your account in the panel's setup wizard."
     fi
     echo_info ""
     if [ "${DEPLOY_UPDATED:-0}" = 1 ]; then
@@ -2613,16 +2600,11 @@ report_deployed_project() {
         outro_c 15 "${DEPLOY_SITE_PASSWORD}"
         outro_nl
     fi
-    if [ -n "${PANEL_ADMIN_PASSWORD:-}" ]; then
-        outro_c 247 'Log in as: '
-        outro_c 15 "${PANEL_ADMIN_EMAIL}"
-        outro_c 247 '  password: '
-        outro_c 15 "${PANEL_ADMIN_PASSWORD}"
-        outro_nl
-    fi
     if [ -n "${PANEL_HUB_CODE:-}" ]; then
         outro_c 247 'Connects to PanelAlpha Hub on its first start; watch the Hub page.'
         outro_nl
+    elif panel_awaits_setup; then
+        outro_say 247 'Open it to create your account in the setup wizard.'
     fi
     outro_nl
 }
