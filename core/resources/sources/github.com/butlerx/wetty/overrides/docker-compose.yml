@@ -43,6 +43,10 @@ services:
       PORT: '3000'
       BASE: /
       TITLE: Terminal
+      # The only browser origin allowed to open the socket. WeTTY refuses to
+      # start without one since --allowed-origin became required, and the
+      # account's webserver then answers 502.
+      ALLOWEDORIGINS: ${PA_PUBLIC_URL}
       # The far end of the ssh. A service name on the internal network below,
       # never a host, never a port the customer can move: allowRemoteHosts is
       # false by default (src/shared/defaults.ts:12) so the `host` and `port`
