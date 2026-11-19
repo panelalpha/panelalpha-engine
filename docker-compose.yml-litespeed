@@ -4,7 +4,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-litespeed
-    image: ghcr.io/panelalpha/engine-litespeed:v2.3.0
+    image: ghcr.io/panelalpha/engine-litespeed:v2.3.1
     pull_policy: missing
     # The entrypoint shell ignores SIGTERM as PID 1.
     init: true
