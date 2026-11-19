@@ -1,0 +1,18 @@
+# Layers over the repository's own docker-compose.yml, which is otherwise used
+# as it is.
+#
+# A new Homeio has no account and, on PanelAlpha, never offers its /register
+# page. The wrapper registers the engine's login through Homeio's own API once
+# the server answers, then leaves it alone.
+services:
+  homeio:
+    command: ["sh", "/panelalpha/homeio-start.sh"]
+    # Docker's init as PID 1 reaps the helper when it exits; the server would
+    # otherwise inherit it as a zombie.
+    init: true
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+      # HOMEIO_ADMIN_USER / HOMEIO_ADMIN_PASSWORD, generated and kept by the
+      # engine. Mounted rather than an env_file, so only the registering helper
+      # reads them and the server's environment never has them.
+      - ../.panelalpha/app-credentials.env:/pa/app-credentials.env:ro

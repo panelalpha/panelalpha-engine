@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Homeio, a home server dashboard (Next.js with a custom Node server,
+  PostgreSQL), on the compose stack its own repository ships, with one
+  change: its single account. Homeio has no default login; its first visitor
+  registers the one account at /register, and the middleware sends visitors
+  there only while its own lookup (a fetch of /api/auth/status at the site's
+  public address, from inside the container) says there is no user. On
+  PanelAlpha that fetch does not come back, and Homeio then assumes an
+  account exists, so a new instance showed only a sign-in form, /register
+  redirected to it, and nobody could get in.
+
+  So the engine generates the account's login (`credentials:` below,
+  returned by GET /projects/{name}/app-credentials) and
+  overrides/docker-compose.override.yml runs files/panelalpha/homeio-start.sh
+  in place of the image's command: it starts files/panelalpha/homeio-register.mjs
+  in the background and then upstream's docker-entrypoint.sh. Once Homeio
+  answers on its own port, the helper asks /api/auth/status and, only while
+  there is no user, registers that login through Homeio's own
+  POST /api/auth/register, which then closes registration as it always does.
+  A password changed in Homeio is never touched.
+credentials:
+  login_path: /login
+  fields:
+    # Homeio's usernames are 3 to 32 of a-z, 0-9, _ and -.
+    HOMEIO_ADMIN_USER: {kind: username}
+    HOMEIO_ADMIN_PASSWORD: {kind: password}
