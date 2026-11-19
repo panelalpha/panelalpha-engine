@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MergeStat, SQL over git repositories: PostgreSQL 14, a Go worker that syncs
+  repositories into it, PostGraphile and a Next.js console, from the
+  repository's docker-compose.yml. The console's login is a PostgreSQL user
+  and password, and that compose file defaults the postgres password to
+  `password` everywhere (POSTGRES_PASSWORD and every connection string), so
+  every deploy signed in as the database superuser with a password published
+  in the repository. It also defaults JWT_SECRET to `secret`, the key that
+  signs the console's session token (whose `role` claim PostGraphile runs
+  queries as), and ENCRYPTION_SECRET to `password`, which encrypts the git
+  host tokens it stores: with those, anyone could mint a superuser session
+  without any password.
+
+  So the engine generates the login (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials), hooks/prepare.sh generates
+  JWT_SECRET and ENCRYPTION_SECRET once per account, and
+  overrides/docker-compose.override.yml runs every service through
+  files/panelalpha/mergestat-run.sh, which builds the password and secrets
+  into what each service reads before execing the image's own entrypoint. An
+  account still on the published `password` has it changed to the generated
+  one. The upstream images, ports and the rest of the compose file stay as
+  they are.
+credentials:
+  login_path: /login
+  fields:
+    # The console asks for a database user; every service connects as
+    # postgres, the image's superuser.
+    MERGESTAT_DB_USER: {kind: username, value: postgres}
+    MERGESTAT_DB_PASSWORD: {kind: password}

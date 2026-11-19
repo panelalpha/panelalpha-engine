@@ -1,0 +1,48 @@
+# Layers over the repository's own docker-compose.yml, which is otherwise used
+# as it is. That file defaults the postgres password to `password` in
+# POSTGRES_PASSWORD and in every connection string, JWT_SECRET to `secret` and
+# ENCRYPTION_SECRET to `password`. Each service here gets the engine's login
+# and the account's secrets as env_file (read by Compose, so no file
+# permissions inside the containers matter) and runs through
+# panelalpha/mergestat-run.sh, which puts them where the service reads them and
+# execs the image's own entrypoint. Setting entrypoint clears an image's CMD,
+# hence `command` where the image had one and the compose file sets none.
+services:
+  postgres:
+    env_file:
+      # MERGESTAT_DB_USER / MERGESTAT_DB_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
+      # MERGESTAT_JWT_SECRET / MERGESTAT_ENCRYPTION_SECRET, from hooks/prepare.sh.
+      - ../.panelalpha/mergestat/secrets.env
+    entrypoint: ["/bin/sh", "/panelalpha/mergestat-run.sh", "postgres"]
+    command: ["postgres"]
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+
+  worker:
+    env_file:
+      - ../.panelalpha/app-credentials.env
+      - ../.panelalpha/mergestat/secrets.env
+    entrypoint: ["/bin/sh", "/panelalpha/mergestat-run.sh", "worker"]
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+
+  graphql:
+    env_file:
+      - ../.panelalpha/app-credentials.env
+      - ../.panelalpha/mergestat/secrets.env
+    # The compose file's command (the connection string, --jwt-secret and the
+    # rest of PostGraphile's flags) still reaches the wrapper, which replaces
+    # those two.
+    entrypoint: ["/bin/sh", "/panelalpha/mergestat-run.sh", "graphql"]
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+
+  ui:
+    env_file:
+      - ../.panelalpha/app-credentials.env
+      - ../.panelalpha/mergestat/secrets.env
+    entrypoint: ["/bin/sh", "/panelalpha/mergestat-run.sh", "ui"]
+    command: ["node", "server.js"]
+    volumes:
+      - ./panelalpha:/panelalpha:ro
