@@ -8,5 +8,20 @@ description: >-
   (ghcr.io/drop-oss/drop:0.4.0-rc-5, the tag the upstream quickstart pins)
   with PostgreSQL 17, EXTERNAL_URL set to the site address, and the game
   library, object data and database on named volumes. hooks/prepare.sh
-  generates the database password once into ~/.panelalpha/drop. First run is
-  Drop's own setup wizard.
+  generates the database password once into ~/.panelalpha/drop. On a start
+  with no user Drop only logs a one-time /setup link, and its sign-in page
+  says "ask an admin", so nobody deploying it could get in. So the engine
+  generates a login (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials) and a one-shot `login` service
+  (files/panelalpha/drop-login.sh) creates the first admin with it through
+  Drop's own setup API, the steps the wizard takes, then closes the setup
+  token. It does nothing once a user exists, so a password changed in Drop
+  is never overwritten. Library sources are added afterwards under Admin,
+  Library, as after the wizard's optional library step.
+credentials:
+  login_path: /auth/signin
+  fields:
+    # Drop wants a username of 5 characters or more and an email.
+    DROP_ADMIN_USERNAME: {kind: username}
+    DROP_ADMIN_EMAIL: {kind: email}
+    DROP_ADMIN_PASSWORD: {kind: password}

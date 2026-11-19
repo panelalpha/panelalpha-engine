@@ -44,14 +44,38 @@ services:
       start_period: 10s
     mem_limit: 512m
 
-  # No-op: `compose up -d` returns once Drop answers.
+  # One-shot: the first admin with the engine's login, through Drop's own setup
+  # API (panelalpha/drop-login.sh), on a database with no user only. Drop
+  # otherwise logs a one-time /setup link nobody deploying it sees. It always
+  # exits 0: on an error Drop keeps its setup wizard and the log says so.
+  login:
+    image: postgres:17-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "/pa/drop-login.sh"]
+    env_file:
+      # DROP_ADMIN_USERNAME / DROP_ADMIN_EMAIL / DROP_ADMIN_PASSWORD, the login
+      # the engine generates; POSTGRES_PASSWORD for psql.
+      - ../.panelalpha/app-credentials.env
+      - ../.panelalpha/drop/db.env
+    environment:
+      PGHOST: postgres
+      PGUSER: drop
+      PGDATABASE: drop
+    volumes:
+      - ./panelalpha:/pa:ro
+    depends_on:
+      drop:
+        condition: service_healthy
+    mem_limit: 64m
+
+  # No-op: `compose up -d` returns once Drop answers and has its admin.
   ready:
     image: postgres:17-alpine
     restart: "no"
     entrypoint: ["/bin/sh", "-c", "exit 0"]
     depends_on:
-      drop:
-        condition: service_healthy
+      login:
+        condition: service_completed_successfully
     mem_limit: 32m
 
 volumes:
