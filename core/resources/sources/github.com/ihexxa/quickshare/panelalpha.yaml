@@ -6,6 +6,15 @@ description: >-
   deploy failed in that image build. This recipe runs the published image of
   the current release (hexxa/quickshare:v0.11.4) as upstream's `docker run`
   example does, with uploads and the database on a named volume. On first
-  start the app creates its admin from DEFAULTADMIN (project env var, default
-  `admin`) and DEFAULTADMINPWD; when the password is unset the app generates
-  one and prints it to its log.
+  start the app creates its admin from DEFAULTADMIN and DEFAULTADMINPWD; with
+  the password unset it generated one and printed it only to the container's
+  log, where nobody deploying it was told. So the engine generates the login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
+  the app reads it from app-credentials.env. Both are read only while there
+  is no database yet, so a password changed in QuickShare is never
+  overwritten. The login form keeps upstream's captcha.
+credentials:
+  login_path: /
+  fields:
+    DEFAULTADMIN: {kind: username}
+    DEFAULTADMINPWD: {kind: password}

@@ -7,11 +7,12 @@ services:
     restart: unless-stopped
     ports:
       - "8686:8686"
-    environment:
-      # Read only on first start; without a name the app prompts on stdin.
-      DEFAULTADMIN: ${DEFAULTADMIN:-admin}
-      # Unset: the app generates the password and prints it to its log.
-      DEFAULTADMINPWD: ${DEFAULTADMINPWD:-}
+    env_file:
+      # DEFAULTADMIN / DEFAULTADMINPWD, the login the engine generates. The
+      # app reads them only on first start, while it has no database yet, so a
+      # password changed in QuickShare is never overwritten. Without them it
+      # would generate the password and print it only to its log.
+      - ../.panelalpha/app-credentials.env
     volumes:
       # Uploaded files and quickshare.sqlite.
       - quickshare-root:/quickshare/root
