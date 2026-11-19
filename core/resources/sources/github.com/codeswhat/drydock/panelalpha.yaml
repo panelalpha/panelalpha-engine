@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Drydock, a container update monitor (Node API and Vue UI in one image, its
+  store under /store). The repository's own Dockerfile is how upstream ships
+  it and the engine builds it as is (the dockerfile strategy, as detection
+  already chose). A fresh Drydock refuses anonymous access unless
+  DD_ANONYMOUS_AUTH_CONFIRM=true and has no user of its own: its only login is
+  DD_AUTH_BASIC_<name>_USER / _HASH (an argon2id hash) from the environment,
+  so a new instance showed "No authentication methods configured" and nobody
+  could get in.
+
+  So the engine generates a login (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials) and files/panelalpha/drydock-start.sh,
+  before the image's own entrypoint, hashes the generated password with
+  Node's crypto.argon2Sync as upstream's docs do and sets
+  DD_AUTH_BASIC_ADMIN_USER / DD_AUTH_BASIC_ADMIN_HASH from them (a
+  DD_AUTH_BASIC_ADMIN_USER the customer sets wins). Drydock has no password
+  change: the login lives in the environment, so the engine's stored values
+  stay the login across restarts and redeploys. DD_SERVER_TRUSTPROXY=1 makes
+  Express read the proxy's X-Forwarded-Proto, without which every signed-in
+  change (logout included) was refused as cross-site: Drydock compared the
+  browser's https origin with the http it saw.
+extends: dockerfile
+extra:
+  # A source recipe is applied without probe data; state what the probe finds:
+  # the repository's Dockerfile and the port it EXPOSEs.
+  dockerfile: Dockerfile
+  port_hint: 3000
+env:
+  # One proxy hop, the account's web server, which terminates TLS.
+  DD_SERVER_TRUSTPROXY: '1'
+credentials:
+  login_path: /login
+  fields:
+    DRYDOCK_ADMIN_USER: {kind: username}
+    DRYDOCK_ADMIN_PASSWORD: {kind: password}

@@ -1,0 +1,16 @@
+# Layers over the compose file the dockerfile strategy generates (service `app`,
+# the repository's Dockerfile).
+services:
+  app:
+    # Sets Drydock's basic login from the generated one, then execs the image's
+    # own entrypoint (under tini, as the image runs it), which drops to the
+    # node user and starts Drydock. An entrypoint here clears the image's CMD,
+    # so the command is restated.
+    entrypoint: ["tini", "-g", "--", "/bin/sh", "/panelalpha/drydock-start.sh"]
+    command: ["node", "dist/index.js"]
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+      # DRYDOCK_ADMIN_USER / DRYDOCK_ADMIN_PASSWORD, generated and kept by the
+      # engine. Mounted rather than an env_file, so the running server's
+      # environment has the hash, not the password.
+      - ../.panelalpha/app-credentials.env:/pa/app-credentials.env:ro
