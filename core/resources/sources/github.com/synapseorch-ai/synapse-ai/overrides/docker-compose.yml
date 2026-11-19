@@ -1,0 +1,23 @@
+# Compose-replace: the repository's docker-compose.yml is a workstation stack (the
+# host's docker.sock, a ./backend/data bind, loopback ports), so the engine built
+# the root Dockerfile, the single image with the backend and the frontend under
+# supervisord, with the dockerfile strategy. Builds it the same way, with the
+# engine's access token.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      # SYNAPSE_ACCESS_TOKEN, the access token the engine generates.
+      - ../.panelalpha/app-credentials.env
+      # The project's environment variables, last so they still win.
+      - path: .env
+        required: false
+    volumes:
+      # The image's VOLUME: SQLite, blobs and the secrets its entrypoint keeps.
+      - synapse-data:/data
+
+volumes:
+  synapse-data: {}

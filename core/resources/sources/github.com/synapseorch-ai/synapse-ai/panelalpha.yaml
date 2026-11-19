@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Synapse (SynapseOrch), an AI agent orchestrator (a Python backend and a
+  Next.js frontend under supervisord in one image, SQLite and the secrets on
+  /data). The repository's docker-compose.yml is a workstation stack, so the
+  engine builds the root Dockerfile as the dockerfile strategy does. With login
+  off (the default) Synapse opens only with its access link, a token its
+  entrypoint makes on the first start and prints to the container log only,
+  so nobody deploying it could get in. So the engine generates the token
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
+  overrides/docker-compose.yml hands it to the container as
+  SYNAPSE_ACCESS_TOKEN, the variable Synapse's entrypoint keeps over its own:
+  pasted into the login page's access-link box, it opens Synapse. It lives in
+  the environment only, so it stays the same across restarts and redeploys.
+  Turning on login in Settings (a username and password of one's own) retires
+  the access link, as upstream does; the engine never touches that login. An
+  LLM provider key is still needed to run agents.
+credentials:
+  login_path: /login
+  fields:
+    SYNAPSE_ACCESS_TOKEN: {kind: password}
