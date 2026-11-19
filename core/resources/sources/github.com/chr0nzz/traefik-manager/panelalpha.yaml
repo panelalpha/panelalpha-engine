@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Traefik Manager, a web UI for Traefik's dynamic configuration (Flask on
+  gunicorn, settings in /app/config/manager.yml). The repository's
+  docker-compose.yml builds its Dockerfile and the engine runs it, dropping
+  its /path/to/... host binds. Its login is one password: with none set, the
+  first start writes a random temporary one to the container log only, so
+  nobody deploying it could sign in. So the engine generates a password
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
+  overrides/docker-compose.override.yml sets it with Traefik Manager's own
+  `flask reset-password --stdin` before gunicorn starts, only while
+  manager.yml has no password: the temporary one is replaced, and a password
+  set later in the app (the setup wizard asks for one) is never touched. It is
+  not handed over as ADMIN_PASSWORD, which would turn off the in-app password
+  change and 2FA. /app/config and /app/backups get named volumes in place of
+  the dropped binds, so the settings survive a redeploy. Everything else is
+  the repository's compose file.
+credentials:
+  login_path: /login
+  fields:
+    TM_ADMIN_PASSWORD: {kind: password}

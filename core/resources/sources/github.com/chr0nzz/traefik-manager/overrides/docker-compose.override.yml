@@ -1,0 +1,20 @@
+# Layers over the repository's docker-compose.yml: the login, and named volumes
+# where that file binds host paths the engine drops.
+services:
+  traefik-manager:
+    env_file:
+      # TM_ADMIN_PASSWORD, the password the engine generates.
+      - ../.panelalpha/app-credentials.env
+    # Through the image's own entrypoint (PUID/PGID), then its CMD.
+    command: ["/bin/sh", "/panelalpha-traefik-manager-start.sh", "gunicorn", "--config", "/app/gunicorn.conf.py", "app:app"]
+    volumes:
+      - ./panelalpha-traefik-manager-start.sh:/panelalpha-traefik-manager-start.sh:ro
+      # The compose file's /path/to/... binds are host paths, which the engine
+      # removes; without these the settings (and the password) would go with
+      # every recreated container.
+      - traefik-manager-config:/app/config
+      - traefik-manager-backups:/app/backups
+
+volumes:
+  traefik-manager-config: {}
+  traefik-manager-backups: {}
