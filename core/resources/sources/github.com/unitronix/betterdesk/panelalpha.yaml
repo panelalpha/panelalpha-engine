@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  BetterDesk, a RustDesk-compatible remote desktop server (a Go server for
+  signal, relay and the client API, and a Node.js web console on :5000,
+  SQLite on shared volumes). The repository's docker-compose.yml builds both
+  images and the engine runs it as is. Both seed the first admin from
+  ADMIN_USERNAME / ADMIN_PASSWORD, which the compose file passes from .env
+  and the engine leaves empty, so the image's bootstrap made up a random
+  password and wrote it only to /opt/rustdesk/.admin_credentials inside the
+  volume: nobody deploying it could sign in. So the engine generates a login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials)
+  and overrides/docker-compose.override.yml hands it to both services, where
+  a short entrypoint puts it into ADMIN_* and the INIT_ADMIN_* /
+  DEFAULT_ADMIN_* variables they read (the compose file's `environment:`
+  beats any env_file), then runs the image's own entrypoint. The images only
+  seed a database with no user, so a password changed in the console is
+  never overwritten on a restart or redeploy. Everything else is the
+  repository's compose file.
+credentials:
+  login_path: /login
+  fields:
+    BETTERDESK_ADMIN_USERNAME: {kind: username}
+    BETTERDESK_ADMIN_PASSWORD: {kind: password}

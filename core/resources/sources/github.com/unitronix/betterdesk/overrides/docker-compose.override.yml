@@ -1,0 +1,50 @@
+# Layers over the repository's docker-compose.yml: only the login changes.
+#
+# Both services seed the first admin from ADMIN_USERNAME / ADMIN_PASSWORD (as
+# INIT_ADMIN_* in the Go server, DEFAULT_ADMIN_* in the console), which the
+# compose file's `environment:` sets from .env: empty, so the image's bootstrap
+# made up a random password and wrote it only to /opt/rustdesk/.admin_credentials.
+# `environment:` beats any env_file, so a short entrypoint puts the engine's
+# login into those variables in the process itself, then runs the image's own
+# entrypoint. The images seed them on a database with no user only; a password
+# changed in the console is never overwritten.
+services:
+  server:
+    env_file:
+      # BETTERDESK_ADMIN_USERNAME / BETTERDESK_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
+    # Dockerfile.server's entrypoint; the compose file's `command:` follows it.
+    entrypoint:
+      - /sbin/tini
+      - --
+      - /bin/sh
+      - -c
+      - >-
+        if [ -n "$$BETTERDESK_ADMIN_PASSWORD" ]; then
+        export ADMIN_USERNAME="$${BETTERDESK_ADMIN_USERNAME:-admin}" ADMIN_PASSWORD="$$BETTERDESK_ADMIN_PASSWORD";
+        export INIT_ADMIN_USER="$$ADMIN_USERNAME" INIT_ADMIN_PASS="$$ADMIN_PASSWORD";
+        export DEFAULT_ADMIN_USERNAME="$$ADMIN_USERNAME" DEFAULT_ADMIN_PASSWORD="$$ADMIN_PASSWORD";
+        fi;
+        exec "$$@"
+      - --
+      - /server-entrypoint.sh
+
+  console:
+    env_file:
+      - ../.panelalpha/app-credentials.env
+    # Dockerfile.console's entrypoint and command (a new entrypoint drops the
+    # image's command), with the same login.
+    entrypoint:
+      - /sbin/tini
+      - --
+      - /bin/sh
+      - -c
+      - >-
+        if [ -n "$$BETTERDESK_ADMIN_PASSWORD" ]; then
+        export ADMIN_USERNAME="$${BETTERDESK_ADMIN_USERNAME:-admin}" ADMIN_PASSWORD="$$BETTERDESK_ADMIN_PASSWORD";
+        export INIT_ADMIN_USER="$$ADMIN_USERNAME" INIT_ADMIN_PASS="$$ADMIN_PASSWORD";
+        export DEFAULT_ADMIN_USERNAME="$$ADMIN_USERNAME" DEFAULT_ADMIN_PASSWORD="$$ADMIN_PASSWORD";
+        fi;
+        exec "$$@"
+      - --
+    command: ["/console-entrypoint.sh"]
