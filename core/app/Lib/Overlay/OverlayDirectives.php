@@ -5,6 +5,7 @@ namespace App\Lib\Overlay;
 /**
  * The nginx sub_filter directives that write overlays into HTML pages, with the upstream answer requested uncompressed.
  * `$` goes through a `geo` variable and a replacement over {@see MAX_PARAMETER_BYTES} through `set` chunks, as nginx needs.
+ * The site's Content-Security-Policy gets the hashes of the overlay's inline scripts and styles ({@see OverlayCsp}).
  */
 final class OverlayDirectives
 {
@@ -38,13 +39,19 @@ final class OverlayDirectives
      */
     private static function httpDirectives(array $overlays): string
     {
+        $directives = [];
         foreach ($overlays as $overlay) {
             if (str_contains($overlay->html, '$')) {
-                return 'geo $'.self::DOLLAR_VARIABLE." {\n    default \"\$\";\n}";
+                $directives[] = 'geo $'.self::DOLLAR_VARIABLE." {\n    default \"\$\";\n}";
+                break;
             }
         }
+        $csp = OverlayCsp::httpDirectives($overlays);
+        if ($csp !== '') {
+            $directives[] = $csp;
+        }
 
-        return '';
+        return implode("\n", $directives);
     }
 
     /**
@@ -72,6 +79,10 @@ final class OverlayDirectives
                 $variables .= '${'.$variable.'}';
             }
             $lines[] = 'sub_filter '.self::quoted($closingTag)." '".$variables."';";
+        }
+        $csp = OverlayCsp::locationDirectives($overlays);
+        if ($csp !== '') {
+            $lines[] = $csp;
         }
 
         return implode("\n", $lines);

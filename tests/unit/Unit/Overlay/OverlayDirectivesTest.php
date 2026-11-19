@@ -41,7 +41,7 @@ class OverlayDirectivesTest extends TestCase
             "'<script>const \${pa_overlay_dollar}x = `\${pa_overlay_dollar}{a}`;</script></body>'",
             $vars['overlay_location'],
         );
-        $this->assertSame("geo \$pa_overlay_dollar {\n    default \"\$\";\n}", $vars['overlay_http']);
+        $this->assertStringStartsWith("geo \$pa_overlay_dollar {\n    default \"\$\";\n}\n", $vars['overlay_http']);
     }
 
     public function test_overlays_sharing_a_position_are_joined_in_order(): void

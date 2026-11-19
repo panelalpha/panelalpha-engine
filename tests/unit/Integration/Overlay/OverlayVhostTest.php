@@ -22,6 +22,18 @@ class OverlayVhostTest extends TestCase
         }
     }
 
+    public function test_an_inline_script_overlay_sends_the_policy_with_its_hash_on_both_listeners(): void
+    {
+        [$preamble, $http, $https, $extra] = $this->blocks($this->renderDind(true, false, [new Overlay('<script>bar()</script>')]));
+
+        $this->assertStringContainsString('map $upstream_http_content_security_policy $pa_overlay_csp_', $preamble);
+        foreach ([$http, $https] as $block) {
+            $this->assertSame(1, substr_count($this->siteLocation($block), 'proxy_hide_header Content-Security-Policy;'));
+            $this->assertMatchesRegularExpression('/add_header Content-Security-Policy \$pa_overlay_csp_[0-9a-f]{16} always;/', $this->siteLocation($block));
+        }
+        $this->assertStringNotContainsString('Content-Security-Policy', $extra);
+    }
+
     public function test_a_suspended_project_shows_no_overlay(): void
     {
         $this->assertStringNotContainsString('sub_filter', $this->renderDind(true, true));
