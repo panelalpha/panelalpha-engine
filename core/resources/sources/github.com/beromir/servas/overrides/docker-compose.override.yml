@@ -13,13 +13,20 @@
 # staged entrypoint -- off the table entirely.
 services:
   app:
+    env_file:
+      # SERVAS_EMAIL / SERVAS_PASSWORD, the login the engine generates;
+      # panelalpha/servas-install.php creates the account from them on the
+      # install stage. .env first, as the generated compose file has it.
+      - .env
+      - ../.panelalpha/app-credentials.env
     volumes:
       # ~/.panelalpha/servas. Everything this installation accumulates lives
       # here and nowhere else:
       #
       #   /data/database.sqlite   every bookmark, tag, group and user
       #   /data/app.key           the application key
-      #   /data/credentials       the generated account, 0600
+      #   /data/credentials       the account an older deploy generated
+      #                           (read by the engine once, see adopt_from)
       #
       # A redeploy clears and re-clones ~/project, so a SQLite
       # file under database/ -- which is where Servas's own config/database.php

@@ -2,9 +2,8 @@
 # Runs on the account after the clone and before the build.
 #
 # Everything here exists because a Servas checkout cannot say where its data
-# goes. A redeploy clears and re-clones ~/project, so the database,
-# the application key and the account's credentials all have to live outside
-# it. ~ is root-owned 0755 and nothing can be created there; ~/.panelalpha is
+# goes. A redeploy clears and re-clones ~/project, so the database and the
+# application key have to live outside it. ~ is root-owned 0755 and nothing can be created there; ~/.panelalpha is
 # created with the account and belongs to it, so the data directory is a child
 # of that one. The compose override bind-mounts it at /data.
 set -e
@@ -91,36 +90,14 @@ chmod 600 "${DATA_HOME}/app.key"
 # by default -- so a stock deploy on a public HTTPS address is a bookmark
 # manager whose first visitor becomes its owner.
 #
-# The account is created at deploy time from these credentials instead, and the
-# .env below closes registration. Written once and never rewritten: the install
-# script is a no-op once a user exists, so a regenerated password would stop
-# matching a database that survived the redeploy.
-CREDENTIALS="${DATA_HOME}/credentials"
-if [ ! -f "${CREDENTIALS}" ]; then
-    # No characters that need quoting in a shell, a URL or a form.
-    password=$(LC_ALL=C tr -dc 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789' < /dev/urandom | head -c 20)
-    if [ ${#password} -ne 20 ]; then
-        say "could not generate a password; the install stage will leave the application without an account" >&2
-        exit 1
-    fi
-    umask 077
-    cat > "${CREDENTIALS}" <<EOF
-# Written by PanelAlpha on the first deploy. This is the Servas account for
-# this installation -- sign in at https://<your-domain>/login .
-#
-# Servas's registration form is the only way an account is ever created, and it
-# is open by default, so on a public address the first visitor would have been
-# the owner. This account was created at deploy time instead and registration
-# was turned off; set SERVAS_ENABLE_REGISTRATION=true in ~/project/.env to open
-# it again. Change the password under Profile and this file stops being
-# interesting.
-SERVAS_EMAIL=admin@localhost
-SERVAS_PASSWORD=${password}
-EOF
-    chmod 600 "${CREDENTIALS}"
-    say "generated the account password; it is in ~/.panelalpha/servas/credentials"
-fi
-chmod 600 "${CREDENTIALS}"
+# The account is created at deploy time instead, by
+# panelalpha/servas-install.php, from the login the engine generates
+# (`credentials:` in panelalpha.yaml, SERVAS_EMAIL / SERVAS_PASSWORD in
+# ~/.panelalpha/app-credentials.env), and the .env below closes registration.
+# This hook used to generate that password itself into
+# ~/.panelalpha/servas/credentials, where nobody deploying it was told it; the
+# file is left alone, because the engine adopts an existing account's login
+# from it (`adopt_from:`).
 
 # ---------------------------------------------------------------------------
 # 4. Writable directories
@@ -165,8 +142,8 @@ mkdir -p storage/framework/cache/data storage/framework/sessions storage/framewo
 # secret in this file; the application key is added to it from inside the
 # container, by panelalpha/servas-install.php, which chmods it 0600 then.
 cat > .env <<'EOF'
-# Written by PanelAlpha. The application key and this installation's account
-# credentials are in ~/.panelalpha/servas/ .
+# Written by PanelAlpha. The application key is in ~/.panelalpha/servas/ ; the
+# account's login is the one the engine generated (app-credentials).
 APP_NAME=Servas
 APP_ENV=production
 APP_DEBUG=false

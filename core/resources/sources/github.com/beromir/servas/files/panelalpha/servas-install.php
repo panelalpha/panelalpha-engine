@@ -25,10 +25,12 @@
  *  3. The account. Servas ships no installer, no seeded user and no admin
  *     role -- its registration form is the only way anybody ever gets in, and
  *     config/fortify.php enables it by default. On a public HTTPS address that
- *     is first-visitor-wins, so prepare.sh closed registration and generated
- *     the credentials, and the account is created here. Guarded on the users
- *     table being empty, so a redeploy over a database that survived it never
- *     creates a second one and never resets a password somebody chose.
+ *     is first-visitor-wins, so prepare.sh closed registration and the
+ *     account is created here, from the login the engine generates
+ *     (SERVAS_EMAIL / SERVAS_PASSWORD, in the container's environment from
+ *     ~/.panelalpha/app-credentials.env). Guarded on the users table being
+ *     empty, so a redeploy over a database that survived it never creates a
+ *     second one and never resets a password somebody chose.
  *
  * Exit codes: 1 only when the installation would be left with no way in --
  * no key, or an empty database this could not seed an account into. Anything
@@ -94,7 +96,6 @@ if (!str_contains($env, 'APP_KEY=' . $key)) {
 // ------------------------------------------------------------------ APP_URL
 
 $appUrl = rtrim((string) (getenv('APP_URL') ?: ''), '/');
-$host = $appUrl !== '' ? (parse_url($appUrl, PHP_URL_HOST) ?: '') : '';
 if ($appUrl !== '') {
     envSet($envPath, 'APP_URL', $appUrl);
 }
@@ -119,35 +120,14 @@ if ($users > 0) {
     exit(0);
 }
 
-$credentialsPath = $dataDir . '/credentials';
-if (!is_file($credentialsPath)) {
-    say("no credentials file at {$credentialsPath}; the installation has no way in");
+// The login the engine generated: the compose override adds
+// ~/.panelalpha/app-credentials.env to this container's env_file.
+$email = trim((string) (getenv('SERVAS_EMAIL') ?: ''));
+$password = (string) (getenv('SERVAS_PASSWORD') ?: '');
+
+if ($email === '' || $password === '') {
+    say('no SERVAS_EMAIL / SERVAS_PASSWORD from the engine; the installation has no way in');
     exit(1);
-}
-
-$credentials = parse_ini_file($credentialsPath, false, INI_SCANNER_RAW) ?: [];
-$email = trim((string) ($credentials['SERVAS_EMAIL'] ?? ''));
-$password = (string) ($credentials['SERVAS_PASSWORD'] ?? '');
-
-if ($password === '') {
-    say('the credentials file carries no password; the installation has no way in');
-    exit(1);
-}
-
-// The address is the container's to know, and the credentials file is what the
-// customer reads, so the resolved one is written back into it.
-if ($host !== '' && ($email === '' || $email === 'admin@localhost')) {
-    $email = 'admin@' . $host;
-    $file = (string) @file_get_contents($credentialsPath);
-    $replaced = preg_replace('/^SERVAS_EMAIL=.*$/m', 'SERVAS_EMAIL=' . $email, $file, 1);
-    if (is_string($replaced)) {
-        @file_put_contents($credentialsPath, $replaced);
-        @chmod($credentialsPath, 0600);
-    }
-}
-
-if ($email === '') {
-    $email = 'admin@localhost';
 }
 
 try {
@@ -164,5 +144,5 @@ try {
     exit(1);
 }
 
-say("created the account {$user->email}; its password is in ~/.panelalpha/servas/credentials");
+say("created the account {$user->email} with the login the engine generated");
 exit(0);

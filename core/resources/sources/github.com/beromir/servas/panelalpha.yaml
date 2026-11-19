@@ -88,12 +88,16 @@ description: >-
   `env('SERVAS_ENABLE_REGISTRATION', true)`, and that form is the only way an
   account is ever created -- so a stock deploy on a public HTTPS address is a
   bookmark manager whose first visitor becomes its owner, with no way to
-  remove them afterwards. prepare.sh generates a 20-character password into
-  ~/.panelalpha/servas/credentials (0600), .env sets
-  SERVAS_ENABLE_REGISTRATION=false, and panelalpha/servas-install.php creates
-  the account before Apache binds -- guarded on the users table being empty, so
-  a redeploy over a surviving database never creates a second one. /register
-  is 404. An operator who wants other people to sign up sets the variable back
+  remove them afterwards. So the engine generates the account's login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials),
+  .env sets SERVAS_ENABLE_REGISTRATION=false, and
+  panelalpha/servas-install.php creates the account from that login before
+  Apache binds -- guarded on the users table being empty, so a redeploy over a
+  surviving database never creates a second one and never resets a password
+  somebody chose. /register is 404. prepare.sh used to generate the password
+  itself into ~/.panelalpha/servas/credentials, where nobody deploying it was
+  told it; an account seeded that way has its login adopted from that file
+  (`adopt_from:`), so what the engine reports is what its database has. An operator who wants other people to sign up sets the variable back
   to true in ~/project/.env.
 
   The application key is the fourth thing and it is a consequence of the first.
@@ -153,7 +157,7 @@ description: >-
   cache is not, and the cost is a stack trace in the container log on every
   start. And mail is unconfigured: Servas needs it only for password recovery,
   Fortify's `resetPasswords()` feature is commented out upstream anyway, and
-  the one password there is sits in a file instead.
+  the one password there is the engine reports.
 extends: laravel
 # No `id:`, deliberately, the way plainpad and heimdall extend this manifest.
 # A recipe that states one becomes a manifest only SourceRecipes::all() can
@@ -194,8 +198,8 @@ commands:
       - upgrade
     description: >-
       Puts this installation's persistent application key and its public
-      address into .env, and creates the account whose password the prepare
-      hook generated -- before Apache binds, because Servas's registration
+      address into .env, and creates the account from the login the engine
+      generated -- before Apache binds, because Servas's registration
       form is otherwise the only way in and it is the first visitor who uses
       it. After the manifest's own commands on purpose: `key:generate` is one
       of them and would overwrite the key. A no-op once an account exists, so
@@ -203,3 +207,12 @@ commands:
       redeploy changes nothing.
     run: 'php panelalpha/servas-install.php'
     timeout: 300
+credentials:
+  login_path: /login
+  # ~/.panelalpha/servas/credentials, where an older deploy of this recipe
+  # generated the account: an installation seeded that way keeps its login.
+  adopt_from: .panelalpha/servas/credentials
+  fields:
+    # admin@<the site's domain>, the address the account always had here.
+    SERVAS_EMAIL: {kind: email, value: 'admin@{host}'}
+    SERVAS_PASSWORD: {kind: password}

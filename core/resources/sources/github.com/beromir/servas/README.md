@@ -78,7 +78,7 @@ where it cannot miss.
 |---|---|
 | `/data/database.sqlite` | every bookmark, tag, group and user |
 | `/data/app.key` | the application key |
-| `/data/credentials` | the generated account, 0600 |
+| `/data/credentials` | the account an older deploy generated (the engine adopts it once, see *Security*) |
 
 SQLite rather than `database: mysql`: it suits a single-user bookmark manager,
 it keeps a database container off the host, and — the deciding part — the
@@ -124,12 +124,22 @@ installer, no seeded user and no admin role. `config/fortify.php:135` reads
 `env('SERVAS_ENABLE_REGISTRATION', true)`, and that form is the only way anybody
 ever gets in — so a stock deploy on a public HTTPS address is a bookmark manager
 whose first visitor becomes its owner, with nothing to remove them afterwards
-and no way to tell it happened. So `hooks/prepare.sh` generates a 20-character
-password into `~/.panelalpha/servas/credentials` (0600), `.env` sets
-`SERVAS_ENABLE_REGISTRATION=false`, and `panelalpha/servas-install.php` creates
-the account before Apache binds — guarded on the `users` table being empty, so a
+and no way to tell it happened. So the engine generates the account's login
+(`credentials:` in `panelalpha.yaml`: `SERVAS_EMAIL`, `admin@<domain>`, and
+`SERVAS_PASSWORD`, read with `GET /projects/{name}/app-credentials` or MCP
+`app_credentials_get`), `.env` sets `SERVAS_ENABLE_REGISTRATION=false`, and
+`panelalpha/servas-install.php` creates the account from that login (the
+compose override adds `../.panelalpha/app-credentials.env` to the app's
+`env_file`) before Apache binds - guarded on the `users` table being empty, so a
 redeploy over a surviving database never creates a second one and never resets a
-password somebody chose; `/register` answers 404. An operator who wants other people to sign up sets the variable back to `true`
+password somebody chose; `/register` answers 404. Sign in at `/login`.
+
+`hooks/prepare.sh` used to generate that password itself into
+`~/.panelalpha/servas/credentials` (0600), which nobody deploying it was told.
+It no longer does, and leaves an existing file alone: `adopt_from:` makes the
+engine take `SERVAS_EMAIL` / `SERVAS_PASSWORD` from it the first time it stores
+the login, so an installation seeded that way reports the account its database
+has. An operator who wants other people to sign up sets the variable back to `true`
 in `~/project/.env`; that is a decision for whoever owns the installation, and
 it should not be the default on an address the engine has just published.
 
@@ -203,7 +213,7 @@ that waits on nothing is a second container per account for no reason.
   SSO) is not provided: Servas has no admin role and no user API.
 - **Mail is not configured.** Servas needs it only for password recovery, and
   Fortify's `resetPasswords()` is commented out upstream anyway; the one
-  password there is sits in a file instead.
+  password there is the engine reports.
 - **`php artisan optimize` fails its `route:cache` step** and always will:
   `routes/web.php` registers two closure routes (`/` and `/groups`) and a
   closure cannot be serialised. The platform marks the command optional, so the
@@ -213,3 +223,12 @@ that waits on nothing is a second container per account for no reason.
   `.env.example`.** Nothing reads them — `CACHE_DRIVER=file` and
   `QUEUE_CONNECTION=sync` in the hook's `.env` — and no sidecar was mined for
   them, but they are one `CACHE_DRIVER=redis` away from pointing at nothing.
+
+## The login, checked
+
+Checked locally (2026-11-19, 088eaa3, PHP 8.4, the hook's SQLite database, the
+install-stage commands run in order): the Fortify login with the engine's
+`SERVAS_EMAIL` / `SERVAS_PASSWORD` reached `/user/profile`; a wrong password was
+refused; `/register` was 404; no `~/.panelalpha/servas/credentials` was written;
+a password changed in the app survived a restart and a redeploy (the hook run
+again, the database kept) and the engine's was refused after it.
