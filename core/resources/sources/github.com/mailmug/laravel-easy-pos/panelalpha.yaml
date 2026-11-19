@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Laravel Easy POS, a point of sale on Laravel 11 and Filament 4 (MySQL). The
+  laravel recipe deploys it as is; only its first admin is missing. Upstream's
+  installer is the `/` route: it runs migrate and `db:seed` (settings, the
+  admin admin@admin.com with the published password pass@123, demo products
+  and customers) only while there is no `settings` table. The recipe's
+  migrate makes that table before the site is reachable, so the database was
+  never seeded and the Filament login at /admin/login had no account to sign
+  in with.
+
+  So the engine generates the admin's login (`credentials:` below, returned
+  by GET /projects/{name}/app-credentials) and panelalpha/easy-pos-admin.php,
+  after migrate and only while the database has no user at all, runs the
+  installer's SettingsSeeder and creates the admin with Filament's own
+  `make:filament-user` from that login. upstream's published admin is never
+  created (one still found with its published password gets the generated
+  login), and a password changed in the app is never touched. The demo
+  products and customers are not seeded: their seeders need Faker, a dev
+  dependency the build does not install.
+extends: laravel
+commands:
+  # Appended after the laravel recipe's install and upgrade commands, so it
+  # runs once migrate has made the tables.
+  - id: easy-pos-admin
+    stage:
+      - install
+      - upgrade
+    description: >-
+      The installer's SettingsSeeder and the first admin from the login the
+      engine generated, only while the database has no user, so an account
+      changed or added in the app is never touched.
+    run: 'php panelalpha/easy-pos-admin.php'
+credentials:
+  login_path: /admin/login
+  fields:
+    EASY_POS_ADMIN_EMAIL: {kind: email}
+    EASY_POS_ADMIN_PASSWORD: {kind: password}
