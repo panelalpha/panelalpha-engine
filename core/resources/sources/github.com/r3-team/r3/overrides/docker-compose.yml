@@ -45,7 +45,37 @@ services:
       start_period: 10s
     mem_limit: 512m
 
-  # No-op gate: `compose up -d` returns only once REI3 accepts connections.
+  # One-shot: the engine's login on the built-in admin while it still has the
+  # password `admin` (panelalpha/rei3/admin-login.sql). REI3 creates that admin
+  # before it opens its port, so this runs once the app is healthy. A failure
+  # leaves admin/admin and says so; it never holds the site back.
+  admin-login:
+    image: postgres:16
+    restart: "no"
+    env_file:
+      # REI3_ADMIN_USERNAME / REI3_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
+    environment:
+      PGHOST: db
+      PGUSER: app
+      PGPASSWORD: app
+      PGDATABASE: app
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        psql -q -v u="$${REI3_ADMIN_USERNAME:-admin}" -v p="$${REI3_ADMIN_PASSWORD}"
+        -f /pa/admin-login.sql ||
+        echo "[panelalpha] rei3: could not set the admin login; it stays admin/admin" >&2
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - ./panelalpha/rei3:/pa:ro
+    mem_limit: 32m
+
+  # No-op gate: `compose up -d` returns only once REI3 accepts connections and
+  # the admin has the engine's login.
   ready:
     image: postgres:16
     restart: "no"
@@ -53,6 +83,8 @@ services:
     depends_on:
       app:
         condition: service_healthy
+      admin-login:
+        condition: service_completed_successfully
     mem_limit: 32m
 
 volumes:

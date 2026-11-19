@@ -14,5 +14,20 @@ description: >-
   (the database is not published outside the account), and /opt/r3/data and
   the PostgreSQL data on named volumes. The app serves plain HTTP on :80
   behind the engine's TLS proxy (`-http`, as the vendor image runs it). A
-  gate service waits until REI3 accepts connections. First run is as the
-  vendor ships it (default login admin/admin, per r3_docker's README).
+  gate service waits until REI3 accepts connections.
+
+  A new database gets REI3's built-in admin with the password `admin` (per
+  r3_docker's README), which nobody deploying it is told and anyone with the
+  address could use. So the engine generates a login (`credentials:` below,
+  returned by GET /projects/{name}/app-credentials) and the admin-login
+  one-shot, once REI3 has created that admin, sets it with psql
+  (files/panelalpha/rei3/admin-login.sql: REI3's own salted sha256), only
+  while the admin still has the password `admin`: a password changed in REI3
+  is never touched. REI3 has no supported way to change a login from outside
+  the running app (`-newadmin` only adds a second admin and leaves admin/admin
+  in place), which is why it is SQL.
+credentials:
+  login_path: /
+  fields:
+    REI3_ADMIN_USERNAME: {kind: username}
+    REI3_ADMIN_PASSWORD: {kind: password}
