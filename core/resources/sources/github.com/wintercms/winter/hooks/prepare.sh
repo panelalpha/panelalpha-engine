@@ -37,7 +37,7 @@ cd ~/project
 #
 # 2. Durable state. ~/project is /app and is emptied before every deploy, so
 #    the key, the SQLite database, storage/app (uploads, media) and the admin
-#    password record live in ~/.panelalpha/winter, mounted at /pa-data by the
+#    login record live in ~/.panelalpha/winter, mounted at /pa-data by the
 #    compose override. A key regenerated per deploy would invalidate every
 #    session and encrypted value; a database kept in storage/ was simply gone.
 STORE="${HOME}/.panelalpha/winter"

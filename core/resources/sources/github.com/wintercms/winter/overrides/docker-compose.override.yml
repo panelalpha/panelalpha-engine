@@ -12,8 +12,13 @@
 # off the table entirely.
 services:
   app:
+    # WINTER_ADMIN_LOGIN / WINTER_ADMIN_PASSWORD, generated and kept by the
+    # engine; set-admin-password.sh gives the seeded admin that login.
+    env_file:
+      - .env
+      - ../.panelalpha/app-credentials.env
     # ~/project is /app and is emptied before every deploy. The database, the
-    # admin password record and storage/app (uploads, media) live in
+    # admin login record and storage/app (uploads, media) live in
     # ~/.panelalpha/winter instead; see hooks/prepare.sh.
     volumes:
       - ../.panelalpha/winter:/pa-data
@@ -24,7 +29,7 @@ services:
     # which is UpdateManager::update() -- 40-odd migrations across the system,
     # backend and cms modules and the committed Winter.Demo plugin, then each
     # module's DatabaseSeeder, which is what creates the roles, the Owners
-    # group and the `admin` user -- and then the password reset.
+    # group and the `admin` user -- and then the engine's login on it.
     # The engine runs `docker compose up -d` without --wait and probes as soon
     # as it returns, which is while all of that is still going: nothing is
     # listening and the probe reads `Failed to connect to 127.0.0.1 port 8000`.

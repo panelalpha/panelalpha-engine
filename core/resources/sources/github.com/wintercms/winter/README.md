@@ -8,6 +8,13 @@ Detection reads it as `laravel` — `composer.json` and `artisan` — and the
 runtime half of that is right. The rest is not, and without this recipe the
 container restart-loops on exit 1.
 
+## Signing in
+
+Open `/backend` (a 302 to `/backend/backend/auth/signin`) and sign in with the
+login the engine generates (`WINTER_ADMIN_LOGIN`, default `admin`, and
+`WINTER_ADMIN_PASSWORD`): read it with `GET /projects/{name}/app-credentials`
+(MCP `app_credentials_get`). See [The admin account](#the-admin-account).
+
 ## Why this is a manifest and not `extends: laravel`
 
 Winter registers its own migration command under Laravel's name.
@@ -142,7 +149,8 @@ fresh, empty site with a new APP_KEY and a new admin password. Now
 | `app.env` | `APP_KEY`, generated once; `.env` is written from it after a wipe |
 | `database.sqlite` | the whole site (`DB_DATABASE=/pa-data/database.sqlite`) |
 | `storage-app/` | mounted over `/app/storage/app`: uploads, media library, resized images |
-| `admin-password` | the admin credentials record |
+| `admin-login` | records that the engine's login was set on the admin (no secret in it) |
+| `admin-password` | an older version's admin credentials record, gone once its admin moves to the engine's login |
 
 `DATABASE_TEMPLATES=true` is set as well. CMS pages, layouts and partials are
 theme files under `themes/`, which a redeploy replaces with the checkout;
@@ -191,7 +199,7 @@ inside the container.
 finished when that returns — which for Winter is before it answers. The install
 stage runs `winter:up` (roughly forty migrations across the system, backend and
 cms modules plus the committed Winter.Demo plugin, then each module's
-`DatabaseSeeder`), then the admin-password reset. Apache binds after all of it.
+`DatabaseSeeder`), then the engine's login on the admin. Apache binds after all of it.
 
 `overrides/docker-compose.override.yml` adds a healthcheck and a no-op `ready`
 service (`alpine:3`, `entrypoint: exit 0`, `restart: "no"`) gated on
@@ -225,19 +233,31 @@ a fresh Winter is *not* open to whoever finds the address; `/backend` redirects
 an anonymous client to the login form. But the only copy of that password is in
 the deploy log, which is not where an account's credentials live.
 
-`files/panelalpha/set-admin-password.sh` generates 20 base64url characters from
-`random_bytes`, writes them to `~/.panelalpha/winter/admin-password` (0600)
-*before* setting them, and then sets them with Winter's own
-`php artisan winter:passwd admin <password>` — the app's own CLI, which hashes
-the password exactly the way the login form verifies it. If `winter:passwd`
-fails the credentials file is removed again, so nothing is ever left claiming a
-password that was not set.
+So the engine generates the login (`credentials:` in `panelalpha.yaml`:
+`WINTER_ADMIN_LOGIN`, default `admin`, and `WINTER_ADMIN_PASSWORD`), keeps it on
+the project and writes it to `~/.panelalpha/app-credentials.env`, which the
+compose override hands to the container as `env_file`.
+`files/panelalpha/set-admin-password.sh`, on the install and upgrade stages
+after `winter:up`, sets it on the seeded admin through `Backend\Models\User`,
+exactly as `php artisan winter:passwd` does (`$user->password = ...;
+$user->forceSave()`), so the model hashes it the way the login form verifies
+it; a `WINTER_ADMIN_LOGIN` other than `admin` renames the account as well.
+Then it writes `~/.panelalpha/winter/admin-login`, with no secret in it.
 
 It does nothing once that file exists: rotate what upstream seeded, never what
-somebody chose afterwards in *Settings → Administrators*. `winter:passwd` and
-not `user:create`, because `Backend\Console\UserCreate` refuses to run outside
+somebody chose afterwards in *Settings -> Administrators*. The seeded password
+from the deploy log no longer works. `winter:passwd`'s way and not
+`user:create`, because `Backend\Console\UserCreate` refuses to run outside
 `app.env = local` without `--force` and would leave the seeded account in place
 beside the new one.
+
+An account an older version of this recipe set up has
+`~/.panelalpha/winter/admin-password`, where that version recorded the password
+it generated. Its admin moves to the engine's login only while it still has
+that recorded password (`checkPassword`), and the record is then removed; a
+password changed since is left alone. If the step fails the deploy goes on
+(`optional: true`), no `admin-login` is written, and the next deploy tries
+again.
 
 ## Known: the three modules are installed twice
 
@@ -296,5 +316,5 @@ routing table the CMS expects to rebuild.
 |---|---|
 | `panelalpha.yaml` | the manifest: `strategy: laravel`, `docroot: .`, SQLite, and `winter:up` in place of `migrate --force` |
 | `hooks/prepare.sh` | keeps APP_KEY, the SQLite database and `storage/app` in `~/.panelalpha/winter`, writes `.env` (SQLite, before the sidecar inference reads it) and creates the empty database file Laravel refuses to create |
-| `files/panelalpha/set-admin-password.sh` | replaces the seeded password that only the deploy log has, and records the new one |
-| `overrides/docker-compose.override.yml` | mounts `~/.panelalpha/winter` at `/pa-data` and over `storage/app`, plus a two-request healthcheck and a `ready` gate, so the deploy waits for the migration and the seeders |
+| `files/panelalpha/set-admin-password.sh` | replaces the seeded password that only the deploy log has with the login the engine generated, once |
+| `overrides/docker-compose.override.yml` | the engine's login as `env_file`, mounts `~/.panelalpha/winter` at `/pa-data` and over `storage/app`, plus a two-request healthcheck and a `ready` gate, so the deploy waits for the migration and the seeders |

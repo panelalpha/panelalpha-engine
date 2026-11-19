@@ -70,10 +70,15 @@ description: >-
   random 22-character password that it prints to the console and stores
   nowhere. That is safe -- a fresh Winter is *not* open to whoever finds the
   address -- but it is also unusable,
-  and the one copy of it is sitting in the deploy log. So
-  files/panelalpha/set-admin-password.sh generates another, records it in
-  ~/.panelalpha/winter/admin-password (0600) and sets it with Winter's own
-  `winter:passwd`, and does nothing at all once that file exists.
+  and the one copy of it is sitting in the deploy log. So the engine generates
+  the login (`credentials:` below, returned by GET
+  /projects/{name}/app-credentials) and files/panelalpha/set-admin-password.sh
+  sets it on that admin through Backend\Models\User, as Winter's own
+  `winter:passwd` does, once: ~/.panelalpha/winter/admin-login records that it
+  was done, and a password changed later in the backend is never reset. An
+  account an older version of this recipe set up (a password recorded in
+  ~/.panelalpha/winter/admin-password) moves to the engine's login only while
+  its admin still has that recorded password.
 id: wintercms
 label: Winter CMS
 strategy: laravel
@@ -120,9 +125,15 @@ commands:
     stage:
       - install
       - upgrade
-    description: 'Replaces the random password DatabaseSeeder printed to the deploy log with one recorded in ~/.panelalpha/winter/admin-password (0600), and leaves a password an operator later chose alone.'
+    description: 'Replaces the random password DatabaseSeeder printed to the deploy log with the login the engine generated (credentials below), once, and leaves a password an operator later chose alone.'
     run: 'sh panelalpha/set-admin-password.sh'
     # A site that would otherwise serve is never held back by this step. The
     # cost of it failing is an admin account whose only password is in the
     # deploy log, which the script says loudly on stderr.
     optional: true
+credentials:
+  # /backend is a 302 to this form.
+  login_path: /backend/backend/auth/signin
+  fields:
+    WINTER_ADMIN_LOGIN: {kind: username}
+    WINTER_ADMIN_PASSWORD: {kind: password}
