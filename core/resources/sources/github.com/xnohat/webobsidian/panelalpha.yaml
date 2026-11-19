@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  WebObsidian, an Obsidian-style markdown vault in the browser (Node, React,
+  settings and search index under /data, the vault on /vault). The
+  repository's docker-compose.yml builds its Dockerfile and the engine runs it
+  as is. Its login is one password, and until one is chosen in the app that
+  password is the built-in default 123456, which nobody deploying it is told
+  and anyone with the address could use. So the engine generates a password
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
+  overrides/docker-compose.override.yml seeds it with WebObsidian's own
+  settings store before the server starts, only while no password has been
+  chosen (no userPasswordHash in /data/settings.json): 123456 no longer signs
+  in, and a password changed in WebObsidian is never touched. It is not handed
+  over as WEBOBSIDIAN_PASSWORD, which WebObsidian accepts as a recovery
+  password forever, even after a change. Everything else is the repository's
+  compose file.
+credentials:
+  login_path: /
+  fields:
+    WEBOBSIDIAN_LOGIN_PASSWORD: {kind: password}

@@ -1,0 +1,14 @@
+# Layers over the repository's docker-compose.yml: only the login changes.
+services:
+  webobsidian:
+    env_file:
+      # WEBOBSIDIAN_LOGIN_PASSWORD, the password the engine generates.
+      - ../.panelalpha/app-credentials.env
+    # Seeds the engine's password while WebObsidian still signs in with its
+    # default 123456, then runs the image's own command.
+    command:
+      - /bin/sh
+      - -c
+      - '[ -z "$${WEBOBSIDIAN_LOGIN_PASSWORD:-}" ] || node panelalpha-webobsidian-login.mjs || echo "[panelalpha] webobsidian: could not set the login; it stays 123456" >&2; exec node server/dist/index.js'
+    volumes:
+      - ./panelalpha-webobsidian-login.mjs:/app/panelalpha-webobsidian-login.mjs:ro
