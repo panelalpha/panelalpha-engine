@@ -13,9 +13,23 @@ description: >-
   README's compose example does, with /app/data on a named volume that
   survives redeploys.
 
-  First run is left as upstream ships it: the /ui login is the built-in
-  default (admin / jellyswarrm) unless JELLYSWARRM_USERNAME and
-  JELLYSWARRM_PASSWORD are set in the project's environment variables. The
-  public address Jellyfin clients are handed (localhost:3000 by default) is
-  set in /ui settings: upstream reads env keys with "_" as the nesting
-  separator, so JELLYSWARRM_PUBLIC_ADDRESS does not reach public_address.
+  Upstream's /ui admin login is the built-in default admin / jellyswarrm,
+  which nobody deploying it is told and anyone with the address could use,
+  unless JELLYSWARRM_USERNAME and JELLYSWARRM_PASSWORD are set. So the engine
+  generates them (`credentials:` below, returned by GET
+  /projects/{name}/app-credentials) and the compose file hands them to the
+  container from ~/.panelalpha/app-credentials.env; Jellyswarrm reads them
+  over jellyswarrm.toml on every start, its own documented way to set the
+  admin. The admin login has no form in /ui to change it, so nothing in the
+  app is overwritten; the project's own JELLYSWARRM_USERNAME /
+  JELLYSWARRM_PASSWORD still win, and the engine then reports those. Keep the
+  password once servers are added: Jellyswarrm encrypts the stored Jellyfin
+  passwords with it. The public address Jellyfin clients are handed
+  (localhost:3000 by default) is set in /ui settings: upstream reads env keys
+  with "_" as the nesting separator, so JELLYSWARRM_PUBLIC_ADDRESS does not
+  reach public_address.
+credentials:
+  login_path: /ui/login
+  fields:
+    JELLYSWARRM_USERNAME: {kind: username}
+    JELLYSWARRM_PASSWORD: {kind: password}

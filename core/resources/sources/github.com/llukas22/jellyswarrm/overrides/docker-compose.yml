@@ -5,7 +5,10 @@ services:
     image: ghcr.io/llukas22/jellyswarrm:0.3.0@sha256:1d61193d34035dee9acf6b5d9388721867dff74fc64ec0f2c7a87b7ff075b9f5
     restart: unless-stopped
     env_file:
-      # The project's environment variables (e.g. JELLYSWARRM_USERNAME/PASSWORD).
+      # JELLYSWARRM_USERNAME / JELLYSWARRM_PASSWORD, the login the engine
+      # generates; Jellyswarrm reads them over jellyswarrm.toml on every start.
+      - ../.panelalpha/app-credentials.env
+      # The project's environment variables, last so they still win.
       - path: .env
         required: false
     volumes:
