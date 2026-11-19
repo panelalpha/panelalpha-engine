@@ -1446,6 +1446,34 @@ YAML, true, null, 'foodcoops/foodsoft');
         $this->assertSame('redis://:' . $redisPassword . '@redis:6379/0', $result['env']['REDIS_URL']);
     }
 
+    /** ocean_ctf: the server got the generated password and its own check `redis-cli -a ''` answered WRONGPASS. */
+    public function test_a_kept_sidecars_health_check_gets_the_same_generated_secret(): void
+    {
+        $yaml = <<<'YAML'
+        services:
+          redis:
+            image: redis:6
+            command: redis-server --requirepass ${REDIS_PASSWORD}
+            healthcheck:
+              test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+              interval: 10s
+          cache:
+            image: redis:7
+            command: redis-server --requirepass ${CACHE_PASSWORD}
+            healthcheck:
+              test: redis-cli -a ${CACHE_PASSWORD} ping
+        YAML;
+
+        $result = RuntimeSidecars::fromYaml($yaml, true, null, 'github.com/hexbay/ocean_ctf', null, 'account-seed');
+
+        $redisPassword = ComposePlaceholders::requiredSecretValue('REDIS_PASSWORD', 'account-seed');
+        $cachePassword = ComposePlaceholders::requiredSecretValue('CACHE_PASSWORD', 'account-seed');
+        $this->assertSame('redis-server --requirepass ' . $redisPassword, $result['services']['redis']['command']);
+        $this->assertSame(['CMD', 'redis-cli', '-a', $redisPassword, 'ping'], $result['services']['redis']['healthcheck']['test']);
+        $this->assertSame('10s', $result['services']['redis']['healthcheck']['interval']);
+        $this->assertSame('redis-cli -a ' . $cachePassword . ' ping', $result['services']['cache']['healthcheck']['test']);
+    }
+
     public function test_a_bare_secret_the_projects_env_sets_is_left_for_compose(): void
     {
         $result = RuntimeSidecars::fromYaml(

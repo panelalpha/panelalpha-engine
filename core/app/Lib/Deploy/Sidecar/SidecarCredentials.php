@@ -204,8 +204,9 @@ class SidecarCredentials
     }
 
     /**
-     * A kept sidecar's bare `${SECRET}` in `environment:` or `command:` that nothing sets, given a generated value:
-     * Compose would pass '', and redis refuses an empty `--requirepass`, meilisearch an empty production master key.
+     * A kept sidecar's bare `${SECRET}` in `environment:`, `command:` or `healthcheck.test` that nothing sets, given
+     * one generated value: Compose would pass '', redis refuses an empty `--requirepass`, meilisearch an empty
+     * production master key, and a `redis-cli -a ${REDIS_PASSWORD}` check left empty is refused by the server.
      *
      * @param  array<string, mixed>  $service
      * @param  array<string, list<?string>|string>  $env  what compose may interpolate the file with
@@ -220,6 +221,7 @@ class SidecarCredentials
 
         $service = self::withEnvironmentFilled($service, $fill);
         $service = self::withCommandFilled($service, $fill);
+        $service = self::withHealthcheckFilled($service, $fill);
 
         return [$service, $generated];
     }
@@ -293,17 +295,41 @@ class SidecarCredentials
      */
     private static function withCommandFilled(array $service, \Closure $fill): array
     {
-        $command = $service['command'] ?? null;
-        if (is_string($command)) {
-            $service['command'] = $fill($command, null);
-        } elseif (is_array($command)) {
-            $service['command'] = array_map(
-                static fn (mixed $part): mixed => is_string($part) ? $fill($part, null) : $part,
-                $command
-            );
+        if (array_key_exists('command', $service)) {
+            $service['command'] = self::filledArgv($service['command'], $fill);
         }
 
         return $service;
+    }
+
+    /**
+     * @param  array<string, mixed>  $service
+     * @param  \Closure(string, ?string): string  $fill
+     * @return array<string, mixed>
+     */
+    private static function withHealthcheckFilled(array $service, \Closure $fill): array
+    {
+        if (! is_array($service['healthcheck'] ?? null) || ! array_key_exists('test', $service['healthcheck'])) {
+            return $service;
+        }
+        $service['healthcheck']['test'] = self::filledArgv($service['healthcheck']['test'], $fill);
+
+        return $service;
+    }
+
+    /**
+     * @param  \Closure(string, ?string): string  $fill
+     */
+    private static function filledArgv(mixed $argv, \Closure $fill): mixed
+    {
+        if (is_string($argv)) {
+            return $fill($argv, null);
+        }
+        if (! is_array($argv)) {
+            return $argv;
+        }
+
+        return array_map(static fn (mixed $part): mixed => is_string($part) ? $fill($part, null) : $part, $argv);
     }
 
     /**
