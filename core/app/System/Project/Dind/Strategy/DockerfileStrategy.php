@@ -7,6 +7,7 @@ use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Compose\RepositoryAppTerminal;
 use App\Lib\Deploy\Detect\DockerfileFinder;
+use App\Lib\Deploy\Detect\DockerfileStages;
 use App\Lib\Deploy\Source\GitUrl;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Paths;
@@ -103,6 +104,7 @@ class DockerfileStrategy
         return [
             'build_args' => $this->buildArgs($decision),
             'build_cache_from' => (new ProjectBuildCache($this->dind))->cacheFrom($projectDir, $dockerfile),
+            'build_target' => $this->buildTarget($projectDir, $dockerfile),
             'env' => array_merge(
                 ComposeHarden::urlEnvironment($this->dind->publicAppUrl(), [
                     $this->dind->projectTree()->readIn($projectDir, '.env'),
@@ -115,6 +117,22 @@ class DockerfileStrategy
             'dockerfile_volumes' => $this->declaredVolumes($projectDir, $dockerfile),
         ] + (isset($database['extra_hosts']) ? ['extra_hosts' => $database['extra_hosts']] : [])
             + $this->terminal($projectDir, $dockerfile);
+    }
+
+    /**
+     * {@see DockerfileStages::productionTarget()}, logged; null builds the last stage, as Docker does.
+     */
+    private function buildTarget(string $projectDir, string $dockerfile): ?string
+    {
+        $contents = $this->dind->projectTree()->readIn($projectDir, $dockerfile);
+        $target = $contents === null ? null : DockerfileStages::productionTarget($contents);
+        if ($target !== null) {
+            $this->dind->shell()->logger()?->info(
+                "Building stage {$target} of {$dockerfile}: the last stage is a development one, and {$target} starts the app"
+            );
+        }
+
+        return $target;
     }
 
     /**

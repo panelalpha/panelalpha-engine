@@ -94,6 +94,7 @@ class DeployCompose
      * @param array{
      *   build_args?: array<string, string>,
      *   build_cache_from?: list<string>,
+     *   build_target?: string,
      *   env?: array<string, string|int>,
      *   sidecars?: array<string, array<string, mixed>>,
      *   volumes?: array<string, mixed>,
@@ -106,7 +107,8 @@ class DeployCompose
             'build' => self::buildContext(
                 $dockerfile,
                 ComposeValues::stringMap($decision['build_args'] ?? null),
-                ComposeValues::stringList($decision['build_cache_from'] ?? null)
+                ComposeValues::stringList($decision['build_cache_from'] ?? null),
+                is_string($decision['build_target'] ?? null) ? $decision['build_target'] : null
             ),
             'ports' => [self::hostPortFor($port).':'.$port],
             'restart' => 'unless-stopped',
@@ -523,15 +525,18 @@ class DeployCompose
      * @param  list<string>  $cacheFrom  {@see BuildCache::cacheFrom()}
      * @return array<string, mixed>|string `.` when the file is the default one
      */
-    private static function buildContext(string $dockerfile, array $args = [], array $cacheFrom = []): array|string
+    private static function buildContext(string $dockerfile, array $args = [], array $cacheFrom = [], ?string $target = null): array|string
     {
-        if ($dockerfile === 'Dockerfile' && $args === [] && $cacheFrom === []) {
+        if ($dockerfile === 'Dockerfile' && $args === [] && $cacheFrom === [] && $target === null) {
             return '.';
         }
 
         $build = ['context' => '.'];
         if ($dockerfile !== 'Dockerfile') {
             $build['dockerfile'] = $dockerfile;
+        }
+        if ($target !== null) {
+            $build['target'] = $target;
         }
         if ($args !== []) {
             $build['args'] = $args;

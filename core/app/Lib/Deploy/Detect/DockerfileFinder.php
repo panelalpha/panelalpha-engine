@@ -90,6 +90,7 @@ final class DockerfileFinder
      */
     public static function exposedPortIn(string $contents): ?int
     {
+        $contents = self::servedStage($contents);
         $declared = self::exposedDeclarations($contents);
         if ($declared === []) {
             return null;
@@ -107,6 +108,14 @@ final class DockerfileFinder
         }
 
         return $declared[0][0];
+    }
+
+    /** The stage the deploy builds ({@see DockerfileStages}) when it declares a port of its own, else the whole file. */
+    private static function servedStage(string $contents): string
+    {
+        $stage = DockerfileStages::stageText($contents, DockerfileStages::productionTarget($contents));
+
+        return $stage !== $contents && self::exposedDeclarations($stage) !== [] ? $stage : $contents;
     }
 
     /** The port the last `HEALTHCHECK` fetches an HTTP URL from on the container's loopback; null when it does not. */
