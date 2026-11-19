@@ -1,0 +1,13 @@
+# Layers over the compose file the dockerfile strategy generates (service `app`,
+# the repository's Dockerfile, env_file .env).
+services:
+  app:
+    env_file:
+      - .env
+      # OPH_ADMIN_EMAIL / OPH_ADMIN_PASSWORD, generated and kept by the engine;
+      # panelalpha/oph-start.sh writes them into the first config.
+      - ../.panelalpha/app-credentials.env
+    # The image's own command, ./exec/open-payment-host, after the first config.
+    command: ["/bin/sh", "/panelalpha/oph-start.sh", "./exec/open-payment-host"]
+    volumes:
+      - ./panelalpha:/panelalpha:ro

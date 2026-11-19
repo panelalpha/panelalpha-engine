@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Open Payment Host, a storefront for subscriptions and digital goods (Stripe,
+  Square, PayPal, Razorpay): one Go binary with SQLite, its config in
+  secrets/fragmenta.json. The engine builds the repository's Dockerfile (its
+  docker-compose.yml mounts the checkout). On the first start the binary
+  writes that config with admin_email admin@openpaymenthost.com and
+  admin_default_password OpenPaymentHost, both published in its README, and
+  creates the admin from them, so every deploy signed in with a published
+  login. So the engine generates the admin's login (`credentials:` below,
+  returned by GET /projects/{name}/app-credentials) and
+  files/panelalpha/oph-start.sh, while there is no config yet, has the binary
+  write its config in a scratch directory (where it stops before serving),
+  puts the generated login in its admin_email and admin_default_password and
+  moves it into place; the binary then creates the admin from it as upstream
+  does. As upstream, signing in with the default password asks for a new one
+  first; a password changed in the app is never touched.
+credentials:
+  login_path: /users/login
+  fields:
+    OPH_ADMIN_EMAIL: {kind: email}
+    OPH_ADMIN_PASSWORD: {kind: password}
