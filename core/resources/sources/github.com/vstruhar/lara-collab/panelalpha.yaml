@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LaraCollab, project management on Laravel 13, Inertia and React (MySQL).
+  The laravel recipe deploys it as is; only its first admin is missing.
+  Upstream makes it with `php artisan migrate --seed`: the DatabaseSeeder
+  makes the roles, permissions, labels, priorities, currencies and countries,
+  then (answering no to "Seed development data?") the admin from ADMIN_EMAIL /
+  ADMIN_PASSWORD, which .env.example publishes as admin@mail.com / password.
+  The laravel recipe runs migrate without --seed, so the database had no
+  roles and no user and the login at /login had no account to sign in with;
+  there is no sign-up.
+
+  So the engine generates the admin's login (`credentials:` below, returned
+  by GET /projects/{name}/app-credentials) and panelalpha/laracollab-admin.php,
+  after migrate and only while the database has no user at all, runs
+  upstream's own seeders with that login in place of ADMIN_EMAIL /
+  ADMIN_PASSWORD. The published admin is never created (one still found with
+  its published password gets the generated login), and a password changed in
+  the app is never touched. The development data is not seeded: its seeders
+  need Faker, a dev dependency the build does not install.
+extends: laravel
+commands:
+  # Appended after the laravel recipe's install and upgrade commands, so it
+  # runs once migrate has made the tables.
+  - id: laracollab-admin
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Upstream's seeders and the first admin from the login the engine
+      generated, only while the database has no user, so an account changed
+      or added in the app is never touched.
+    run: 'php panelalpha/laracollab-admin.php'
+credentials:
+  login_path: /login
+  fields:
+    # Not admin@example.com: the profile form validates the email with
+    # email:rfc,dns, and example.com's null MX fails it, so the admin could
+    # not save the profile (nor a new password) with that address.
+    LARACOLLAB_ADMIN_EMAIL: {kind: email, value: 'admin@{host}'}
+    LARACOLLAB_ADMIN_PASSWORD: {kind: password}

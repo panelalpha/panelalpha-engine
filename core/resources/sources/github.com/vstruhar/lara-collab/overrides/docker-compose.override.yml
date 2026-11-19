@@ -1,0 +1,10 @@
+# Layers over the compose file the laravel strategy generates (the shared PHP
+# base image, ~/project at /app, the account's uid, the db sidecar and APP_URL).
+services:
+  app:
+    # LARACOLLAB_ADMIN_EMAIL / LARACOLLAB_ADMIN_PASSWORD, generated and kept by
+    # the engine; panelalpha/laracollab-admin.php creates the first admin from
+    # them.
+    env_file:
+      - .env
+      - ../.panelalpha/app-credentials.env
