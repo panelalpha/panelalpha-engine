@@ -46,6 +46,14 @@ class ComposePlaceholders
     /** A blank for a credential another service issues (BROKER_API_SECRET) is left blank, not invented. */
     private const ISSUED_CREDENTIAL_PATTERN = '/API_?(KEY|SECRET)/i';
 
+    /** Names an app signs, hashes or encrypts with by itself; a template's empty one is set by no one. */
+    private const OWN_SIGNING_KEY_PATTERN = '/(^|_)(SECRET|SECRET_KEY|SECRET_KEY_BASE|ENCRYPTION_KEY|SIGNING_KEY|SIGNING_SECRET|SALT|PEPPER)$/i';
+
+    /** A word naming an integration: its empty secret keeps that integration off, so it stays empty. */
+    private const INTEGRATION_WORD_PATTERN = '/(^|_)(CLIENT|CONSUMER|OAUTH|OIDC|SAML|LDAP|SSO|CAPTCHA|RECAPTCHA|HCAPTCHA|TURNSTILE|'
+        .'STRIPE|PAYPAL|GITHUB|GITLAB|GOOGLE|FB|FACEBOOK|TWITTER|DISCORD|SLACK|TELEGRAM|TWILIO|SENDGRID|MAILGUN|SMTP|MAIL|'
+        .'AWS|S3|R2|GCS|AZURE|MINIO|STORAGE|BUCKET|SUPABASE|FIREBASE|CLERK|AUTH0|OKTA|SENTRY|PUSHER|ALGOLIA|OPENAI|WEBHOOK)(_|$)/i';
+
     /** change-this-to-a-secure-random-string, your-jwt-secret-here. */
     private const PUBLISHED_SECRET_PHRASE = '/^(?:(?:change|replace)[-_ ]?(?:this|me|it)[-_ ]|replace[-_ ]with[-_ ]|your[-_ ].*[-_ ](?:here|secret|key)$|generate[-_ ])/';
 
@@ -371,6 +379,19 @@ class ComposePlaceholders
             || preg_match('/^x{3,}$/', $value) === 1
             || preg_match('/^(django-)?insecure/', $value) === 1
             || preg_match('/^(.)\1{7,}$/', $value) === 1;
+    }
+
+    /**
+     * An empty value a template leaves for the app's own signing key (prisma-editor's NEXTAUTH_SECRET="",
+     * streamystats' SESSION_SECRET=): copied as is, the key is set to nothing and the app refuses to build or start.
+     * A secret of an integration (RECAPTCHA_SECRET, STRIPE_SECRET_KEY, GITHUB_SECRET) is left empty, which keeps it off.
+     */
+    public static function isBlankOwnSecret(string $key, string $value): bool
+    {
+        return trim(trim($value), '"\'') === ''
+            && preg_match(self::OWN_SIGNING_KEY_PATTERN, $key) === 1
+            && preg_match(self::INTEGRATION_WORD_PATTERN, $key) !== 1
+            && preg_match(self::THIRD_PARTY_KEY_PATTERN, $key) !== 1;
     }
 
     /** A key the app signs or encrypts with itself, not a credential another service issues. */

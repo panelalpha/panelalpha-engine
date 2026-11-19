@@ -166,6 +166,31 @@ class EnvExampleBlanksTest extends TestCase
         $this->assertMatchesRegularExpression('/^[0-9a-f]{48}$/', $this->values($filled)['FERNET_SALT'] ?? '');
     }
 
+    /**
+     * prisma-editor's NEXTAUTH_SECRET="" reached its build as an empty build arg ("Invalid environment variables"),
+     * streamystats' SESSION_SECRET= its start; the comment above says what shape the key takes.
+     */
+    public function test_an_empty_own_signing_key_is_generated_in_the_shape_its_comment_asks_for(): void
+    {
+        $template = "DATABASE_URL=\"\"\nNEXTAUTH_SECRET=\"\"\n\n# Session signing secret\n# Generate with: openssl rand -base64 32\n"
+            ."SESSION_SECRET=\n# openssl rand -hex 32\nPAD_ENCRYPTION_KEY=\nGITHUB_CLIENT_SECRET=\"\"\nRECAPTCHA_SECRET_KEY=\n"
+            ."STRIPE_SECRET_KEY=\nDB_PASSWORD=\nANCHR_FB_SECRET=\nSECRET_KEY=kept-as-written\n";
+
+        [$filled, $keys] = ProjectEnvironment::withBlankOwnSecretsFilled($template, 'seed-for-tests');
+        $values = $this->values($filled);
+
+        $this->assertSame(['NEXTAUTH_SECRET', 'SESSION_SECRET', 'PAD_ENCRYPTION_KEY'], $keys);
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{48}$/', $values['NEXTAUTH_SECRET']);
+        $this->assertSame(32, strlen((string) base64_decode($values['SESSION_SECRET'], true)));
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $values['PAD_ENCRYPTION_KEY']);
+        foreach (['DATABASE_URL', 'GITHUB_CLIENT_SECRET', 'RECAPTCHA_SECRET_KEY', 'STRIPE_SECRET_KEY', 'DB_PASSWORD', 'ANCHR_FB_SECRET'] as $key) {
+            $this->assertSame('', $values[$key], "{$key} configures something else and stays empty");
+        }
+        $this->assertSame('kept-as-written', $values['SECRET_KEY']);
+        $this->assertSame($filled, ProjectEnvironment::withBlankOwnSecretsFilled($template, 'seed-for-tests')[0]);
+        $this->assertSame([], ProjectEnvironment::withBlankOwnSecretsFilled($template, 's', ['NEXTAUTH_SECRET' => 'x', 'SESSION_SECRET' => 'y', 'PAD_ENCRYPTION_KEY' => 'z'])[1]);
+    }
+
     public function test_a_third_party_credential_left_blank_is_still_not_invented(): void
     {
         $this->assertFalse(ComposePlaceholders::isPublishedSecret('STRIPE_API_KEY', 'YOUR_STRIPE_API_KEY'));

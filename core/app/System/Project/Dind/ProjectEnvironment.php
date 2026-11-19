@@ -292,6 +292,10 @@ class ProjectEnvironment
             $logger?->info("Replaced the published placeholder in {$key} from {$exampleName} with a generated secret");
         }
         self::logShapedSecrets($shaped, $exampleName, $logger);
+        [$contents, $filled] = self::withBlankOwnSecretsFilled($contents, $this->secretSeed(), $overrides);
+        if ($filled !== []) {
+            $logger?->info("Generated the app's own signing secrets {$exampleName} leaves empty: ".implode(', ', $filled));
+        }
         $contents = $this->withoutComposeDefaultedKeys($contents);
         $contents = $this->fillPublicUrlBlanks($contents, $exampleName, $overrides, $logger);
         [$contents, $blanks] = self::withoutTemplatePlaceholders($contents, $overrides);
@@ -951,6 +955,38 @@ class ProjectEnvironment
         return $generated === []
             ? [$contents, []]
             : [EnvFile::merge($contents, $generated), array_keys($generated)];
+    }
+
+    /**
+     * The app's own signing keys a template leaves empty ({@see ComposePlaceholders::isBlankOwnSecret()}), given a
+     * seeded secret in the shape the comment above asks for (`openssl rand -hex 32`, `-base64 32`). Keys the account
+     * set are left to its env_vars.
+     *
+     * @param  array<string, string>  $overrides
+     * @return array{0: string, 1: list<string>} contents, the keys filled
+     */
+    public static function withBlankOwnSecretsFilled(string $contents, string $seed, array $overrides = []): array
+    {
+        $filled = [];
+        $comment = '';
+        foreach (EnvFile::parse($contents) as $row) {
+            $key = self::variableKey($row);
+            if ($key !== '' && ! isset($overrides[$key])
+                && ComposePlaceholders::isBlankOwnSecret($key, (string) ($row['value'] ?? ''))
+            ) {
+                $filled[$key] = ComposePlaceholders::requiredSecretValue(
+                    $key,
+                    $seed,
+                    ComposePlaceholders::hintedLength($comment),
+                    ComposePlaceholders::hintedBase64Bytes($comment)
+                );
+            }
+            $comment = ($row['type'] ?? '') === 'comment' ? $comment.' '.(string) ($row['text'] ?? '') : '';
+        }
+
+        return $filled === []
+            ? [$contents, []]
+            : [EnvFile::merge($contents, $filled), array_keys($filled)];
     }
 
     /**
