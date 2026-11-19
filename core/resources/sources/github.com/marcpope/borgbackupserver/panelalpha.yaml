@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Borg Backup Server, a web console for borg backups (PHP on Apache with
+  MariaDB, ClickHouse and sshd in the published marcpope/borgbackupserver
+  image, all data on the bbs-data volume). The repository's
+  docker-compose.yml runs that image and the engine runs it as is. On a
+  fresh install the image's entrypoint gives the built-in `admin` the
+  password in ADMIN_PASS, or, with none set (the compose file leaves it
+  commented out), a random one it prints only to the container log, so
+  nobody deploying it could sign in. So the engine generates the password
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials)
+  and overrides/docker-compose.override.yml hands it to the container as
+  ADMIN_PASS. The entrypoint only uses it on a fresh install, so a password
+  changed in the app is never overwritten on a restart or redeploy.
+  Everything else is the repository's compose file.
+credentials:
+  login_path: /login
+  fields:
+    # The entrypoint always names its admin `admin`; this field only reports it.
+    BBS_ADMIN_USER: {kind: username, value: admin}
+    ADMIN_PASS: {kind: password}

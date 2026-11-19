@@ -1,0 +1,8 @@
+# Layers over the repository's docker-compose.yml: only the login changes.
+services:
+  bbs:
+    env_file:
+      # ADMIN_PASS, the password the engine generates for the built-in `admin`.
+      # The image's entrypoint sets it on that admin on a fresh install only
+      # (it prints a random one to the log when ADMIN_PASS is empty).
+      - ../.panelalpha/app-credentials.env
