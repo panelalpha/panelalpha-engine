@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Hisabi, a personal finance tracker (Laravel 12, Inertia and React, MySQL).
+  The laravel recipe deploys it as is; only its user is missing. Hisabi has
+  no sign-up: upstream makes the one user with `php artisan hisabi:install`,
+  an interactive command on the server (its install.sh runs it from a
+  terminal), so a new instance was a sign-in form nobody could pass.
+
+  So the engine generates the login (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials) and panelalpha/hisabi-admin.php,
+  after migrate and only while the database has no user at all, does what
+  hisabi:install does with its default answers: db:seed (the default
+  categories and brands, which it offers with "yes" preselected) and the user
+  from that login, its password bcrypt-hashed as the command hashes it. A
+  password changed in the app is never touched.
+extends: laravel
+commands:
+  # Appended after the laravel recipe's install and upgrade commands, so it
+  # runs once migrate has made the tables.
+  - id: hisabi-admin
+    stage:
+      - install
+      - upgrade
+    description: >-
+      What hisabi:install does, with the login the engine generated and its
+      default seeding, only while the database has no user, so an account
+      changed in the app is never touched.
+    run: 'php panelalpha/hisabi-admin.php'
+credentials:
+  login_path: /login
+  fields:
+    HISABI_ADMIN_EMAIL: {kind: email}
+    HISABI_ADMIN_PASSWORD: {kind: password}

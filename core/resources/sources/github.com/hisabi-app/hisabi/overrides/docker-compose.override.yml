@@ -1,0 +1,9 @@
+# Layers over the compose file the laravel strategy generates (the shared PHP
+# base image, ~/project at /app, the account's uid, the db sidecar and APP_URL).
+services:
+  app:
+    # HISABI_ADMIN_EMAIL / HISABI_ADMIN_PASSWORD, generated and kept by the
+    # engine; panelalpha/hisabi-admin.php creates the user from them.
+    env_file:
+      - .env
+      - ../.panelalpha/app-credentials.env
