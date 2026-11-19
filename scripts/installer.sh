@@ -20,7 +20,7 @@ die() {
     ! declare -F start_core_tenant_network >/dev/null || start_core_tenant_network
     ! declare -F resume_broker_rotation >/dev/null || resume_broker_rotation
     ! declare -F record_run_outcome >/dev/null || record_run_outcome "$exit_code" || true
-    send_update_status "$exit_code" || true
+    ! declare -F send_update_status >/dev/null || send_update_status "$exit_code" || true
 }
 
 set -e

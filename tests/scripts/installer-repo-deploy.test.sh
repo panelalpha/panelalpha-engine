@@ -587,6 +587,10 @@ outro=$(finish_run 0)
 expect 'engine install mints a Claude Code token' '1' "$(grep -c 'mcp:connect:claude' "$DOCKER_LOG")"
 expect 'engine install ends with the command to paste' '1' "$(printf '%s\n' "$outro" | grep -c 'Run this in your Claude Code')"
 
+help_err=$(bash "${SCRIPT_DIR}/installer.sh" --help 2>&1 >/dev/null)
+expect '--help exits 0' '0' "$?"
+expect '--help prints no error' '' "$help_err"
+
 echo
 if [ "$failures" -eq 0 ]; then
     echo "All tests passed."
