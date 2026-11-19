@@ -94,6 +94,9 @@ final class AppLauncher
         if ($pulled !== null) {
             return $pulled;
         }
+        if (! $skipBuild && $this->pullPublishedBuilds()) {
+            $skipBuild = true;
+        }
 
         $reloadAfterReclaim = fn () => $this->preloadImages($strategy, $runtime, $skipBuild, $model->getDeployImage(), afterReclaim: true);
 
@@ -467,6 +470,58 @@ final class AppLauncher
             "An image the new version needs could not be pulled; the previous version is still serving.\n".$process->getErrorOutput(),
             (int) $process->getExitCode()
         );
+    }
+
+    /**
+     * A project that publishes the image it builds (`build:` beside `image:` and `pull_policy: missing`, as the
+     * engine's own stack does) starts from the registry's copy of that tag when the registry has it, and is
+     * built when it has not: a branch, or a version not published yet. Always asked of the registry, never
+     * answered by a copy an earlier build left under the same tag, which holds that build's code, not this one's.
+     */
+    private function pullPublishedBuilds(): bool
+    {
+        $config = ZeroDowntimeRedeploy::composeConfig($this->project);
+        $services = $config === null ? [] : self::publishedBuilds($config);
+        if ($services === []) {
+            return false;
+        }
+        $names = implode(', ', $services);
+        $process = $this->run(
+            $this->composeWithLogins(array_merge(['pull'], $services)),
+            "Pulling the published image of {$names} (docker compose pull)"
+        );
+        if ($process->getExitCode() === 0) {
+            return true;
+        }
+        $this->project->shell()->logger()?->info("No published image of {$names} could be pulled; building it from the project");
+
+        return false;
+    }
+
+    /**
+     * The services that build an image they also publish: `build:`, a non-empty `image:` and
+     * `pull_policy: missing`. Empty unless every service that builds is one, since a single
+     * `up --no-build` then starts them all.
+     *
+     * @param  array<string, mixed>  $compose
+     * @return list<string>
+     */
+    public static function publishedBuilds(array $compose): array
+    {
+        $services = is_array($compose['services'] ?? null) ? $compose['services'] : [];
+        $published = [];
+        foreach ($services as $name => $service) {
+            if (! is_array($service) || ! isset($service['build'])) {
+                continue;
+            }
+            $image = $service['image'] ?? null;
+            if (! is_string($image) || trim($image) === '' || ($service['pull_policy'] ?? null) !== 'missing') {
+                return [];
+            }
+            $published[] = (string) $name;
+        }
+
+        return $published;
     }
 
     /**
