@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  RUSEON Core, a video surveillance and stream server (one Go binary with its
+  React UI embedded, BadgerDB under /app/data). The repository's
+  docker-compose.yml builds its Dockerfile and the engine runs it as is. On a
+  database with no user the server creates the admin `admin` with a random
+  password and prints it only to its log, which nobody deploying it is told,
+  and it has no setting for that password. So the engine generates a login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
+  overrides/docker-compose.override.yml runs an admin-seed one-shot before the
+  server: files/panelalpha/ruseon-core/seed, built inside the repository's own
+  module, creates that admin through the app's storage package and user model
+  while the database has no user. The server then finds one and generates no
+  password of its own; a password changed in RUSEON Core is never touched.
+  BadgerDB is one process at a time, which is why the seed runs to completion
+  before the server starts. A failure there leaves the server to generate its
+  admin as before, with a log line. Everything else is the repository's
+  compose file.
+credentials:
+  login_path: /
+  fields:
+    RUSEON_ADMIN_USERNAME: {kind: username}
+    RUSEON_ADMIN_PASSWORD: {kind: password}

@@ -1,0 +1,22 @@
+# Layers over the repository's docker-compose.yml: only the first admin changes.
+services:
+  # One-shot, before the server: creates the admin from the login the engine
+  # generates while the database has no user (panelalpha/ruseon-core/seed).
+  # BadgerDB is one process at a time, which is why it runs to completion
+  # before the server starts rather than beside it.
+  admin-seed:
+    build:
+      context: .
+      dockerfile: panelalpha/ruseon-core/seed.Dockerfile
+    restart: "no"
+    env_file:
+      # RUSEON_ADMIN_USERNAME / RUSEON_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
+    volumes:
+      - ruseon_core_data:/app/data
+    mem_limit: 128m
+
+  ruseon-core:
+    depends_on:
+      admin-seed:
+        condition: service_completed_successfully
