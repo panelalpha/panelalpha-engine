@@ -1,0 +1,24 @@
+# Compose-replace: the repository's compose file is a workstation one (./conf and
+# ./db bind mounts), which the engine already replaces with the dockerfile strategy.
+# Builds its Dockerfile as that strategy would, with the engine's login.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "9998:9998"
+    entrypoint: ["/bin/sh", "/panelalpha-fredy-start.sh"]
+    # An entrypoint set here clears the image's CMD.
+    command: ["node", "index.js"]
+    env_file:
+      # FREDY_ADMIN_USERNAME / FREDY_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
+    volumes:
+      - fredy-db:/db
+      - fredy-conf:/conf
+      - ./panelalpha-fredy-start.sh:/panelalpha-fredy-start.sh:ro
+      - ./panelalpha-fredy-login.mjs:/fredy/panelalpha-fredy-login.mjs:ro
+
+volumes:
+  fredy-db: {}
+  fredy-conf: {}

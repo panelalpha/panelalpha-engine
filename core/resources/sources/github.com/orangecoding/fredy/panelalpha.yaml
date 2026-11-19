@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Fredy, a real estate finder (Node.js, SQLite under /db, config under /conf).
+  The repository's Dockerfile is how upstream ships it; its compose file is a
+  workstation one (./conf and ./db bind mounts), so the engine built the
+  Dockerfile instead. A new database gets Fredy's built-in admin with the
+  password `admin`, which nobody deploying it is told and anyone with the
+  address could use. So the engine generates a login (`credentials:` below,
+  returned by GET /projects/{name}/app-credentials) and
+  files/panelalpha-fredy-start.sh runs files/panelalpha-fredy-login.mjs before
+  Fredy's own entrypoint: with Fredy's own modules it migrates the database,
+  lets Fredy create its admin, and sets the engine's username and password on
+  it only while it still has the default password, so a password changed in
+  Fredy is never touched. The compose file is the generated one plus the login
+  and that wrapper; /db and /conf stay on named volumes, as the Dockerfile
+  declares them.
+credentials:
+  login_path: /#/login
+  fields:
+    FREDY_ADMIN_USERNAME: {kind: username}
+    FREDY_ADMIN_PASSWORD: {kind: password}
