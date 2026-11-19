@@ -16,7 +16,7 @@ trap 'rm -rf "$W"' EXIT
 # download and unzip steps run.
 sed -n '/^ENGINE_HOST_STATE=(/,/^)$/p' "$SCRIPT_DIR/installer.sh" >"$W/funcs.sh"
 for fn in download_engine_from_repository engine_host_state list_dropped_engine_files list_shipped_modsecurity_rules \
-    remove_dropped_engine_files unzip_panelalpha_engine; do
+    running_bind_sources place_mounted_engine_files remove_dropped_engine_files unzip_panelalpha_engine; do
     sed -n "/^${fn}() {/,/^}\$/p" "$SCRIPT_DIR/installer.sh" >>"$W/funcs.sh"
 done
 # shellcheck source=/dev/null
@@ -216,6 +216,50 @@ git -C "$REPO" archive side | tar -x -C "$W/root2"
 out=$(PATH="$W/nogit:$PATH" remove_dropped_engine_files "$W/list" "$W/root2")
 check "no hash: kept, and said" "yes|1" \
     "$(there "$W/root2/core/app/Console/Commands/Api/Call.php")|$(grep -cxF 'Kept core/app/Console/Commands/Api/Call.php: could not hash it' <<<"$out")"
+
+# A file a running container mounts stays while its service may still load it; the next update removes it.
+git -C "$REPO" archive side | tar -x -C "$W/root2"
+mkdir -p "$W/mounts" "$W/nomounts"
+cat >"$W/mounts/docker" <<STUB
+#!/bin/sh
+case "\$1" in
+ps) echo c1 ;;
+inspect) echo "$W/root2/core/app/Console/Commands/Api/Call.php" ;;
+esac
+STUB
+printf '#!/bin/sh\nexit 0\n' >"$W/nomounts/docker"
+chmod +x "$W/mounts/docker" "$W/nomounts/docker"
+out=$(PATH="$W/mounts:$PATH" remove_dropped_engine_files "$W/list" "$W/root2")
+check "a file a running container mounts stays, and is said" "yes|1" \
+    "$(there "$W/root2/core/app/Console/Commands/Api/Call.php")|$(grep -cxF 'Kept core/app/Console/Commands/Api/Call.php: a running container mounts it' <<<"$out")"
+check "the files nothing mounts go all the same" "no" "$(there "$W/root2/core/app/Side.php")"
+out=$(PATH="$W/nomounts:$PATH" remove_dropped_engine_files "$W/list" "$W/root2")
+check "once nothing mounts it, the next update removes it" "no|1" \
+    "$(there "$W/root2/core/app/Console/Commands/Api/Call.php")|$(grep -cxF 'Removed core/app/Console/Commands/Api/Call.php' <<<"$out")"
+
+# A library a running container mounts is never written into: a changed one is renamed into place, the same one stays.
+mkdir -p "$W/m/src/lib" "$W/m/eng/lib" "$W/m/bin"
+printf 'old' >"$W/m/eng/lib/changed.so" && printf 'new' >"$W/m/src/lib/changed.so"
+printf 'same' >"$W/m/eng/lib/same.so" && printf 'same' >"$W/m/src/lib/same.so"
+printf 'old' >"$W/m/eng/lib/free.so" && printf 'new' >"$W/m/src/lib/free.so"
+cat >"$W/m/bin/docker" <<STUB
+#!/bin/sh
+case "\$1" in
+ps) echo c1 ;;
+inspect) printf '%s\n' "$W/m/eng/lib/changed.so" "$W/m/eng/lib/same.so" "$W/m/eng/lib" /etc/hosts ;;
+esac
+STUB
+chmod +x "$W/m/bin/docker"
+inode() { stat -c %i "$1"; }
+changed_before=$(inode "$W/m/eng/lib/changed.so") same_before=$(inode "$W/m/eng/lib/same.so")
+out=$(PATH="$W/m/bin:$PATH" place_mounted_engine_files "$W/m/src" "$W/m/eng")
+check "a changed mounted file is the release's, on a new inode" "new|yes" \
+    "$(cat "$W/m/eng/lib/changed.so")|$([ "$(inode "$W/m/eng/lib/changed.so")" != "$changed_before" ] && echo yes)"
+check "and is said" "Replaced lib/changed.so, which a running container mounts" "$out"
+check "the same mounted file is not touched" "$same_before" "$(inode "$W/m/eng/lib/same.so")"
+check "neither is left for the copy" "no|no" "$(there "$W/m/src/lib/changed.so")|$(there "$W/m/src/lib/same.so")"
+check "a file nothing mounts is left for the copy" "yes|old" "$(there "$W/m/src/lib/free.so")|$(cat "$W/m/eng/lib/free.so")"
+check "no temporary file stays" "no" "$(there "$W/m/eng/lib/changed.so.pa-new")"
 
 # A history it cannot read removes nothing and says why.
 git clone -q --depth 1 "file://$REPO" "$W/shallow" 2>/dev/null

@@ -1179,17 +1179,48 @@ list_shipped_modsecurity_rules() { # <clone> <list to write>
     rm -f "$2.revs" "$2.raw"
 }
 
+# Host paths running containers bind-mount, resolved.
+running_bind_sources() {
+    local src
+    docker ps -q 2>/dev/null |
+        xargs -r docker inspect -f '{{range .Mounts}}{{if eq .Type "bind"}}{{println .Source}}{{end}}{{end}}' 2>/dev/null |
+        while IFS= read -r src; do
+            [ -z "$src" ] || realpath -m -- "$src"
+        done
+}
+
+# cp writes into an existing file, so a library a running service has loaded changes under it and every worker
+# crashes. A file a running container mounts is renamed into place instead, or left alone when it is the same.
+place_mounted_engine_files() { # <src> <engine dir>
+    local root src rel
+    root=$(cd "$2" && pwd -P)
+    while IFS= read -r src; do
+        case "$src" in "$root"/*) ;; *) continue ;; esac
+        rel=${src#"$root"/}
+        [ -f "$1/$rel" ] && [ ! -L "$1/$rel" ] && [ -f "$src" ] && [ ! -L "$src" ] || continue
+        if ! cmp -s -- "$1/$rel" "$src"; then
+            cp --preserve=mode -- "$1/$rel" "$src.pa-new" && mv -f -- "$src.pa-new" "$src" || continue
+            echo "Replaced $rel, which a running container mounts"
+        fi
+        rm -f -- "${1:?}/$rel"
+    done < <(running_bind_sources)
+}
+
 # Copying a release over the old tree keeps every file the release dropped, and
 # dropped code keeps running (api:call did). Removes those files, and folders
 # they leave empty, but only a file that is still a copy some release shipped:
-# one an operator wrote or changed at that path stays, and so does host state
-# and anything whose folder is reached through a link.
+# one an operator wrote or changed at that path stays, and so does host state,
+# anything whose folder is reached through a link, and a file a running
+# container mounts.
 remove_dropped_engine_files() { # <list> <engine dir>
-    local root rec mode oid path dir real have removed=0 kept=0
+    local root rec mode oid path dir real have src removed=0 kept=0
     local -a order=()
-    local -A shipped=()
+    local -A shipped=() mounted=()
     [ -s "$1" ] && [ -d "$2" ] || return 0
     root=$(cd "$2" && pwd -P)
+    while IFS= read -r src; do
+        mounted[$src]=1
+    done < <(running_bind_sources)
     while IFS= read -r -d '' rec; do
         mode=${rec%% *} rec=${rec#* }
         oid=${rec%% *} path=${rec#* }
@@ -1208,6 +1239,11 @@ remove_dropped_engine_files() { # <list> <engine dir>
         [ "$dir" = . ] && have=$root || have=$root/$dir
         if [ "$real" != "$have" ]; then
             echo "Kept $path: its folder is reached through a link"
+            kept=$((kept + 1))
+            continue
+        fi
+        if [ -n "${mounted[$root/$path]+x}" ]; then
+            echo "Kept $path: a running container mounts it"
             kept=$((kept + 1))
             continue
         fi
@@ -1262,6 +1298,7 @@ unzip_panelalpha_engine() {
     # would stop cp.
     remove_dropped_engine_files "$INSTALL_DIR/dropped-files" "$PANELALPHA_DIR/shared-hosting"
     replace_running_updaters "$INSTALL_DIR/src" "$PANELALPHA_DIR/shared-hosting"
+    place_mounted_engine_files "$INSTALL_DIR/src" "$PANELALPHA_DIR/shared-hosting"
     # --preserve=mode also repairs files an earlier run left with the wrong mode;
     # a plain cp keeps the existing file's mode.
     cp -Rf --preserve=mode "$INSTALL_DIR/src/." "$PANELALPHA_DIR/shared-hosting/"
