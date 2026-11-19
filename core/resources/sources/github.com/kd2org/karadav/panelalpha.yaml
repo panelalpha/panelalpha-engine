@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  KaraDAV, a WebDAV and NextCloud-compatible file server: plain PHP (no
+  Composer) over SQLite, the application in www/. The first request that
+  reaches it creates the database with the admin demo / karadavdemo,
+  published in its INSTALL.md, and signs that first visitor in; on PanelAlpha
+  the first request is the engine's own health check, so a visitor met a
+  sign-in form whose only account was the published one, which anyone with
+  the address could use.
+
+  So the engine generates the admin's login (`credentials:` below, returned
+  by GET /projects/{name}/app-credentials) and panelalpha/karadav-admin.php,
+  at install and upgrade, before the site is served, lets KaraDAV's own
+  init.php create the database as that first request would and then gives
+  the demo admin the generated login and password through KaraDAV's
+  User::edit, only while it still has the published password. A password
+  changed in KaraDAV is never touched. Nothing else changes: the document
+  root stays www/, as detection finds it.
+extends: php-plain
+docroot: www
+commands:
+  # The php-plain platform has none, so this is the only one; it runs before
+  # Apache serves. No `id:`, as davical's recipe explains: a stale detection
+  # cache drops a recipe's stage commands that carry one.
+  - stage:
+      - install
+      - upgrade
+    description: >-
+      Creates the database through KaraDAV's own init.php when there is none,
+      then moves the seeded demo admin to the login the engine generated while
+      it still has the published password karadavdemo.
+    run: 'php panelalpha/karadav-admin.php'
+credentials:
+  login_path: /login.php
+  fields:
+    KARADAV_ADMIN_USER: {kind: username}
+    KARADAV_ADMIN_PASSWORD: {kind: password}

@@ -1,0 +1,9 @@
+# Layers over the compose file the php strategy generates (the shared PHP base
+# image, ~/project at /app, the account's uid, the staged entrypoint).
+services:
+  app:
+    # KARADAV_ADMIN_USER / KARADAV_ADMIN_PASSWORD, generated and kept by the
+    # engine; panelalpha/karadav-admin.php gives the seeded admin that login.
+    env_file:
+      - .env
+      - ../.panelalpha/app-credentials.env
