@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Haven, a private blog and feed reader (Rails on PostgreSQL), on the compose
+  stack its own repository ships, with one change: the first user. Upstream's
+  bin/docker-start creates an admin from HAVEN_USER_EMAIL / HAVEN_USER_PASS,
+  and the repository's docker-compose.yml sets them to changeme@havenweb.org /
+  ChangeMeN0W, a login anyone can read in the repository and nobody deploying
+  it was told; sign-up is off, so that admin was the only way in. The engine
+  generates the login (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials) and
+  overrides/docker-compose.override.yml runs files/panelalpha/haven-start.sh
+  in place of the image's command: it sets HAVEN_USER_EMAIL /
+  HAVEN_USER_PASS to that login and runs upstream's bin/docker-start, whose
+  create_user.rb creates the admin only while no user has that email. The
+  published login is never created, and a password changed in Haven is never
+  touched.
+credentials:
+  login_path: /users/sign_in
+  fields:
+    # Haven signs in with an email address (Devise).
+    HAVEN_ADMIN_EMAIL: {kind: email}
+    HAVEN_ADMIN_PASSWORD: {kind: password}

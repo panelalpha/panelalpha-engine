@@ -1,0 +1,16 @@
+# Layers over the repository's own docker-compose.yml, which is otherwise used
+# as it is.
+#
+# That file sets HAVEN_USER_EMAIL / HAVEN_USER_PASS to the published
+# changeme@havenweb.org / ChangeMeN0W, and bin/docker-start creates the first
+# admin from them. The wrapper puts the engine's login there instead, then runs
+# bin/docker-start.
+services:
+  haven:
+    command: ["bash", "/panelalpha/haven-start.sh"]
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+      # HAVEN_ADMIN_EMAIL / HAVEN_ADMIN_PASSWORD, generated and kept by the
+      # engine. Mounted rather than an env_file: an env_file loses to the
+      # compose file's own environment: entries for HAVEN_USER_*.
+      - ../.panelalpha/app-credentials.env:/pa/app-credentials.env:ro
