@@ -1,0 +1,13 @@
+# Layers over the repository's docker-compose.yml: only the login changes.
+services:
+  tagr:
+    env_file:
+      # TAGR_ADMIN_USER / TAGR_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
+    # The compose file's environment sets AUTH_USER / AUTH_PASSWORD (admin /
+    # change-me) and beats env_file, so the engine's login is exported over them
+    # here, then the image's own command runs (its CMD, ./docker-entrypoint.sh).
+    command:
+      - /bin/sh
+      - -c
+      - export AUTH_USER="$${TAGR_ADMIN_USER:-$$AUTH_USER}" AUTH_PASSWORD="$${TAGR_ADMIN_PASSWORD:-$$AUTH_PASSWORD}"; exec ./docker-entrypoint.sh

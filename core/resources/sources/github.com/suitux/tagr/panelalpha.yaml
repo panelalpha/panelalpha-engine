@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tagr, a music library tagger (Next.js with Prisma on SQLite under /data).
+  The repository's docker-compose.yml runs the published ghcr.io/suitux/tagr
+  image and the engine runs it as is. Tagr's admin is not a database user: it
+  is AUTH_USER / AUTH_PASSWORD from the environment, compared on every login,
+  and that compose file sets them to admin / change-me, so the engine filled
+  AUTH_PASSWORD with a password nobody deploying it was told and the visitor
+  had no way in. So the engine generates a login (`credentials:` below,
+  returned by GET /projects/{name}/app-credentials) and
+  overrides/docker-compose.override.yml hands it to the container as
+  TAGR_ADMIN_USER / TAGR_ADMIN_PASSWORD and exports them as AUTH_USER /
+  AUTH_PASSWORD before the image's own entrypoint runs; the compose file's
+  admin / change-me no longer signs in. The admin's password has no form in
+  the app (only the tagger and listener users in the database do), so the
+  engine's stored values stay the login across restarts and redeploys.
+  Everything else is the repository's compose file.
+credentials:
+  login_path: /login
+  fields:
+    TAGR_ADMIN_USER: {kind: username}
+    TAGR_ADMIN_PASSWORD: {kind: password}
