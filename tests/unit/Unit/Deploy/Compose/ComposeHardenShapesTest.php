@@ -29,7 +29,7 @@ class ComposeHardenShapesTest extends TestCase
         $this->assertSame([
             42,
             '/proc/meminfo',
-            ['type' => 'bind', 'source' => LxcfsProc::PROC_DIR . '/cpuinfo', 'target' => '/proc/cpuinfo', 'read_only' => true],
+            ['type' => 'bind', 'source' => LxcfsProc::PROC_DIR . '/cpuinfo', 'target' => '/proc/cpuinfo'],
         ], $compose['services']['app']['volumes']);
     }
 

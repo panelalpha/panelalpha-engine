@@ -113,8 +113,10 @@ class ComposeHarden
     }
 
     /**
-     * lxcfs's /proc files bound read-only into every service, after hardening (which removes host paths);
-     * a service that mounts the target keeps its own.
+     * lxcfs's /proc files bound into every service, after hardening (which removes host paths); a service that
+     * mounts the target keeps its own. No `read_only`: the account's own mount of {@see LxcfsProc::PROC_DIR} is
+     * read-only already and every bind of it stays so, while a read-only bind makes the daemon remount it, which
+     * sysbox refuses when compose copies a `configs:`/`secrets:` content into the container before it starts.
      *
      * @param  array<string, mixed>  $compose
      * @param  list<string>  $procFiles  names under {@see LxcfsProc::PROC_DIR} the account has
@@ -133,7 +135,7 @@ class ComposeHarden
             $taken = array_map(self::mountTarget(...), $volumes);
             foreach ($procFiles as $file) {
                 if (! in_array("/proc/{$file}", $taken, true)) {
-                    $volumes[] = ['type' => 'bind', 'source' => LxcfsProc::PROC_DIR."/{$file}", 'target' => "/proc/{$file}", 'read_only' => true];
+                    $volumes[] = ['type' => 'bind', 'source' => LxcfsProc::PROC_DIR."/{$file}", 'target' => "/proc/{$file}"];
                 }
             }
             $compose['services'][$name]['volumes'] = array_values($volumes);

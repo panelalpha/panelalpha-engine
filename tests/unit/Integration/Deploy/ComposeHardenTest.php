@@ -952,15 +952,36 @@ YAML
 
         foreach (['app', 'db'] as $service) {
             $this->assertContains(
-                ['type' => 'bind', 'source' => '/var/lib/lxcfs/proc/meminfo', 'target' => '/proc/meminfo', 'read_only' => true],
+                ['type' => 'bind', 'source' => '/var/lib/lxcfs/proc/meminfo', 'target' => '/proc/meminfo'],
                 $result['services'][$service]['volumes']
             );
             $this->assertContains(
-                ['type' => 'bind', 'source' => '/var/lib/lxcfs/proc/loadavg', 'target' => '/proc/loadavg', 'read_only' => true],
+                ['type' => 'bind', 'source' => '/var/lib/lxcfs/proc/loadavg', 'target' => '/proc/loadavg'],
                 $result['services'][$service]['volumes']
             );
         }
         $this->assertContains('./data:/data', $result['services']['app']['volumes']);
+    }
+
+    /** pgconsole: `remount-ro …/proc/cpuinfo: operation not permitted` while compose copied its `configs:` content in. */
+    public function test_lxcfs_binds_leave_the_daemon_nothing_to_remount_when_compose_copies_a_config_in(): void
+    {
+        $result = ComposeHarden::applyReporting(
+            [
+                'services' => ['pgconsole' => ['image' => 'pgplex/pgconsole', 'configs' => [['source' => 'c', 'target' => '/etc/pgconsole.toml']]]],
+                'configs' => ['c' => ['content' => "[[connections]]\n"]],
+            ],
+            procFiles: ['cpuinfo', 'meminfo']
+        )['compose'];
+
+        $proc = array_values(array_filter(
+            $result['services']['pgconsole']['volumes'],
+            static fn (mixed $volume): bool => is_array($volume) && str_starts_with((string) $volume['target'], '/proc/')
+        ));
+        $this->assertCount(2, $proc);
+        foreach ($proc as $volume) {
+            $this->assertArrayNotHasKey('read_only', $volume);
+        }
     }
 
     public function test_a_service_that_mounts_a_proc_file_itself_keeps_its_own(): void
@@ -971,7 +992,7 @@ YAML
         ]], ['meminfo', 'loadavg']);
 
         $this->assertSame(
-            ['/somewhere/meminfo:/proc/meminfo:ro', ['type' => 'bind', 'source' => '/var/lib/lxcfs/proc/loadavg', 'target' => '/proc/loadavg', 'read_only' => true]],
+            ['/somewhere/meminfo:/proc/meminfo:ro', ['type' => 'bind', 'source' => '/var/lib/lxcfs/proc/loadavg', 'target' => '/proc/loadavg']],
             $result['services']['short']['volumes']
         );
         $this->assertCount(2, $result['services']['long']['volumes']);
