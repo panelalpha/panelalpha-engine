@@ -1,0 +1,28 @@
+# Layers over the repository's docker-compose.yml (the published
+# passwordcockpit/passwordcockpit image and MariaDB): the login, the API's
+# address, and the data kept across redeploys.
+services:
+  passwordcockpit:
+    env_file:
+      # PASSWORDCOCKPIT_ADMIN_USERNAME / PASSWORDCOCKPIT_ADMIN_PASSWORD, the
+      # login the engine generates. entrypoint.sh sets the password on a new
+      # database's admin; panelalpha/passwordcockpit/admin-login.php sets the
+      # name, and the whole login on an admin still on Admin123!.
+      - ../.panelalpha/app-credentials.env
+    # panelalpha/passwordcockpit/start.sh: the site's address as
+    # PASSWORDCOCKPIT_BASEHOST, then the image's own entrypoint.sh.
+    entrypoint: ["/bin/sh", "/panelalpha/start.sh"]
+    volumes:
+      # Named volumes in place of the repository's ./volumes/ binds, which are
+      # inside the checkout a redeploy re-clones: every stored password and the
+      # admin's own would be gone after one.
+      - passwordcockpit-upload:/var/www/html/upload
+      - ./panelalpha/passwordcockpit:/panelalpha:ro
+
+  mariadb:
+    volumes:
+      - passwordcockpit-mariadb:/var/lib/mysql
+
+volumes:
+  passwordcockpit-upload: {}
+  passwordcockpit-mariadb: {}

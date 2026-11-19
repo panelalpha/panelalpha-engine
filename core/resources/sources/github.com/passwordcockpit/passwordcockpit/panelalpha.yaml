@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Passwordcockpit, a web password manager for teams (PHP on Apache with an
+  Ember frontend, MariaDB). The repository's docker-compose.yml runs the
+  published passwordcockpit/passwordcockpit image and MariaDB, and the engine
+  runs it as is. A new database gets Passwordcockpit's built-in admin with
+  the password Admin123!, published in the README, which nobody deploying it
+  is told and anyone with the address could use. So the engine generates a
+  login (`credentials:` below, returned by GET /projects/{name}/app-credentials)
+  and overrides/docker-compose.override.yml hands it to the container: the
+  image's entrypoint sets PASSWORDCOCKPIT_ADMIN_PASSWORD on a new database's
+  admin, and files/panelalpha/passwordcockpit/admin-login.php sets the
+  username, and the whole login on an admin still on Admin123!. A password
+  changed in Passwordcockpit is never touched.
+
+  Two other things had to change for that login to be usable. The frontend
+  calls the API at PASSWORDCOCKPIT_BASEHOST, which the image writes into
+  public/ on every start, and the compose file says http://localhost:8080: in
+  a visitor's browser that is their own machine, so the login form could not
+  reach the API at all. The wrapper entrypoint sets it to the site's address
+  (PA_PUBLIC_URL). And the upload directory and the MariaDB data were binds
+  under ./volumes, inside the checkout a redeploy re-clones; they are named
+  volumes now, so the vault and the admin's password survive a redeploy.
+  Everything else, PASSWORDCOCKPIT_BLOCK_CIPHER_KEY and
+  PASSWORDCOCKPIT_AUTHENTICATION_SECRET_KEY included, is the repository's
+  compose file.
+credentials:
+  login_path: /login
+  fields:
+    PASSWORDCOCKPIT_ADMIN_USERNAME: {kind: username}
+    PASSWORDCOCKPIT_ADMIN_PASSWORD: {kind: password}
