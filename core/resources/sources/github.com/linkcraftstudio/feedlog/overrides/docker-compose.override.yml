@@ -1,0 +1,52 @@
+# Layers over the repository's compose.yml (upstream's published image and
+# pgvector). The app itself is unchanged; it gets the engine's login and its
+# own session secret, and a one-shot signs that login up as the workspace's
+# owner before the deploy finishes.
+services:
+  app:
+    env_file:
+      # FEEDLOG_ADMIN_EMAIL / FEEDLOG_ADMIN_PASSWORD, generated and kept by
+      # the engine (`credentials:` in panelalpha.yaml).
+      - ../.panelalpha/app-credentials.env
+      # FEEDLOG_AUTH_SECRET, generated once by hooks/prepare.sh. ~/project is
+      # emptied before every deploy; ~/.panelalpha is not.
+      - ../.panelalpha/feedlog/auth.env
+    volumes:
+      - ./panelalpha/feedlog:/panelalpha:ro
+    # Upstream's `node .output/server/index.mjs`, after start.sh exports
+    # SYSTEM_ADMIN_EMAILS and BETTER_AUTH_SECRET, which compose.yml sets from
+    # the .env made from .env.example (admin@example.com and a published
+    # placeholder) under `environment:`, where env_file cannot reach them.
+    command: ["sh", "/panelalpha/start.sh"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+      start_period: 300s
+
+  # Signs the engine's login up through FeedLog's own sign-up endpoint, only
+  # while no account has that email; see files/panelalpha/feedlog/create-admin.mjs.
+  admin-login:
+    image: ${FEEDLOG_IMAGE:-ghcr.io/linkcraftstudio/feedlog:latest}
+    env_file:
+      - ../.panelalpha/app-credentials.env
+    volumes:
+      - ./panelalpha/feedlog:/panelalpha:ro
+    entrypoint: ["node", "/panelalpha/create-admin.mjs"]
+    command: []
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: "no"
+
+  # A no-op gate. The engine runs `docker compose up -d` and the deploy is
+  # finished when it returns; Compose blocks on this condition, so it returns
+  # only once the owner exists and nobody else can take that email first.
+  ready:
+    image: alpine:3
+    entrypoint: ["true"]
+    depends_on:
+      admin-login:
+        condition: service_completed_successfully
+    restart: "no"

@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  FeedLog, a feedback board, roadmap and changelog (Nuxt, better-auth,
+  Postgres with pgvector), on the compose.yml its repository ships:
+  upstream's published image and a pgvector database. Used as it is, except
+  for who owns it. An email listed in SYSTEM_ADMIN_EMAILS becomes the owner of
+  the workspace when it signs up, and the .env the engine makes from
+  .env.example lists `admin@example.com`, so the dashboard belonged to
+  whoever signed up with that address first and nobody deploying it was told.
+  Everyone else who signs up is a plain user with no dashboard.
+
+  So the engine generates the owner's login (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get).
+  overrides/docker-compose.override.yml hands it to the app, whose command
+  (files/panelalpha/feedlog/start.sh, then upstream's own `node
+  .output/server/index.mjs`) sets SYSTEM_ADMIN_EMAILS to that email, and a
+  one-shot `admin-login` signs it up through FeedLog's own sign-up endpoint
+  before the deploy finishes (a `ready` gate holds `up -d` until then), so
+  FeedLog's own bootstrap hook makes it the owner. It only ever creates the
+  account: one that exists is left alone, so a password changed in the app is
+  never reset. Sign-up stays open to everyone else, as upstream has it.
+
+  BETTER_AUTH_SECRET, which signs the session cookies, is the published
+  `replace-me-with-a-32-char-random-string` in .env.example as well;
+  hooks/prepare.sh generates one per account into ~/.panelalpha/feedlog.
+credentials:
+  # Sign-in is a modal on every page; its button is in the header.
+  login_path: /
+  fields:
+    FEEDLOG_ADMIN_EMAIL: {kind: email}
+    FEEDLOG_ADMIN_PASSWORD: {kind: password}
