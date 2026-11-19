@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  CortenDesk, a RustDesk console (Laravel on nginx and PHP-FPM, with the
+  RustDesk ID server and relay in the same image, MySQL 8.4). The
+  repository's docker-compose.yml builds its Dockerfile with MySQL and the
+  engine runs it as is. On a database with no user the entrypoint's
+  DockerSeeder creates the first admin from CORTENDESK_ADMIN_USER /
+  CORTENDESK_ADMIN_PASSWORD, which the compose file does not set: admin /
+  changeme, the login the README prints, so anyone with the URL could sign
+  in and nobody deploying it was told. So the engine generates a login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials)
+  and overrides/docker-compose.override.yml hands it to the container as
+  those two variables. The seeder does nothing once a user exists, so a
+  password changed in the console is never overwritten on a restart or
+  redeploy. Everything else is the repository's compose file.
+credentials:
+  login_path: /login
+  fields:
+    CORTENDESK_ADMIN_USER: {kind: username}
+    CORTENDESK_ADMIN_PASSWORD: {kind: password}

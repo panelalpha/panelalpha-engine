@@ -1,0 +1,8 @@
+# Layers over the repository's docker-compose.yml: only the login changes.
+services:
+  cortendesk:
+    env_file:
+      # CORTENDESK_ADMIN_USER / CORTENDESK_ADMIN_PASSWORD, the login the engine
+      # generates. The entrypoint's DockerSeeder reads them when it creates the
+      # first admin, on a database with no user yet.
+      - ../.panelalpha/app-credentials.env
