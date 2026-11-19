@@ -98,7 +98,7 @@ mounts are made, so Docker never gets to create them as root:
 | `data/prod.db` | every list, item, claim, user and setting |
 | `data/.panelalpha-installed` | the marker that makes the install step run once |
 | `uploads/` | user-uploaded item images, served by Caddy at `/api/assets/*` |
-| `credentials` | the generated admin account, 0600 |
+| `credentials` | the admin account an earlier version of this recipe generated, 0600; read once by `adopt_from` |
 
 `~` is root-owned 0755 and nothing can be created there; `~/.panelalpha` is
 created with the account and belongs to it, which is why the data directory is
@@ -129,10 +129,17 @@ installer and no CLI, and it is first-visitor-wins twice over:
   `system_config` table rather than in the environment, and `/signup` is a
   non-private route too.
 
-So `hooks/prepare.sh` generates a 20-character password into
-`~/.panelalpha/wishlist/credentials` (0600, in a 0700 directory), and
-`files/panelalpha/install.mjs` creates the account **and** writes
+So the engine generates the admin login (`credentials:` in `panelalpha.yaml`:
+`WISHLIST_USERNAME` `admin`, `WISHLIST_EMAIL` `admin@localhost` and
+`WISHLIST_PASSWORD`), returned by `GET /projects/{name}/app-credentials` (MCP
+`app_credentials_get`) so whoever deployed it can sign in at `/login`, and
+`files/panelalpha/install.mjs` creates the account from it **and** writes
 `enableSignup = false` in one transaction.
+
+Before the engine owned the login, `hooks/prepare.sh` generated the password
+into `~/.panelalpha/wishlist/credentials`, where nobody deploying it was told
+to look. `adopt_from` reads that file when the engine first stores the login,
+so such an installation keeps the password its account already has.
 
 It runs **from the entrypoint, before the server binds** — not as a one-shot
 compose service beside the app, the way NocoDB's does. A one-shot can only
@@ -163,9 +170,10 @@ form of the password with a 16-byte hex salt used as text, stored as
 MiB, over node's default) produces exactly that.
 
 **The password is never an environment variable.** It reaches the container as
-a read-only bind mount of the 0600 file. The compose file the engine writes is
-0644 and readable by every other tenant, and `docker inspect`
-would show an environment value too.
+a read-only bind mount of `~/.panelalpha/app-credentials.env` (0600, the
+engine's; the file alone, not the directory), whose values the engine
+single-quotes and `install.mjs` unquotes. `docker inspect` would show an
+environment value.
 
 **Nothing from the checkout is web-reachable.** The container serves the
 image's own build output plus `uploads/` (Caddy's `handle_path /api/assets/*`);
@@ -175,7 +183,7 @@ image's own build output plus `uploads/` (Caddy's `handle_path /api/assets/*`);
 `uploads/`, `Dockerfile`, `package.json`, `prisma/schema.prisma` and
 `api/assets/../../data/prod.db` are all **404**. `.env` and `.env.default` are
 0644 on disk, and hold nothing secret — the password is
-in `~/.panelalpha/wishlist/credentials`.
+in `~/.panelalpha/app-credentials.env`.
 
 ## Readiness
 

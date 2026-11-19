@@ -45,14 +45,18 @@ description: >-
   user table is empty, routes/signup/+page.server.ts gives the first account
   Role.ADMIN, and getDefaultConfig() in lib/server/config.ts has
   `enableSignup: true` -- so a stock deploy on a public HTTPS name is
-  first-visitor-wins twice over. hooks/prepare.sh generates a 20-character
-  password into ~/.panelalpha/wishlist/credentials (0600, in a 0700 directory),
-  and files/panelalpha/install.mjs creates the account and turns public signup
-  off in one transaction, from the entrypoint, before the server binds -- not
-  from a one-shot service beside the app, which could only run once the app was
-  already answering. It is guarded by a marker on the data mount, so a redeploy
-  never creates a second account and never overrides an operator who later
-  re-opened signup.
+  first-visitor-wins twice over. The engine generates the admin login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials, so
+  whoever deployed it is told), and files/panelalpha/install.mjs creates the
+  account from ~/.panelalpha/app-credentials.env and turns public signup off
+  in one transaction, from the entrypoint, before the server binds -- not from
+  a one-shot service beside the app, which could only run once the app was
+  already answering. It is guarded by a marker on the data mount, so a
+  redeploy never creates a second account, never resets a password changed in
+  the app and never overrides an operator who later re-opened signup. An
+  installation from before the engine owned the login keeps its password:
+  `adopt_from` reads it from ~/.panelalpha/wishlist/credentials, where this
+  recipe used to generate it.
 
   A `ready` service gates the deploy. Caddy binds :3280 before the migrations
   run, so the port answers 502 for the whole of the first boot -- 45 Prisma
@@ -65,3 +69,10 @@ description: >-
   password-reset links can be generated and copied by hand from the admin panel
   -- but emailed invitations need an SMTP server the engine does not provide;
   it is configured in the admin panel rather than through the environment.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/wishlist/credentials
+  fields:
+    WISHLIST_USERNAME: {kind: username}
+    WISHLIST_EMAIL: {kind: email, value: admin@localhost}
+    WISHLIST_PASSWORD: {kind: password}

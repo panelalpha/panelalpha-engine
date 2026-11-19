@@ -11,8 +11,9 @@
 // than in the environment, and /signup is in hooks.server.ts's
 // `nonPrivateRoutes`.
 //
-// So both are done here, from the credentials hooks/prepare.sh generated,
-// while nothing is listening yet. Run from the entrypoint rather than from a
+// So both are done here, from the login the engine generated
+// (~/.panelalpha/app-credentials.env, bound read-only), while nothing is
+// listening yet. Run from the entrypoint rather than from a
 // sibling compose service on purpose: a one-shot beside the app can only start
 // once the app is healthy, which means once the app is answering, and the
 // window this exists to close is exactly that moment.
@@ -59,7 +60,9 @@ function credentials() {
     for (const line of readFileSync(CREDENTIALS, "utf8").split("\n")) {
         const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
         if (m) {
-            out[m[1]] = m[2];
+            // The engine single-quotes its values (WISHLIST_PASSWORD='...');
+            // a credentials file from before it owned the login does not.
+            out[m[1]] = m[2].replace(/^'(.*)'$/, "$1");
         }
     }
 
@@ -147,7 +150,7 @@ function main() {
 
     db.close();
     writeFileSync(MARKER, new Date().toISOString() + "\n");
-    say(`created the admin account ${email}; its password is in ~/.panelalpha/wishlist/credentials`);
+    say(`created the admin account ${username} (${email}) with the login the engine generated`);
     say("public signup is off; invite people from Admin > Settings, or turn it back on there");
 }
 
