@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Hola-Calendar (哗啦待办), a team calendar and task board: one Python
+  standard-library server and a static front end, SQLite under /app/data. The
+  repository's own Dockerfile is how upstream ships it and the engine builds
+  it as is (the dockerfile strategy, as detection already chose). Its first
+  start seeds the accounts superadmin, test001, test002 and test003 with
+  random passwords it writes only to data/initial-accounts.txt inside the
+  container, so nobody deploying it could sign in; and its login refused any
+  browser Origin but 127.0.0.1 and localhost unless WORK_CALENDAR_ORIGINS
+  names the site, so even the right password was refused (403).
+
+  So the engine generates the superadmin's password (`credentials:` below,
+  returned by GET /projects/{name}/app-credentials; the username is fixed,
+  the code treats `superadmin` as the operator account) and
+  files/panelalpha/hola-login.py, before the server, opens the database with
+  the server's own Store (which seeds it on the first start, as the server
+  would) and sets that password with Store.set_password only while the
+  superadmin still has the password it was seeded with. A password changed in
+  the app is never touched; the three test accounts are seeded as upstream
+  seeds them and initial-accounts.txt still lists them. WORK_CALENDAR_ORIGINS
+  is the site's address.
+extends: dockerfile
+extra:
+  # A source recipe is applied without probe data; state what the probe finds:
+  # the repository's Dockerfile and the port it EXPOSEs.
+  dockerfile: Dockerfile
+  port_hint: 4173
+env:
+  # The login (every POST) refuses a browser Origin it does not list; without
+  # the site's own address no one could sign in from it.
+  WORK_CALENDAR_ORIGINS: '${PA_PUBLIC_URL}'
+credentials:
+  login_path: /
+  fields:
+    HOLA_ADMIN_USER: {kind: username, value: superadmin}
+    HOLA_ADMIN_PASSWORD: {kind: password}

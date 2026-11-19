@@ -1,0 +1,13 @@
+# Layers over the compose file the dockerfile strategy generates (service `app`,
+# the repository's Dockerfile, /app/data on a named volume).
+services:
+  app:
+    # Sets the superadmin's password from the generated one while it still has
+    # its seeded one, then runs the image's own command.
+    command: ["/bin/sh", "/panelalpha/hola-start.sh"]
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+      # HOLA_ADMIN_USER / HOLA_ADMIN_PASSWORD, generated and kept by the
+      # engine. Mounted rather than an env_file, so only the seeding step reads
+      # them and the running server's environment never has them.
+      - ../.panelalpha/app-credentials.env:/pa/app-credentials.env:ro
