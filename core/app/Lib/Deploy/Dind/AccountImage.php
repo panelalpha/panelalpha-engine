@@ -13,7 +13,7 @@ final class AccountImage
 {
     public const REPOSITORY = 'ghcr.io/panelalpha/engine-user-dind';
 
-    public const REF = self::REPOSITORY.':v2.2.0-20261028';
+    public const REF = self::REPOSITORY.':v2.3.1-20261119';
 
     /** Present, else pulled, else built from $context. */
     public static function ensureCommand(string $context): string

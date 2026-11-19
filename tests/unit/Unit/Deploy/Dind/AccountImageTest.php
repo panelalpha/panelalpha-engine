@@ -14,7 +14,7 @@ class AccountImageTest extends TestCase
      * tag named in AccountImage::REF, and its hash here.
      */
     private const PUBLISHED_CONTEXT = [
-        'ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028' => 'f559a82e7f8c9b8e06c9c5ee9e7b64193605a8dab9bdd6d3b77556af07feb9f5',
+        'ghcr.io/panelalpha/engine-user-dind:v2.3.1-20261119' => 'f559a82e7f8c9b8e06c9c5ee9e7b64193605a8dab9bdd6d3b77556af07feb9f5',
     ];
 
     private const CONTEXT_FILES = ['Dockerfile', 'entrypoint.sh', 'wp-cli/wp-cli.phar'];

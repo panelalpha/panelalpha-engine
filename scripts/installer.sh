@@ -54,7 +54,7 @@ else
     ENGINE_REPO='https://github.com/panelalpha/engine.git'
 fi
 # A repository clone carries no vendor directory; composer install fills it.
-COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.2.0-20261028'
+COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.3.1-20261119'
 
 # Tagged with the engine version, not a build date, so the tag moves whenever
 # core/composer.json's PHP constraint does -- an unpublished tag does not pull
@@ -1193,6 +1193,7 @@ running_bind_sources() {
 # crashes. A file a running container mounts is renamed into place instead, or left alone when it is the same.
 place_mounted_engine_files() { # <src> <engine dir>
     local root src rel
+    [ -d "$2" ] || return 0
     root=$(cd "$2" && pwd -P)
     while IFS= read -r src; do
         case "$src" in "$root"/*) ;; *) continue ;; esac

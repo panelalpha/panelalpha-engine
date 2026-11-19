@@ -16,7 +16,8 @@ trap 'rm -rf "$W"' EXIT
 # download and unzip steps run.
 sed -n '/^ENGINE_HOST_STATE=(/,/^)$/p' "$SCRIPT_DIR/installer.sh" >"$W/funcs.sh"
 for fn in download_engine_from_repository engine_host_state list_dropped_engine_files list_shipped_modsecurity_rules \
-    running_bind_sources place_mounted_engine_files remove_dropped_engine_files unzip_panelalpha_engine; do
+    running_bind_sources place_mounted_engine_files remove_dropped_engine_files replace_running_updaters \
+    unzip_panelalpha_engine; do
     sed -n "/^${fn}() {/,/^}\$/p" "$SCRIPT_DIR/installer.sh" >>"$W/funcs.sh"
 done
 # shellcheck source=/dev/null
@@ -260,6 +261,19 @@ check "the same mounted file is not touched" "$same_before" "$(inode "$W/m/eng/l
 check "neither is left for the copy" "no|no" "$(there "$W/m/src/lib/changed.so")|$(there "$W/m/src/lib/same.so")"
 check "a file nothing mounts is left for the copy" "yes|old" "$(there "$W/m/src/lib/free.so")|$(cat "$W/m/eng/lib/free.so")"
 check "no temporary file stays" "no" "$(there "$W/m/eng/lib/changed.so.pa-new")"
+
+# A first install has no engine dir yet, and the installer runs under set -e.
+mkdir -p "$W/first/install/src/lib" "$W/first/pa"
+printf 'new' >"$W/first/install/src/lib/changed.so"
+out=$(
+    set -e
+    hand_engine_files_to_root() { :; }
+    INSTALL_DIR=$W/first/install PANELALPHA_DIR=$W/first/pa ENGINE_OP=install
+    PATH="$W/m/bin:$PATH" unzip_panelalpha_engine
+    echo unzipped
+)
+check "a first install unzips the engine where there was none" "unzipped|new" \
+    "$out|$(cat "$W/first/pa/shared-hosting/lib/changed.so" 2>/dev/null)"
 
 # A history it cannot read removes nothing and says why.
 git clone -q --depth 1 "file://$REPO" "$W/shallow" 2>/dev/null
