@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  RSSBox, an RSS reader and translator on the Django admin (gunicorn, SQLite
+  under data/). The repository's Dockerfile is how upstream ships it and the
+  engine builds it as is. Its scripts/init.py creates the admin `admin` with
+  the password `rssbox` on a new database, which nobody deploying it is told
+  and anyone with the address could use. So the engine generates a login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
+  files/panelalpha/rssbox/start.sh, after the image's entrypoint and before
+  gunicorn, sets it on that admin with Django's own user model while it still
+  has the password `rssbox`: a password changed in RSSBox is never touched.
+
+  Two other things had to change for that login to be usable. Django's CSRF
+  check compares the https origin a browser sends with CSRF_TRUSTED_ORIGINS,
+  which defaults to http://*, so every sign-in was refused with a CSRF
+  failure: the compose file sets it (and SITE_URL) to the site's address. And
+  data/, where db.sqlite3 lives, had no volume, so a redeploy started over with
+  a new database: it is the named volume rssbox-data now. Redis stays absent,
+  as it was (the entrypoint waits for it for 20 seconds and carries on).
+credentials:
+  login_path: /login/
+  fields:
+    RSSBOX_ADMIN_USERNAME: {kind: username}
+    RSSBOX_ADMIN_PASSWORD: {kind: password}

@@ -1,0 +1,31 @@
+# Compose-replace: the repository has no compose file the engine runs (only
+# deploy/docker-compose.yml for the published image, with ./data binds and a
+# Redis container), so the engine took the dockerfile strategy. Builds its
+# Dockerfile as that strategy would, with the engine's login, the site's
+# address for Django's CSRF check, and the database on a named volume.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    # entrypoint.sh is the image's own (scripts/init.py: migrations and the
+    # default admin), then panelalpha/rssbox/start.sh as its CMD.
+    entrypoint: ["entrypoint.sh"]
+    command: ["/bin/sh", "/panelalpha/start.sh", "/opt/venv/bin/gunicorn", "config.wsgi:application"]
+    env_file:
+      # RSSBOX_ADMIN_USERNAME / RSSBOX_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
+    environment:
+      # The login form posts over https, and CSRF_TRUSTED_ORIGINS defaults to
+      # http://*: Django refused every sign-in with a CSRF failure.
+      CSRF_TRUSTED_ORIGINS: ${PA_PUBLIC_URL}
+      SITE_URL: ${PA_PUBLIC_URL}
+    volumes:
+      # db.sqlite3. Without a volume it was in the container and a redeploy
+      # started over with a new database.
+      - rssbox-data:/app/data
+      - ./panelalpha/rssbox:/panelalpha:ro
+
+volumes:
+  rssbox-data: {}
