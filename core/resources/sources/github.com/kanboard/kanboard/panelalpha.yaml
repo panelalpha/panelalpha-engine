@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Kanboard, Kanban project management (PHP on nginx and PHP-FPM, SQLite by
+  default). The repository's own Dockerfile is how upstream ships it and the
+  engine builds it as is. A new database gets Kanboard's built-in admin with the
+  password `admin`, which nobody deploying it is told. So the engine generates
+  a login (`credentials:` below, returned by GET /projects/{name}/app-credentials)
+  and files/panelalpha-kanboard-start.sh sets it on that admin before
+  Kanboard's own entrypoint runs, only while the admin still has the default
+  password: a password changed in Kanboard is never touched. The compose file
+  is the generated one plus the login and that wrapper; data/ and plugins/ stay
+  on named volumes, as the Dockerfile declares them.
+credentials:
+  login_path: /login
+  fields:
+    KANBOARD_ADMIN_USERNAME: {kind: username}
+    KANBOARD_ADMIN_PASSWORD: {kind: password}

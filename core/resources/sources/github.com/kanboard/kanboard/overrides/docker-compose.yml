@@ -1,0 +1,21 @@
+# Compose-replace: the repository has no compose file of its own the engine runs
+# (only docker-compose.{sqlite,mysql,postgres}.yml samples of the published image).
+# Builds its Dockerfile as the dockerfile strategy would, with the engine's login.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    entrypoint: ["/bin/sh", "/panelalpha-kanboard-start.sh"]
+    env_file:
+      # KANBOARD_ADMIN_USERNAME / KANBOARD_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
+    volumes:
+      - kanboard-data:/var/www/app/data
+      - kanboard-plugins:/var/www/app/plugins
+      - ./panelalpha-kanboard-start.sh:/panelalpha-kanboard-start.sh:ro
+
+volumes:
+  kanboard-data: {}
+  kanboard-plugins: {}
