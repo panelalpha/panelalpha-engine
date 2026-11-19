@@ -15,6 +15,9 @@ final class SourceWordpressClient
 {
     public const PLUGIN_SLUG = 'wordpress-migrator';
 
+    /** The slug releases from 1.2.1 on install under; a copy of it must not sit next to the pinned plugin. */
+    public const NEWER_PLUGIN_SLUG = 'panelalpha-migrator';
+
     public const PLUGIN_NAMESPACE = 'wp-migrator/v1';
 
     private const TOKEN_CHECK_MIGRATION_ID = 'panelalpha-token-check';
@@ -264,10 +267,13 @@ final class SourceWordpressClient
     /**
      * Upload the migrator plugin with WordPress's own replace-with-uploaded, so a copy already there is overwritten
      * by one carrying this zip's token and is never deleted first; call {@see activatePlugin} next.
+     *
+     * @return string|null the version wp-admin shows for the installed copy; null when it shows none (the caller warns)
      */
-    public function installPluginFromZip(string $zipPath): void
+    public function installPluginFromZip(string $zipPath): ?string
     {
         $this->assertAdminSession();
+        $this->deleteAndVerify(self::NEWER_PLUGIN_SLUG);
 
         $uploadPage = $this->http->request(
             'GET',
@@ -295,9 +301,66 @@ final class SourceWordpressClient
             ],
         );
 
-        if (! $this->hasPlugin(self::PLUGIN_SLUG)) {
+        $list = $this->http->request('POST', $this->homeUrl.'/wp-admin/plugins.php');
+        $plugins = WpAdminHtml::plugins($list->body);
+        if (! isset($plugins['inactive'][self::PLUGIN_SLUG]) && ! isset($plugins['active'][self::PLUGIN_SLUG])) {
             throw new RuntimeException(self::installFailedMessage($upload->body));
         }
+
+        return $this->assertInstalledCopyIsPinned($list->body, $plugins, WordpressMigratorZip::versionOf($zipPath));
+    }
+
+    /**
+     * Remove a copy of the plugin and check wp-admin no longer lists it; a copy that stays could be an older
+     * release, and its files would then answer in place of the ones this import installs.
+     */
+    private function deleteAndVerify(string $slug): void
+    {
+        $this->deletePlugin($slug);
+
+        $list = $this->http->request('POST', $this->homeUrl.'/wp-admin/plugins.php');
+        $plugins = WpAdminHtml::plugins($list->body);
+        if (isset($plugins['active'][$slug]) || isset($plugins['inactive'][$slug])) {
+            throw new RuntimeException($slug === self::NEWER_PLUGIN_SLUG
+                ? 'The source site has a panelalpha-migrator plugin. The Engine removes it before the import because it '
+                    .'shares wp-content/migrations with wordpress-migrator, but wp-admin still lists it. Remove '
+                    .'panelalpha-migrator in wp-admin and try again.'
+                : self::foreignCopyMessage('"'.$slug.'" could not be removed'));
+        }
+    }
+
+    /**
+     * After the upload only the pinned release may be installed: no copy under the newer slug, and when
+     * wp-admin shows the version it is the zip's. A version wp-admin does not show is not an error here; the
+     * returned null lets the caller record a warning.
+     *
+     * @param  array{active?: array<string, string>, inactive?: array<string, string>}  $plugins
+     * @return string|null the version wp-admin shows for the installed copy
+     */
+    private function assertInstalledCopyIsPinned(string $listHtml, array $plugins, ?string $pinnedVersion): ?string
+    {
+        if (isset($plugins['active'][self::NEWER_PLUGIN_SLUG]) || isset($plugins['inactive'][self::NEWER_PLUGIN_SLUG])) {
+            throw new RuntimeException(
+                'The source site has a panelalpha-migrator plugin next to wordpress-migrator. The import cannot run '
+                .'while both are installed because they share wp-content/migrations. Remove panelalpha-migrator in '
+                .'wp-admin and try again.'
+            );
+        }
+
+        $installed = WpAdminHtml::pluginVersions($listHtml)[self::PLUGIN_SLUG] ?? null;
+        if ($pinnedVersion !== null && $installed !== null && $installed !== $pinnedVersion) {
+            throw new RuntimeException(self::foreignCopyMessage(
+                'the source has version '.$installed.', this import installs '.$pinnedVersion
+            ));
+        }
+
+        return $installed;
+    }
+
+    private static function foreignCopyMessage(string $detail): string
+    {
+        return 'An older or different copy of the migrator plugin is on the source site; remove it and try again ('
+            .$detail.').';
     }
 
     /**

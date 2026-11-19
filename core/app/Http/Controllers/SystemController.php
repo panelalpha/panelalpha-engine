@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Auth\SystemProjects;
 use App\Auth\TokenAbilities;
 use App\Exceptions\DockerErrorException;
 use App\Http\Requests\EximConfigUpdateRequest;
@@ -73,7 +74,7 @@ class SystemController extends Controller
             'latest_webserver_change' => $system->getLatestChangeWebserverInfo(),
             'latest_update' => $system->getLatestUpdateInfo(),
             'panelalpha_online' => self::panelalphaOnline(),
-            'unreadable_secrets' => self::unreadableSecrets($caller, User::query()->cursor()),
+            'unreadable_secrets' => self::unreadableSecrets($caller, SystemProjects::forRequest()->unlist(User::query())->cursor()),
             'orphan_account_containers' => self::orphanAccountContainers($system, $caller),
             'tenant_network_firewall' => (new HostScriptReport($system, HostScriptReport::TENANT_NETWORK_FIREWALL))->reportFor($caller),
             'host_firewall' => (new HostScriptReport($system, HostScriptReport::HOST_FIREWALL))->reportFor($caller),

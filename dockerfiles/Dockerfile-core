@@ -73,10 +73,11 @@ RUN echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
     $(lsb_release -cs) nginx" \
     > /etc/apt/sources.list.d/nginx.list
 
+ARG NGINX_VERSION=1.30.7
 RUN apt-get update -y \
     && apt-get install -y \
         php8.4-fpm \
-        nginx \
+        "nginx=${NGINX_VERSION}-1~$(lsb_release -cs)" \
     && apt-get clean autoclean \
     && apt-get autoremove -y
 

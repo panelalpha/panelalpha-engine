@@ -143,9 +143,8 @@ DEPLOY_PASSWORD_SET=0
 DEPLOY_FULL_PRIVILEGES=0
 # --env-var KEY=VALUE pairs for the --repo project; values may be secrets, never printed.
 DEPLOY_ENV_VARS=()
-# With --full-privileges the project is the panel: --email is its admin, --hub-code its Hub code.
-PANEL_ADMIN_EMAIL=''
-PANEL_ADMIN_PASSWORD=''
+# With --full-privileges the project is the panel: --hub-code is its Hub code, made for --email.
+PANEL_HUB_EMAIL=''
 PANEL_HUB_CODE=''
 # 1 when --update-engine: with --repo on an existing host, update the engine
 # and deploy without asking.
@@ -213,13 +212,15 @@ Usage: bash installer.sh [options]
       --no-password        do not set a site password on the --repo project
       --full-privileges    trust the --repo project with this engine: an Engine
                            API token for every project, the server's own name
-                           and public ports, and protection from API tokens once
-                           it is live (for a panel that manages the engine).
+                           and public ports, and once it is live a system
+                           project: hidden from every other API token, and
+                           protected (for a panel that manages the engine).
                            The project is taken to be the PanelAlpha panel:
-                           --email becomes its admin, with a generated password
-                           printed at the end, --hub-code goes to the panel
-                           (not to the engine), and no site password is set
-                           unless --password is given
+                           its owner creates the admin in the panel's setup
+                           wizard (--email does not make one); --hub-code goes
+                           to the panel (not to the engine), with --email, the
+                           address the code was made for; and no site password
+                           is set unless --password is given
       --env-var KEY=VALUE  environment variable for the --repo project
                            (repeatable); the value is never printed
       --update-engine      with --repo on an existing install, update the engine
@@ -540,16 +541,16 @@ if [ "${#DEPLOY_ENV_VARS[@]}" -gt 0 ]; then
     done
 fi
 
-# The panel, not the engine, pairs with the Hub; its admin comes from --email.
+# The panel, not the engine, pairs with the Hub; --email goes to it only with --hub-code.
 if [ "$DEPLOY_FULL_PRIVILEGES" = 1 ]; then
     if [ -n "$HUB_CODE" ] && [ -z "$INSTALL_EMAIL" ]; then
-        echo "--hub-code with --full-privileges needs --email: the panel's admin, whose PanelAlpha account made the code." >&2
+        echo "--hub-code with --full-privileges needs --email: the address of the PanelAlpha account that made the code." >&2
         trap - EXIT
         exit 1
     fi
     PANEL_HUB_CODE="$HUB_CODE"
     HUB_CODE=''
-    PANEL_ADMIN_EMAIL="$INSTALL_EMAIL"
+    [ -n "$PANEL_HUB_CODE" ] && PANEL_HUB_EMAIL="$INSTALL_EMAIL"
     # A site password would put HTTP auth in front of the panel's own login.
     [ -n "$DEPLOY_SITE_PASSWORD" ] || DEPLOY_NO_PASSWORD=1
 fi
@@ -1178,17 +1179,48 @@ list_shipped_modsecurity_rules() { # <clone> <list to write>
     rm -f "$2.revs" "$2.raw"
 }
 
+# Host paths running containers bind-mount, resolved.
+running_bind_sources() {
+    local src
+    docker ps -q 2>/dev/null |
+        xargs -r docker inspect -f '{{range .Mounts}}{{if eq .Type "bind"}}{{println .Source}}{{end}}{{end}}' 2>/dev/null |
+        while IFS= read -r src; do
+            [ -z "$src" ] || realpath -m -- "$src"
+        done
+}
+
+# cp writes into an existing file, so a library a running service has loaded changes under it and every worker
+# crashes. A file a running container mounts is renamed into place instead, or left alone when it is the same.
+place_mounted_engine_files() { # <src> <engine dir>
+    local root src rel
+    root=$(cd "$2" && pwd -P)
+    while IFS= read -r src; do
+        case "$src" in "$root"/*) ;; *) continue ;; esac
+        rel=${src#"$root"/}
+        [ -f "$1/$rel" ] && [ ! -L "$1/$rel" ] && [ -f "$src" ] && [ ! -L "$src" ] || continue
+        if ! cmp -s -- "$1/$rel" "$src"; then
+            cp --preserve=mode -- "$1/$rel" "$src.pa-new" && mv -f -- "$src.pa-new" "$src" || continue
+            echo "Replaced $rel, which a running container mounts"
+        fi
+        rm -f -- "${1:?}/$rel"
+    done < <(running_bind_sources)
+}
+
 # Copying a release over the old tree keeps every file the release dropped, and
 # dropped code keeps running (api:call did). Removes those files, and folders
 # they leave empty, but only a file that is still a copy some release shipped:
-# one an operator wrote or changed at that path stays, and so does host state
-# and anything whose folder is reached through a link.
+# one an operator wrote or changed at that path stays, and so does host state,
+# anything whose folder is reached through a link, and a file a running
+# container mounts.
 remove_dropped_engine_files() { # <list> <engine dir>
-    local root rec mode oid path dir real have removed=0 kept=0
+    local root rec mode oid path dir real have src removed=0 kept=0
     local -a order=()
-    local -A shipped=()
+    local -A shipped=() mounted=()
     [ -s "$1" ] && [ -d "$2" ] || return 0
     root=$(cd "$2" && pwd -P)
+    while IFS= read -r src; do
+        mounted[$src]=1
+    done < <(running_bind_sources)
     while IFS= read -r -d '' rec; do
         mode=${rec%% *} rec=${rec#* }
         oid=${rec%% *} path=${rec#* }
@@ -1207,6 +1239,11 @@ remove_dropped_engine_files() { # <list> <engine dir>
         [ "$dir" = . ] && have=$root || have=$root/$dir
         if [ "$real" != "$have" ]; then
             echo "Kept $path: its folder is reached through a link"
+            kept=$((kept + 1))
+            continue
+        fi
+        if [ -n "${mounted[$root/$path]+x}" ]; then
+            echo "Kept $path: a running container mounts it"
             kept=$((kept + 1))
             continue
         fi
@@ -1261,6 +1298,7 @@ unzip_panelalpha_engine() {
     # would stop cp.
     remove_dropped_engine_files "$INSTALL_DIR/dropped-files" "$PANELALPHA_DIR/shared-hosting"
     replace_running_updaters "$INSTALL_DIR/src" "$PANELALPHA_DIR/shared-hosting"
+    place_mounted_engine_files "$INSTALL_DIR/src" "$PANELALPHA_DIR/shared-hosting"
     # --preserve=mode also repairs files an earlier run left with the wrong mode;
     # a plain cp keeps the existing file's mode.
     cp -Rf --preserve=mode "$INSTALL_DIR/src/." "$PANELALPHA_DIR/shared-hosting/"
@@ -2425,12 +2463,9 @@ deploy_repository() {
     for pair in "${DEPLOY_ENV_VARS[@]+"${DEPLOY_ENV_VARS[@]}"}"; do
         args+=("--env-var=${pair}")
     done
-    if [ -n "${PANEL_ADMIN_EMAIL:-}" ]; then
-        [ -n "$PANEL_ADMIN_PASSWORD" ] || PANEL_ADMIN_PASSWORD=$(generate_panel_admin_password)
-        args+=("--env-var=PANELALPHA_USER_EMAIL=${PANEL_ADMIN_EMAIL}" "--env-var=PANELALPHA_USER_PASSWORD=${PANEL_ADMIN_PASSWORD}")
-    fi
+    # No password: the panel makes no admin of its own.
     if [ -n "${PANEL_HUB_CODE:-}" ]; then
-        args+=("--env-var=PANELALPHA_HUB_CODE=${PANEL_HUB_CODE}")
+        args+=("--env-var=PANELALPHA_HUB_CODE=${PANEL_HUB_CODE}" "--env-var=PANELALPHA_USER_EMAIL=${PANEL_HUB_EMAIL}")
     fi
 
     # --json: JSON on stdout; the live deploy log, then any failure reason, on
@@ -2483,9 +2518,8 @@ deploy_repository() {
     fi
     DEPLOY_PROJECT_URL="https://${domain}"
     if printf '%s' "$json" | grep -q '"updated":true'; then
-        # Its admin, environment and Hub pairing stay: what this run generated for a new one was not applied.
+        # Its admin, environment and Hub pairing stay: what this run gave a new one was not applied.
         DEPLOY_UPDATED=1
-        PANEL_ADMIN_PASSWORD=''
         PANEL_HUB_CODE=''
         return 0
     fi
@@ -2535,24 +2569,16 @@ apply_deploy_site_password() {
     fi
 }
 
-# Two 8-character halves joined by a dash, drawn until both cases and a digit are in.
-generate_panel_admin_password() {
-    local pw=''
-    while :; do
-        pw=$(generate_deploy_site_password)
-        case "$pw" in *[A-Z]*) ;; *) continue ;; esac
-        case "$pw" in *[a-z]*) ;; *) continue ;; esac
-        case "$pw" in *[0-9]*) ;; *) continue ;; esac
-        break
-    done
-    printf '%s-%s' "${pw:0:8}" "${pw:8:8}"
-}
-
 # The command an operator retries a failed --repo deploy with.
 deploy_retry_command() {
     local cmd="pae project:create --repo ${DEPLOY_REPO_LABEL}"
     [ "${DEPLOY_FULL_PRIVILEGES:-0}" = 1 ] && cmd="${cmd} --full-privileges"
     printf '%s' "$cmd"
+}
+
+# A panel this run created: its setup wizard makes the first account.
+panel_awaits_setup() {
+    [ "${DEPLOY_FULL_PRIVILEGES:-0}" = 1 ] && [ "${DEPLOY_UPDATED:-0}" != 1 ] && [ "${DEPLOY_FAILED:-0}" != 1 ]
 }
 
 # Where the repository ended up — stdout for logs, and the same lines in the
@@ -2593,11 +2619,10 @@ report_deployed_project() {
     if [ "$DEPLOY_PASSWORD_SET" = 1 ] && [ -n "$DEPLOY_SITE_PASSWORD" ]; then
         echo_info "Password: ${DEPLOY_SITE_PASSWORD}"
     fi
-    if [ -n "${PANEL_ADMIN_PASSWORD:-}" ]; then
-        echo_info "Log in as: ${PANEL_ADMIN_EMAIL}    password: ${PANEL_ADMIN_PASSWORD}"
-    fi
     if [ -n "${PANEL_HUB_CODE:-}" ]; then
         echo_info "The panel connects to PanelAlpha Hub on its first start; watch the Hub page you copied the command from."
+    elif panel_awaits_setup; then
+        echo_info "Open ${DEPLOY_PROJECT_URL} to create your account in the panel's setup wizard."
     fi
     echo_info ""
     if [ "${DEPLOY_UPDATED:-0}" = 1 ]; then
@@ -2612,16 +2637,11 @@ report_deployed_project() {
         outro_c 15 "${DEPLOY_SITE_PASSWORD}"
         outro_nl
     fi
-    if [ -n "${PANEL_ADMIN_PASSWORD:-}" ]; then
-        outro_c 247 'Log in as: '
-        outro_c 15 "${PANEL_ADMIN_EMAIL}"
-        outro_c 247 '  password: '
-        outro_c 15 "${PANEL_ADMIN_PASSWORD}"
-        outro_nl
-    fi
     if [ -n "${PANEL_HUB_CODE:-}" ]; then
         outro_c 247 'Connects to PanelAlpha Hub on its first start; watch the Hub page.'
         outro_nl
+    elif panel_awaits_setup; then
+        outro_say 247 'Open it to create your account in the setup wizard.'
     fi
     outro_nl
 }
@@ -2957,6 +2977,14 @@ finish_installation() {
 
     echo_info "AI agents connect: pae connect"
     echo_info ""
+
+    # The panel's install (--full-privileges): the panel is what its owner uses, so no Claude
+    # Code token is minted and no command to paste ends the install.
+    if [ "${DEPLOY_FULL_PRIVILEGES:-0}" = 1 ]; then
+        outro_nl
+        finish_commit
+        return
+    fi
 
     # One MCP token for Claude Code, minted now so the last lines are commands to paste.
     # Keep each command on its own line: `&&` fails in Windows PowerShell 5.1, and

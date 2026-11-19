@@ -408,7 +408,7 @@ class ProjectCreateCommandTest extends TestCase
         $this->assertNothingCreated();
     }
 
-    public function test_full_privileges_are_granted_before_the_deploy_and_the_project_protected_after_it(): void
+    public function test_full_privileges_are_granted_before_the_deploy_and_the_project_made_system_after_it(): void
     {
         Queue::fake();
         $firewall = new RecordingFirewall();
@@ -418,7 +418,7 @@ class ProjectCreateCommandTest extends TestCase
             $atDeploy = [
                 'scope' => app(ApiAccess::class)->entryFor($user)['scope'] ?? null,
                 'routing' => app(PublicRoutingGrants::class)->of($user->username),
-                'protected' => $user->fresh()->isProtected(),
+                'system' => $user->fresh()->isSystem(),
             ];
             $this->deployed($user);
         });
@@ -428,19 +428,20 @@ class ProjectCreateCommandTest extends TestCase
         $this->assertSame(0, $code, $out);
         $this->assertSame(ApiAccess::SCOPE_ALL, $atDeploy['scope'], 'the first deploy already delivers an all-projects token');
         $this->assertEqualsCanonicalizing([PublicRoutingGrants::PORTS, PublicRoutingGrants::HOST_DOMAIN], $atDeploy['routing']);
-        $this->assertFalse($atDeploy['protected'], 'protected only once the application is live');
+        $this->assertFalse($atDeploy['system'], 'system only once the application is live');
         $this->assertSame(['acme'], $firewall->last());
         Queue::assertNotPushed(ApplyEnvVars::class);
+        $this->assertTrue(User::findByUsername('acme')->isSystem());
         $this->assertTrue(User::findByUsername('acme')->isProtected());
         $this->assertSame(self::INTRO . "\n"
             . "Allowed acme to use the Engine API for every project, and to take the server's own name and public ports.\n"
             . "    0:00 Deploy started (source: dind template)\n"
-            . "Project 'acme' is protected from API and MCP tokens: they can no longer delete, stop or redeploy it.\n"
+            . "Project 'acme' is a system project: no API or MCP token but its own sees or reaches it, and it is protected.\n"
             . "Project acme created.\n"
             . "Live at https://acme.example.test\n", $this->plain($out));
     }
 
-    public function test_a_failed_deploy_with_full_privileges_leaves_the_project_unprotected(): void
+    public function test_a_failed_deploy_with_full_privileges_leaves_the_project_ordinary(): void
     {
         Queue::fake();
         $this->app->instance(ApiAccess::class, new ApiAccess(firewall: new RecordingFirewall()));
@@ -449,6 +450,7 @@ class ProjectCreateCommandTest extends TestCase
         [, $errors] = $this->refused(['--project' => 'acme', '--domain' => 'acme.example.test', '--template' => 'dind', '--full-privileges' => true]);
 
         $this->assertSame(['The build failed.'], $errors);
+        $this->assertFalse(User::findByUsername('acme')->isSystem());
         $this->assertFalse(User::findByUsername('acme')->isProtected());
     }
 
@@ -471,7 +473,7 @@ class ProjectCreateCommandTest extends TestCase
         $this->assertSame('panel', $stub->redeployed?->username);
         $this->assertSame(1, User::query()->count());
         $this->assertSame(ApiAccess::SCOPE_ALL, app(ApiAccess::class)->entryFor($panel)['scope'] ?? null);
-        $this->assertTrue($panel->fresh()->isProtected());
+        $this->assertTrue($panel->fresh()->isSystem());
         Queue::assertNotPushed(ApplyEnvVars::class);
         $json = json_decode((string) collect(explode("\n", $this->plain($out)))->last(fn (string $line) => str_starts_with($line, '{"data":')), true);
         $this->assertSame('panel', $json['data']['username']);

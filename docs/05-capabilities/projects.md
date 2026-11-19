@@ -171,6 +171,21 @@ pae project:settings:unset protected --project=<name>
 
 Your own `pae` commands on the server are not affected. Details: [CLI commands](../06-commands/pae-cli.md).
 
+## System projects
+
+A system project is the engine's own application, such as the PanelAlpha panel that `--full-privileges` installs. No token sees it: it is left out of every project list, task list and API access list, and a call that names it, its domains or its tasks is answered exactly as for a project that does not exist. The one exception is the project's own API token, which still reaches it by name, so the application can manage its own domains. Even that token does not find it in a list.
+
+A system project is always protected ([Protecting](#protecting)), and protection cannot be turned off while it is a system project. Only you can turn it on or off, on the server.
+
+```bash
+pae project:settings:set system on --project=<name>
+pae project:settings:unset system --project=<name>
+```
+
+`--full-privileges` makes the panel a system project once it is live. An engine update does the same for a panel installed earlier with that flag: a project with an API token for every project that is protected.
+
+An application reads its own project name from `GET /api/tokens/current`, which answers `project` for the token its API access holds and null for any other token.
+
 ## Overlays
 
 An overlay is a piece of HTML, such as a banner, a notice or a script, that the engine's webserver writes into every page a site serves. The application is not changed. There is one global overlay for every project, and each project can have its own.
@@ -264,6 +279,8 @@ Show this project's limits. Raise its memory limit to 2048 MB and rebuild.
 **The rebuild is not optional.** The new limit is written into the running application when it is deployed, so changing the number without rebuilding changes nothing you can see.
 
 **A container project's CPU limit applies at once.** It is put on the running project without a rebuild, and removing it gives the running project every CPU of the server again. When the engine's root broker cannot change the running project, the limit is still saved and applies the next time the project's container is recreated; the answer says so. A limit that was changed before 2.3.0 and never reached the running project is applied by `pae project:cpu-limit:apply --all`; the update runs it.
+
+On a traditional PHP project, the rebuild recreates the site's container when a limit changed. The site does not answer for a few seconds while the new container starts. A rebuild with no change does not restart the site.
 
 **Every project has a memory limit.** It is at least 6 MB, the least Docker starts a container with, and at least 256 MB for a container project, whose account runs its own Docker: measured, that Docker was stopped for lack of memory at 112 MB and barely ran a small static site at 128 MB. No project may have more than the server's RAM less what is kept for the engine, 512 MB by default; on a 4 GB server that is about 3.3 GB. A project created without a limit gets exactly that maximum. How much memory is free at the moment does not matter: a project is not refused because others are using memory, so projects together can be given more than the server has. Ask for the server's current metrics to see the numbers; they are under `memory_budget`.
 

@@ -1,7 +1,7 @@
 # nginx ships no Brotli module. Build ngx_brotli as dynamic modules against the
 # same nginx source the image below runs, with brotli itself linked in statically.
-FROM nginx:1.31.1 AS brotli
-ARG NGINX_SHA256=9fcaaeb8f22544b09a19a761f3412c4112215422401634bebdd1296a403cc4bc
+FROM nginx:1.31.9 AS brotli
+ARG NGINX_SHA256=a11c5eeee2e257f4478f0e649f84b0040787d277d2d3e5233952aa6b6dcb80ad
 ARG NGX_BROTLI_COMMIT=a71f9312c2deb28875acc7bacfdd5695a111aa53
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates cmake curl git gcc make libc6-dev libpcre2-dev zlib1g-dev \
@@ -20,7 +20,7 @@ RUN apt-get update \
     && mkdir /out \
     && cp objs/ngx_http_brotli_filter_module.so objs/ngx_http_brotli_static_module.so /out/
 
-FROM nginx:1.31.1
+FROM nginx:1.31.9
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 COPY --from=brotli /out/ /usr/lib/nginx/modules/
 # The nginx-proxy config includes these by glob, so it also starts on an image without them.

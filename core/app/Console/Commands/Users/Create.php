@@ -54,7 +54,7 @@ class Create extends Command
                             {--template= : Project template; dind when a repository is given}
                             {--recipe= : Deploy with this recipe instead of the detected one}
                             {--env-var=* : KEY=VALUE environment override, repeatable}
-                            {--full-privileges : Trust the application with this engine: an Engine API token for every project, the server\'s own name and public ports, and protection from API tokens once it is live}
+                            {--full-privileges : Trust the application with this engine: an Engine API token for every project, the server\'s own name and public ports, and once it is live a system project: hidden from every other token and protected}
                             {--update-existing : When a project already deploys this repository, deploy it again from it instead of creating another (the one-line installer run a second time)}
                             {--quiet-deploy : Do not print the deploy log while it runs}
                             {--json : Print the created project as JSON instead of a summary}';
@@ -150,7 +150,7 @@ class Create extends Command
         }
 
         if ($fullPrivileges) {
-            $this->protect($user);
+            $this->markSystem($user);
         }
 
         return $this->report($this->created($user, $creator), $creator);
@@ -191,8 +191,8 @@ class Create extends Command
             $this->stopFollowingDeployLog();
         }
 
-        if ($fullPrivileges && ! $user->fresh()->isProtected()) {
-            $this->protect($user);
+        if ($fullPrivileges && ! $user->fresh()->isSystem()) {
+            $this->markSystem($user);
         }
 
         $user->refresh();
@@ -226,12 +226,12 @@ class Create extends Command
         );
     }
 
-    /** `project:settings:set protected on`, once the application is live: no API or MCP token may then delete, stop or redeploy it. */
-    private function protect(User $user): void
+    /** `project:settings:set system on`, once the application is live: no token but its own may then see it, and it is protected. */
+    private function markSystem(User $user): void
     {
         $user->refresh();
-        $result = $user->project()->settings()->set(Settings::KEY_PROTECTED, User::PROTECTED_ON);
-        $this->deployOutput()->writeln((string) ($result['message'] ?? "Project {$user->username} is protected."));
+        $result = $user->project()->settings()->set(Settings::KEY_SYSTEM, User::SYSTEM_ON);
+        $this->deployOutput()->writeln((string) ($result['message'] ?? "Project {$user->username} is a system project."));
     }
 
     /** The created project as POST /users answers it, `inspection` included. */

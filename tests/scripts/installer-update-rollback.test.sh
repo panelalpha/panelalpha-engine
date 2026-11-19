@@ -17,7 +17,7 @@ trap 'rm -rf "$W"' EXIT
 # installer.sh installs an engine when sourced, so cut out what the update runs.
 sed -n '/^ENGINE_HOST_STATE=(/,/^)$/p' "$SCRIPT_DIR/installer.sh" >"$W/funcs.sh"
 sed -n '/^ENGINE_REBUILT_DIRS=/p' "$SCRIPT_DIR/installer.sh" >>"$W/funcs.sh"
-for fn in die installer_error_message record_run record_run_outcome engine_host_state remove_dropped_engine_files \
+for fn in die installer_error_message record_run record_run_outcome engine_host_state running_bind_sources place_mounted_engine_files remove_dropped_engine_files \
     unzip_panelalpha_engine replace_running_updaters snapshot_engine_tree restore_engine_tree mark_engine_stack_touched \
     restore_previous_release rollback_engine_update restore_interrupted_update discard_engine_snapshot \
     normalize_version version_from_system_php release_order stop_update check_update_target; do

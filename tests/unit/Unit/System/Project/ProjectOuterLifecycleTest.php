@@ -175,6 +175,59 @@ class ProjectOuterLifecycleTest extends TestCase
         $this->assertContains('compose-up', $system->journal);
     }
 
+    public function test_rebuild_of_a_running_php_project_rerenders_compose_and_brings_it_up_without_down(): void
+    {
+        $system = $this->recordingSystem(template: 'default', running: true);
+        $model = $this->phpHostingModel('bob');
+        $composePath = $system->projectDirPath('bob') . '/docker-compose.yml';
+        mkdir($system->projectDirPath('bob'), 0777, true);
+        file_put_contents($composePath, "services:\n  php:\n    mem_limit: 512M # stale\n");
+        $project = new Project($system, $model);
+
+        $project->rebuildFromSource();
+
+        $this->assertStringNotContainsString('# stale', (string) file_get_contents($composePath));
+        $this->assertStringContainsString('image: test', (string) file_get_contents($composePath));
+        $this->assertContains(Privileged::compose($composePath)->up(), $this->executed);
+        $this->assertNotContains(Privileged::compose($composePath)->down(), $this->executed);
+        $this->assertNotContains(Privileged::compose($composePath)->up(true), $this->executed);
+    }
+
+    public function test_rebuild_of_a_stopped_php_project_still_goes_down_then_up(): void
+    {
+        $system = $this->recordingSystem(template: 'default', running: false);
+        $model = $this->phpHostingModel('bob');
+        $composePath = $system->projectDirPath('bob') . '/docker-compose.yml';
+        mkdir($system->projectDirPath('bob'), 0777, true);
+        file_put_contents($composePath, "services:\n  php:\n    mem_limit: 512M # stale\n");
+        $project = new Project($system, $model);
+
+        $project->rebuildFromSource();
+
+        $down = array_search(Privileged::compose($composePath)->down(), $this->executed, true);
+        $up = array_search(Privileged::compose($composePath)->up(), $this->executed, true);
+        $this->assertIsInt($down);
+        $this->assertIsInt($up);
+        $this->assertLessThan($up, $down);
+        $this->assertStringNotContainsString('# stale', (string) file_get_contents($composePath));
+    }
+
+    public function test_recreate_outer_compose_leaves_a_running_dind_account_alone(): void
+    {
+        $system = $this->recordingSystem(template: 'dind', running: true);
+        $project = $system->project($this->dindModel('alice', $system));
+        $composePath = $project->composeFilePath();
+        $known = "services:\n  dind:\n    image: known\n";
+        file_put_contents($composePath, $known);
+
+        $project->recreateOuterCompose();
+
+        $this->assertSame($known, file_get_contents($composePath));
+        $this->assertNotContains(Privileged::compose($composePath)->up(), $this->executed);
+        $this->assertNotContains(Privileged::compose($composePath)->down(), $this->executed);
+        $this->assertNotContains('compose-up', $system->journal);
+    }
+
     private function dindModel(string $username, System $system): ModelsUser
     {
         $model = new class ($system) extends ModelsUser {
@@ -232,13 +285,13 @@ class ProjectOuterLifecycleTest extends TestCase
         return $model;
     }
 
-    private function recordingSystem(string $template, bool $failComposeUp = false): System
+    private function recordingSystem(string $template, bool $failComposeUp = false, bool $running = false): System
     {
         $executed = &$this->executed;
         $phpTemplateRoot = $this->phpTemplateRoot;
         $dindTemplateRoot = $this->dindTemplateRoot;
 
-        return new class ($this->tmpRoot, $this->homeRoot, $dindTemplateRoot, $phpTemplateRoot, $template, $executed, $failComposeUp) extends System {
+        return new class ($this->tmpRoot, $this->homeRoot, $dindTemplateRoot, $phpTemplateRoot, $template, $executed, $failComposeUp, $running) extends System {
             /** @var list<string> */
             public array $journal = [];
 
@@ -251,6 +304,7 @@ class ProjectOuterLifecycleTest extends TestCase
                 private string $defaultTemplate,
                 private array &$executed,
                 private bool $failComposeUp,
+                private bool $running,
             ) {
             }
 
@@ -326,12 +380,14 @@ class ProjectOuterLifecycleTest extends TestCase
                     }
                     $this->journal[] = 'compose-up';
                 }
+                if (is_array($cmd) && LocalRoot::action($cmd) === 'compose.runningServices') {
+                    return $this->running ? "php\n" : '';
+                }
                 if (str_contains($line, 'ps --services')) {
                     // As Compose does when the file it is pointed at is gone.
                     if (preg_match('/-f (\S+)/', $line, $m) === 1 && !is_file($m[1])) {
                         throw new \Exception("compose file \"{$m[1]}\" is invalid: open {$m[1]}: no such file or directory");
                     }
-
                     return '';
                 }
                 if (str_contains($line, 'mkdir')) {

@@ -11,7 +11,7 @@ SCRIPT_DIR="$ROOT/scripts"
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 
-for fn in replace_running_updaters unzip_panelalpha_engine hand_engine_files_to_root hand_account_compose_files; do
+for fn in running_bind_sources place_mounted_engine_files replace_running_updaters unzip_panelalpha_engine hand_engine_files_to_root hand_account_compose_files; do
     sed -n "/^${fn}() {/,/^}\$/p" "$SCRIPT_DIR/installer.sh" >>"$W/funcs.sh"
 done
 # shellcheck source=/dev/null

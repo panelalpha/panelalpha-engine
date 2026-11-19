@@ -49,6 +49,7 @@ class DeployFailureExplainerRuleOrderTest extends TestCase
             'registry-rate-limited',
             'layer-digest-mismatch',
             'image-reference-invalid',
+            'build-dns-unavailable',
             'container-entrypoint-missing',
             'container-entrypoint-not-executable',
             'container-start-failed',

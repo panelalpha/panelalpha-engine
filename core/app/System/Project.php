@@ -558,6 +558,9 @@ class Project
      * Holds the lock a DinD rebuild takes through its deploy log: a delete holds it
      * too, and this would otherwise recreate the account that delete is removing,
      * or, from a model read before it, the account it removed.
+     *
+     * Only a PHP hosting project reaches here. A running PHP container is refreshed
+     * in place (see refreshRunningHostSide()); a stopped one is recreated as before.
      */
     private function recreateHostSideUnderDeployLock(): void
     {
@@ -565,10 +568,27 @@ class Project
         try {
             $this->model->assertNotDeletedElsewhere();
             $this->prepareLinuxIsolation();
-            $this->recreateOuterCompose();
+            if ($this->isRunning()) {
+                $this->refreshRunningHostSide();
+            } else {
+                $this->recreateOuterCompose();
+            }
         } finally {
             $lock->release();
         }
+    }
+
+    /**
+     * Re-renders the running PHP container's compose files and runs `up` without a
+     * `down`. Compose recreates the one container only when its config changed (for
+     * example a new memory or CPU limit), so an unchanged project keeps running.
+     * A running DinD account must never take this path: its outer container holds the
+     * user's apps, which is why recreateOuterCompose() leaves a running account alone.
+     */
+    private function refreshRunningHostSide(): void
+    {
+        $this->createFromTemplate();
+        $this->up();
     }
 
     public function prepareLinuxIsolation(): void

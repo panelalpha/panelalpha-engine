@@ -12,7 +12,7 @@ services:
       context: ./dockerfiles
       dockerfile: Dockerfile-core
       target: php_nginx_prod
-    image: ghcr.io/panelalpha/engine-core:v2.3.0
+    image: ghcr.io/panelalpha/engine-core:v2.3.1
     pull_policy: missing
     restart: always
     post_start:
@@ -72,7 +72,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-root-broker
-    image: ghcr.io/panelalpha/engine-root-broker:v2.3.0
+    image: ghcr.io/panelalpha/engine-root-broker:v2.3.1
     pull_policy: missing
     restart: always
     privileged: true
@@ -105,7 +105,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-exim
-    image: ghcr.io/panelalpha/engine-exim:v2.3.0
+    image: ghcr.io/panelalpha/engine-exim:v2.3.1
     pull_policy: missing
     # The entrypoint shell ignores SIGTERM as PID 1.
     init: true
@@ -129,7 +129,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-dns-proxy
-    image: ghcr.io/panelalpha/engine-dns-proxy:v2.3.0
+    image: ghcr.io/panelalpha/engine-dns-proxy:v2.3.1
     pull_policy: missing
     restart: always
     hostname: dns-proxy.shared-hosting.palocal
@@ -148,7 +148,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-metrics
-    image: ghcr.io/panelalpha/engine-metrics:v2.3.0
+    image: ghcr.io/panelalpha/engine-metrics:v2.3.1
     pull_policy: missing
     # Python ignores SIGTERM as PID 1.
     init: true
@@ -180,7 +180,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-database
-    image: ghcr.io/panelalpha/app-database:v2.3.0
+    image: ghcr.io/panelalpha/app-database:v2.3.1
     pull_policy: missing
     restart: always
     hostname: database-core.shared-hosting.palocal
@@ -202,7 +202,7 @@ services:
       context: ./templates/config/pure-ftpd/build
       args:
         VERSION: 1.0.51
-    image: ghcr.io/panelalpha/engine-pure-ftpd:v2.3.0
+    image: ghcr.io/panelalpha/engine-pure-ftpd:v2.3.1
     pull_policy: missing
     restart: always
     hostname: pure-ftpd.shared-hosting.palocal
@@ -223,7 +223,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-sftp
-    image: ghcr.io/panelalpha/engine-sftp:v2.3.0
+    image: ghcr.io/panelalpha/engine-sftp:v2.3.1
     pull_policy: missing
     restart: always
     hostname: sftp.shared-hosting.palocal
@@ -253,7 +253,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-database
-    image: ghcr.io/panelalpha/app-database:v2.3.0
+    image: ghcr.io/panelalpha/app-database:v2.3.1
     pull_policy: missing
     restart: always
     hostname: database-users.shared-hosting.palocal
@@ -283,7 +283,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-phpmyadmin-users
-    image: ghcr.io/panelalpha/engine-phpmyadmin-users:v2.3.0
+    image: ghcr.io/panelalpha/engine-phpmyadmin-users:v2.3.1
     pull_policy: missing
     restart: always
     hostname: phpmyadmin-users.shared-hosting.palocal
@@ -456,7 +456,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-lighthouse
-    image: ghcr.io/panelalpha/engine-lighthouse:v2.3.0
+    image: ghcr.io/panelalpha/engine-lighthouse:v2.3.1
     pull_policy: missing
     init: true
     restart: "always"

@@ -7,6 +7,7 @@ use App\Http\Middleware\CoverageMiddleware;
 use App\Http\Middleware\EncryptCookies;
 use App\Http\Middleware\EnsureProjectNotProtected;
 use App\Http\Middleware\EnsureSwaggerEnabled;
+use App\Http\Middleware\EnsureSystemProjectHidden;
 use App\Http\Middleware\EnsureTokenMayUseApi;
 use App\Http\Middleware\JsonMiddleware;
 use App\Http\Middleware\LogHubCalls;
@@ -82,6 +83,7 @@ class Kernel extends HttpKernel
             // was issued to do, then whether the project it acts on lets a
             // token touch it at all.
             EnsureTokenMayUseApi::class,
+            EnsureSystemProjectHidden::class,
             EnsureProjectNotProtected::class,
             CoverageMiddleware::class,
         ],

@@ -4,9 +4,9 @@ namespace App\Http\Controllers\User;
 
 use App\Auth\RequestToken;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\ProjectSettingUpdateRequest;
 use App\Http\Responses\Refusal;
 use App\Lib\Apis\Cloudflare\CloudflareException;
-use App\Lib\Vault\RequestVault;
 use App\System\Project\Settings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -111,18 +111,14 @@ class ProjectSettingController extends Controller
     /**
      * Set one setting.
      */
-    public function update(string $username, string $key, Request $request): JsonResponse
+    public function update(string $username, string $key, ProjectSettingUpdateRequest $request): JsonResponse
     {
         if ($refusal = $this->readOnlyRefusal($request, $username, $key)) {
             return $refusal;
         }
 
-        $settings = $this->settingsFor($username);
-        $validated = $request->validate(['value' => ['required', 'string']]);
-
-        // A secret setting may be given a `vault:<key>` in place of the secret.
         try {
-            $result = $settings->set($key, self::valueFor($username, $key, (string) $validated['value']));
+            $result = $this->settingsFor($username)->set($key, (string) $request->validated('value'));
         } catch (\InvalidArgumentException|CloudflareException $e) {
             // An unknown key, or a token Cloudflare itself refused: the
             // caller's input either way.
@@ -130,23 +126,6 @@ class ProjectSettingController extends Controller
         }
 
         return new JsonResponse(['data' => $result]);
-    }
-
-    /**
-     * The value to store: as sent, or the secret a `vault:<key>` stands for.
-     *
-     * Only a *secret* setting may take a reference: a non-secret one can be
-     * read back verbatim, so resolving it from the vault would put a secret
-     * where the transcript can see it. There, `vault:...` is a literal.
-     */
-    private static function valueFor(string $username, string $key, string $value): string
-    {
-        if (! Settings::isSecret($key)) {
-            return $value;
-        }
-
-        // The field is `value`; the vault type is the setting key in snake_case.
-        return (string) RequestVault::get('value', $username, str_replace('-', '_', Settings::normalizeKey($key)));
     }
 
     #[OA\Delete(
@@ -200,16 +179,17 @@ class ProjectSettingController extends Controller
     }
 
     /**
-     * `protected` is the operator's: a token able to clear it would lift the
-     * refusal it is being held by. The console writes it without a token.
+     * `protected` and `system` are the operator's: a token able to clear one would lift the
+     * refusal it is being held by. The console writes them without a token.
      */
     private function readOnlyRefusal(Request $request, string $username, string $key): ?JsonResponse
     {
-        if (Settings::normalizeKey($key) !== Settings::KEY_PROTECTED || RequestToken::of($request) === null) {
+        $key = Settings::normalizeKey($key);
+        if (! in_array($key, Settings::OPERATOR_KEYS, true) || RequestToken::of($request) === null) {
             return null;
         }
 
-        return Refusal::json(403, 'key', self::READ_ONLY, "The 'protected' setting is read-only over the API; an operator "
+        return Refusal::json(403, 'key', self::READ_ONLY, "The '{$key}' setting is read-only over the API; an operator "
             .'sets or clears it on the host.', $username);
     }
 }

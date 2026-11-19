@@ -7,7 +7,9 @@ use App\Http\Middleware\Authenticate;
 use App\Models\Admin;
 use App\Models\PersonalAccessToken;
 use App\Models\Task;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Schema;
 use Tests\Unit\Task\Support\StubTaskJob;
 
 class TaskListHttpTest extends SqliteTaskTestCase
@@ -19,6 +21,17 @@ class TaskListHttpTest extends SqliteTaskTestCase
     {
         parent::setUp();
         $this->withoutMiddleware(Authenticate::class);
+        Schema::create('users', function (Blueprint $table): void {
+            $table->id();
+            $table->string('username');
+            $table->json('details')->nullable();
+        });
+    }
+
+    protected function tearDown(): void
+    {
+        Schema::dropIfExists('users');
+        parent::tearDown();
     }
 
     public function test_status_active_returns_the_unfinished_tasks_of_one_project(): void

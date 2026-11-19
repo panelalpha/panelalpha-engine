@@ -20,7 +20,10 @@ class WpAutoUpdateController extends WordPressController
         summary: 'Read WordPress auto-update settings',
         description: 'Returns core (`off`|`on`|`minor`), plugins (`off`|`on`), and themes '
             .'(`off`|`on`) auto-update settings, plus each plugin and theme\'s own status '
-            .'(`enabled`|`disabled`); `on` means every one is enabled. Optional `path` selects the install.',
+            .'(`enabled`|`disabled`); `on` means every one is enabled. Optional `path` selects the install. '
+            .'`core` is `off` when `WP_AUTO_UPDATE_CORE` holds a value WordPress cannot use. `blocked_by` names '
+            .'the wp-config.php constants that stop automatic updates (that unusable `WP_AUTO_UPDATE_CORE`, '
+            .'`DISALLOW_FILE_MODS` or `AUTOMATIC_UPDATER_DISABLED` set to true), empty when none.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
         parameters: [
@@ -64,6 +67,12 @@ class WpAutoUpdateController extends WordPressController
                         type: 'object',
                         description: 'Theme name => enabled|disabled.',
                         additionalProperties: new OA\AdditionalProperties(type: 'string'),
+                    ),
+                    new OA\Property(
+                        property: 'blocked_by',
+                        type: 'array',
+                        description: 'Constant names that stop automatic updates, in this order: WP_AUTO_UPDATE_CORE, DISALLOW_FILE_MODS, AUTOMATIC_UPDATER_DISABLED. Empty when none.',
+                        items: new OA\Items(type: 'string'),
                     ),
                 ])],
             )),

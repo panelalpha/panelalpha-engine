@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts"
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 
-for fn in replace_running_updaters unzip_panelalpha_engine; do
+for fn in running_bind_sources place_mounted_engine_files replace_running_updaters unzip_panelalpha_engine; do
     sed -n "/^${fn}() {/,/^}\$/p" "$SCRIPT_DIR/installer.sh" >>"$W/funcs.sh"
 done
 # shellcheck source=/dev/null

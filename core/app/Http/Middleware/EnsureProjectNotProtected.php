@@ -170,7 +170,11 @@ class EnsureProjectNotProtected
 
     private function refuse(string $username): JsonResponse
     {
+        $lift = User::findByUsername($username)?->isSystem() === true
+            ? 'make it an ordinary project first, since a system project is always protected'
+            : 'clear its protected setting first';
+
         return Refusal::json(409, 'project', self::CODE, "Project '{$username}' is protected from API and MCP tokens. Deleting, "
-            .'stopping or redeploying it needs an operator to clear its protected setting first.', $username);
+            ."stopping or redeploying it needs an operator to {$lift}.", $username);
     }
 }

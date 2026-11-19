@@ -1,7 +1,8 @@
 #!/bin/bash
 #
 # docker-compose.yml-webserver is a `cp -n` copy of one variant, so operator edits survive updates.
-# It takes the variant's `image:` (same repository only) and a missing `ulimits:` block, nothing else.
+# It takes the variant's `image:` (same repository only), its ./third-party mounts and a missing `ulimits:` block,
+# nothing else.
 # A symlink (what webserver.sh leaves) already follows the shipped file.
 #
 #   bash scripts/refresh-webserver-image.sh /opt/panelalpha/shared-hosting
@@ -25,6 +26,30 @@ refresh_image() {
 
     sed -i "s#^    image: .*#    image: ${image}#" "$copy"
     echo "Webserver image ${current} -> ${image}"
+}
+
+# A module built for one nginx loads into no other, so the copy mounts what the release ships at each target.
+refresh_third_party_mounts() {
+    local tmp changed
+    tmp=$(mktemp)
+    changed=$(mktemp)
+    awk -v changed="$changed" '
+        /^      - \.\/third-party\// { split($2, m, ":") }
+        FNR == NR { if ($0 ~ /^      - \.\/third-party\//) shipped[m[2]] = $0; next }
+        /^      - \.\/third-party\// && (m[2] in shipped) && shipped[m[2]] != $0 {
+            split(shipped[m[2]], f, " ")
+            split(f[2], n, ":")
+            print "Webserver mount " m[1] " -> " n[1] > changed
+            print shipped[m[2]]
+            next
+        }
+        { print }
+    ' "$shipped" "$copy" >"$tmp"
+    if [ -s "$changed" ]; then
+        cat "$tmp" >"$copy"
+        cat "$changed"
+    fi
+    rm -f "$tmp" "$changed"
 }
 
 # The shipped block and its comment, after the copy's `restart:` line, else its `image:` line.
@@ -55,4 +80,5 @@ add_ulimits() {
 }
 
 refresh_image
+refresh_third_party_mounts
 add_ulimits

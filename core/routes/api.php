@@ -109,6 +109,7 @@ Route::post('/internal/site-password/{username}/login', [SitePasswordGateControl
 
 // What any token may do to itself. PanelAlpha Connect rotates and ends its
 // token through these; nothing here reaches another token.
+Route::get('/tokens/current', [TokenController::class, 'show']);
 Route::post('/tokens/current/rotate', [TokenController::class, 'rotate']);
 Route::delete('/tokens/current', [TokenController::class, 'destroy']);
 

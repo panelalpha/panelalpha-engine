@@ -29,9 +29,9 @@ class WordpressMigratorZipTest extends WordpressMigrationTestCase
 
         $installZip = null;
         try {
-            $installZip = (new WordpressMigratorZip())->repackFromTagArchive($fixture);
+            $installZip = (new WordpressMigratorZip)->repackFromTagArchive($fixture);
 
-            $zip = new ZipArchive();
+            $zip = new ZipArchive;
             $this->assertTrue($zip->open($installZip) === true);
 
             $this->assertNotFalse($zip->locateName('wordpress-migrator/wordpress-migrator.php'));
@@ -68,9 +68,9 @@ class WordpressMigratorZipTest extends WordpressMigrationTestCase
 
     public function test_discard_removes_the_migrator_temp_directory(): void
     {
-        $workDir = sys_get_temp_dir() . '/wp-migrator-' . bin2hex(random_bytes(4));
+        $workDir = sys_get_temp_dir().'/wp-migrator-'.bin2hex(random_bytes(4));
         mkdir($workDir, 0700, true);
-        $zipPath = $workDir . '/wordpress-migrator-install.zip';
+        $zipPath = $workDir.'/wordpress-migrator-install.zip';
         file_put_contents($zipPath, 'zip');
 
         $cache = new \ReflectionProperty(WordpressMigratorZip::class, 'cache');
@@ -84,19 +84,19 @@ class WordpressMigratorZipTest extends WordpressMigrationTestCase
 
     public function test_repack_rejects_parent_directory_entry(): void
     {
-        $tmp = sys_get_temp_dir() . '/wp-migrator-slip-' . bin2hex(random_bytes(4));
+        $tmp = sys_get_temp_dir().'/wp-migrator-slip-'.bin2hex(random_bytes(4));
         mkdir($tmp, 0700, true);
         $this->registerFixtureCleanup($tmp);
 
-        $zipPath = $tmp . '/tag.zip';
-        $escaped = $tmp . '/work/escaped.php';
-        $zip = new ZipArchive();
+        $zipPath = $tmp.'/tag.zip';
+        $escaped = $tmp.'/work/escaped.php';
+        $zip = new ZipArchive;
         $this->assertTrue($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true);
         $zip->addFromString('../escaped.php', '<?php echo "nope";');
         $zip->close();
 
         try {
-            (new WordpressMigratorZip())->repackFromTagArchive($zipPath, $tmp . '/work');
+            (new WordpressMigratorZip)->repackFromTagArchive($zipPath, $tmp.'/work');
             $this->fail('Expected RuntimeException for a parent-directory zip entry');
         } catch (RuntimeException $e) {
             $this->assertStringContainsString('unsafe path', $e->getMessage());
@@ -112,7 +112,7 @@ class WordpressMigratorZipTest extends WordpressMigrationTestCase
         ]);
 
         try {
-            (new WordpressMigratorZip())->repackFromTagArchive($fixture);
+            (new WordpressMigratorZip)->repackFromTagArchive($fixture);
             $this->fail('Expected RuntimeException for missing wordpress-migrator.php');
         } catch (RuntimeException $e) {
             $this->assertStringContainsString('wordpress-migrator.php', $e->getMessage());
@@ -143,6 +143,37 @@ class WordpressMigratorZipTest extends WordpressMigrationTestCase
         $this->fakeRelease(null);
 
         $this->assertFalse(WordpressMigratorZip::requiresToken($this->download()));
+    }
+
+    public function test_version_of_reads_the_version_header_of_the_install_zip(): void
+    {
+        $this->assertSame('1.1.4', WordpressMigratorZip::versionOf($this->installZipWithHeader(" * Version: 1.1.4\n")));
+    }
+
+    public function test_version_of_is_null_when_the_main_file_has_no_version_header(): void
+    {
+        $this->assertNull(WordpressMigratorZip::versionOf($this->installZipWithHeader('')));
+    }
+
+    /**
+     * An install zip whose main plugin file carries the given header line, as WordPress reads it.
+     */
+    private function installZipWithHeader(string $header): string
+    {
+        $dir = sys_get_temp_dir().'/wp-migrator-version-'.bin2hex(random_bytes(4));
+        mkdir($dir, 0700, true);
+        $this->registerFixtureCleanup($dir);
+
+        $path = $dir.'/wordpress-migrator-install.zip';
+        $zip = new ZipArchive;
+        $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true);
+        $zip->addFromString(
+            'wordpress-migrator/wordpress-migrator.php',
+            "<?php\n/**\n * Plugin Name: WordPress Migrator\n{$header} */\n",
+        );
+        $zip->close();
+
+        return $path;
     }
 
     public function test_the_default_release_is_v1_1_4_pinned_by_its_checksum(): void
@@ -189,14 +220,14 @@ class WordpressMigratorZipTest extends WordpressMigrationTestCase
 
         $this->assertSame(WordpressMigratorZip::REQUEST_DOWNLOAD_SECONDS, $seconds->getValue(app(WordpressMigratorZip::class)));
         $this->assertSame(120, WordpressMigratorZip::REQUEST_DOWNLOAD_SECONDS);
-        $this->assertSame(WordpressMigratorZip::JOB_DOWNLOAD_SECONDS, $seconds->getValue($stepZip(new InstallDestinationPluginStep())));
-        $this->assertSame(WordpressMigratorZip::JOB_DOWNLOAD_SECONDS, $seconds->getValue($stepZip(new InstallSourcePluginStep())));
+        $this->assertSame(WordpressMigratorZip::JOB_DOWNLOAD_SECONDS, $seconds->getValue($stepZip(new InstallDestinationPluginStep)));
+        $this->assertSame(WordpressMigratorZip::JOB_DOWNLOAD_SECONDS, $seconds->getValue($stepZip(new InstallSourcePluginStep)));
     }
 
     public function test_download_failure_raises_clear_error(): void
     {
         try {
-            (new WordpressMigratorZip())->downloadAndRepack('http://' . TestNetwork::LOOPBACK . ':1/does-not-exist.zip');
+            (new WordpressMigratorZip)->downloadAndRepack('http://'.TestNetwork::LOOPBACK.':1/does-not-exist.zip');
             $this->fail('Expected RuntimeException for failed download');
         } catch (RuntimeException $e) {
             $this->assertStringContainsString('download', strtolower($e->getMessage()));
@@ -205,7 +236,7 @@ class WordpressMigratorZipTest extends WordpressMigrationTestCase
 
     private function download(): string
     {
-        $installZip = (new WordpressMigratorZip())->downloadAndRepack('https://releases.example/wordpress-migrator.zip');
+        $installZip = (new WordpressMigratorZip)->downloadAndRepack('https://releases.example/wordpress-migrator.zip');
         $this->registerFixtureCleanup(dirname($installZip));
 
         return $installZip;
@@ -228,33 +259,33 @@ class WordpressMigratorZipTest extends WordpressMigrationTestCase
      */
     private function migratorWorkDirs(): array
     {
-        $dirs = glob(sys_get_temp_dir() . '/wp-migrator-*', GLOB_ONLYDIR) ?: [];
+        $dirs = glob(sys_get_temp_dir().'/wp-migrator-*', GLOB_ONLYDIR) ?: [];
         sort($dirs);
 
         return $dirs;
     }
 
     /**
-     * @param array<string, string> $files relative path => contents under the tag top dir
+     * @param  array<string, string>  $files  relative path => contents under the tag top dir
      */
     private function buildTagArchiveFixture(array $files): string
     {
-        $tmp = sys_get_temp_dir() . '/wp-migrator-fixture-' . bin2hex(random_bytes(6));
+        $tmp = sys_get_temp_dir().'/wp-migrator-fixture-'.bin2hex(random_bytes(6));
         mkdir($tmp, 0700, true);
-        $top = $tmp . '/panelalpha-wordpress-migrator-1.1.4';
+        $top = $tmp.'/panelalpha-wordpress-migrator-1.1.4';
         mkdir($top, 0700, true);
 
         foreach ($files as $relative => $contents) {
-            $path = $top . '/' . $relative;
+            $path = $top.'/'.$relative;
             $dir = dirname($path);
-            if (!is_dir($dir)) {
+            if (! is_dir($dir)) {
                 mkdir($dir, 0700, true);
             }
             file_put_contents($path, $contents);
         }
 
-        $zipPath = $tmp . '/tag.zip';
-        $zip = new ZipArchive();
+        $zipPath = $tmp.'/tag.zip';
+        $zip = new ZipArchive;
         $this->assertTrue($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true);
 
         $iterator = new \RecursiveIteratorIterator(
@@ -264,10 +295,10 @@ class WordpressMigratorZipTest extends WordpressMigrationTestCase
         /** @var \SplFileInfo $file */
         foreach ($iterator as $file) {
             $relative = 'panelalpha-wordpress-migrator-1.1.4/'
-                . substr($file->getPathname(), strlen($top) + 1);
+                .substr($file->getPathname(), strlen($top) + 1);
             $relative = str_replace('\\', '/', $relative);
             if ($file->isDir()) {
-                $zip->addEmptyDir(rtrim($relative, '/') . '/');
+                $zip->addEmptyDir(rtrim($relative, '/').'/');
             } else {
                 $zip->addFile($file->getPathname(), $relative);
             }
@@ -291,7 +322,7 @@ class WordpressMigratorZipTest extends WordpressMigrationTestCase
     protected function tearDown(): void
     {
         foreach ($this->fixtureDirs as $dir) {
-            if (!is_dir($dir)) {
+            if (! is_dir($dir)) {
                 continue;
             }
             $iterator = new \RecursiveIteratorIterator(

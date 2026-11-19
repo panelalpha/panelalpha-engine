@@ -4,9 +4,12 @@ namespace App\Console\Commands\Users\ProjectSettings;
 
 use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Lib\Apis\Cloudflare\CloudflareException;
+use App\Lib\Vault\ProjectSettingVaultTypes;
+use App\Lib\Vault\RequestVault;
 use App\Models\User;
 use App\System\Project\Settings;
 use Illuminate\Console\Command;
+use Illuminate\Validation\ValidationException;
 
 class Set extends Command
 {
@@ -79,6 +82,16 @@ class Set extends Command
         }
 
         try {
+            $value = $this->withVaultSecret($user->username, $key, $value);
+        } catch (ValidationException $e) {
+            foreach (collect($e->errors())->flatten() as $message) {
+                $this->error((string) $message);
+            }
+
+            return 1;
+        }
+
+        try {
             $result = $user->project()->settings()->set($key, $value);
         } catch (CloudflareException $e) {
             $this->error($e->getMessage());
@@ -97,6 +110,19 @@ class Set extends Command
         $this->line('');
 
         return 0;
+    }
+
+    /**
+     * The value with a secret setting's `vault:<key>` read in its place. Reading claims the entry and counts a use,
+     * so it runs only once the change is confirmed.
+     *
+     * @throws ValidationException when the reference cannot be used
+     */
+    private function withVaultSecret(string $project, string $key, string $value): string
+    {
+        $type = ProjectSettingVaultTypes::typeFor($key);
+
+        return $type === null ? $value : (string) RequestVault::resolve('value', $value, $project, $type);
     }
 
     /**

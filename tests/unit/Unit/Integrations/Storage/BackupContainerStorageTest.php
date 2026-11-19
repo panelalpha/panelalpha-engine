@@ -82,6 +82,68 @@ class BackupContainerStorageTest extends TestCase
         }
     }
 
+    #[RequiresPhpExtension('ftp')]
+    public function test_ftp_connection_options_ignore_passive_address_for_ftp_and_ftps(): void
+    {
+        foreach (['ftp', 'ftps'] as $driver) {
+            $container = $this->container($driver, '/backups', [
+                'host' => 'ftp.example.com',
+                'username' => 'backup',
+                'password' => 'secret',
+            ]);
+
+            $options = Ftp::ftpConnectionOptions($container);
+
+            $this->assertTrue($options->ignorePassiveAddress(), $driver);
+            $this->assertSame($driver === 'ftps', $options->ssl(), $driver);
+        }
+    }
+
+    #[RequiresPhpExtension('ftp')]
+    public function test_ftp_connection_options_map_credentials_root_and_port(): void
+    {
+        $container = $this->container('ftp', '/backups/panel', [
+            'host' => 'ftp.example.com',
+            'username' => 'backup',
+            'password' => 'secret',
+            'port' => '2121',
+        ]);
+
+        $options = Ftp::ftpConnectionOptions($container);
+
+        $this->assertSame('ftp.example.com', $options->host());
+        $this->assertSame('/backups/panel', $options->root());
+        $this->assertSame('backup', $options->username());
+        $this->assertSame('secret', $options->password());
+        $this->assertSame(2121, $options->port());
+    }
+
+    #[RequiresPhpExtension('ftp')]
+    public function test_ftp_connection_options_default_to_port_21_and_empty_password(): void
+    {
+        $container = $this->container('ftp', '/backups', [
+            'host' => 'ftp.example.com',
+            'username' => 'backup',
+        ]);
+
+        $options = Ftp::ftpConnectionOptions($container);
+
+        $this->assertSame(21, $options->port());
+        $this->assertSame('', $options->password());
+    }
+
+    #[RequiresPhpExtension('ftp')]
+    public function test_ftp_connection_options_require_host(): void
+    {
+        $container = $this->container('ftp', '/backups', [
+            'username' => 'backup',
+            'password' => 'secret',
+        ]);
+
+        $this->expectException(InvalidArgumentException::class);
+        Ftp::ftpConnectionOptions($container);
+    }
+
     public function test_s3_storage_accepts_filesystem_operator_for_tests(): void
     {
         $filesystem = $this->localFilesystem();

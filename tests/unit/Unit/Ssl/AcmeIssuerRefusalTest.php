@@ -22,7 +22,9 @@ class AcmeIssuerRefusalTest extends TestCase
                 'shop.nip.io',
                 false,
                 'shop.nip.io is under nip.io, a zone every engine in the fleet issues under and shares one 50-certificate '
-                .'weekly limit on. Set shared_zone_issuance to obtain one anyway, or give the project a domain you own',
+                .'weekly limit on. To obtain one anyway, turn on the '
+                .'ssl_shared_zone_issuance setting (the shared_zone_issuance field of the SSL config), or give the '
+                .'project a domain you own',
             ],
         ];
     }

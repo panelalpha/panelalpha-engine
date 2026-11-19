@@ -88,6 +88,38 @@ final class WpAdminHtml
         return $plugins;
     }
 
+    /**
+     * The version wp-admin prints under each plugin on the plugins page, by plugin directory.
+     *
+     * Works in any wp-admin language: WordPress prints the number raw next to a translated label, so the first
+     * version-like token (digits with at least one dot) in the first `|` segment of the version line is the version.
+     * A row whose first segment has no such token is left out.
+     *
+     * @return array<string, string>
+     */
+    public static function pluginVersions(string $response): array
+    {
+        $doc = new \DOMDocument;
+        @$doc->loadHTML($response);
+        $xpath = new \DOMXPath($doc);
+
+        $versions = [];
+        foreach ($xpath->query('//tr[@data-plugin]') ?: [] as $row) {
+            if (! $row instanceof \DOMElement) {
+                continue;
+            }
+            $slug = explode('/', $row->getAttribute('data-plugin'))[0];
+            $cells = $xpath->query('.//*[contains(@class, "plugin-version-author-uri")]', $row);
+            $text = $cells !== false && $cells->length > 0 ? (string) $cells->item(0)?->textContent : '';
+            $firstSegment = explode('|', $text, 2)[0];
+            if ($slug !== '' && preg_match('/\d+(?:\.\d+)+[0-9A-Za-z.+-]*/', $firstSegment, $m) === 1) {
+                $versions[$slug] = $m[0];
+            }
+        }
+
+        return $versions;
+    }
+
     public static function wpHomeUrl(string $response): ?string
     {
         $doc = new \DOMDocument;

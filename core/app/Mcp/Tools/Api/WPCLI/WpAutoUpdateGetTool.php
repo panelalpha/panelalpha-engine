@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Read WordPress auto-update settings
 
-    Returns core (`off`|`on`|`minor`), plugins (`off`|`on`), and themes (`off`|`on`) auto-update settings, plus each plugin and theme's own status (`enabled`|`disabled`); `on` means every one is enabled. Optional `path` selects the install.
+    Returns core (`off`|`on`|`minor`), plugins (`off`|`on`), and themes (`off`|`on`) auto-update settings, plus each plugin and theme's own status (`enabled`|`disabled`); `on` means every one is enabled. Optional `path` selects the install. `core` is `off` when `WP_AUTO_UPDATE_CORE` holds a value WordPress cannot use. `blocked_by` names the wp-config.php constants that stop automatic updates (that unusable `WP_AUTO_UPDATE_CORE`, `DISALLOW_FILE_MODS` or `AUTOMATIC_UPDATER_DISABLED` set to true), empty when none.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

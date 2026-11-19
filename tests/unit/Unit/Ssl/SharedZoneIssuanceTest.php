@@ -25,7 +25,8 @@ class SharedZoneIssuanceTest extends TestCase
 
         $this->assertNotNull($reason);
         $this->assertStringContainsString('panelalpha.direct', $reason);
-        $this->assertStringContainsString('shared_zone_issuance', $reason);
+        $this->assertStringContainsString('ssl_shared_zone_issuance setting', $reason);
+        $this->assertStringContainsString('shared_zone_issuance field', $reason);
 
         $this->assertNull(SharedZones::ineligibleReason($name, true));
     }

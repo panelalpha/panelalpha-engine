@@ -40,6 +40,9 @@ class DeployFailureExplainer
     private const REGISTRY_REFUSAL = '/unauthorized|authentication required|authorization failed'
         .'|no basic auth credentials|denied: requested access|\b40[13]\b/i';
 
+    /** Go's resolver failing a lookup; `no such host` is an answer, a name that does not exist, and is left out. */
+    private const DNS_LOOKUP_FAILURE = '/\blookup ([A-Za-z0-9][A-Za-z0-9.-]*) on (\[[0-9A-Fa-f:]+\]|\d{1,3}(?:\.\d{1,3}){3}):53: (?!no such host)([^\n]+)/';
+
     private const DATABASE_AUTH_FAILURE = '/(password authentication failed for user|Access denied for user .{0,40}using password'
         .'|authentication failed.{0,40}MongoServerError)/i';
 
@@ -776,7 +779,8 @@ class DeployFailureExplainer
 
     /**
      * Above base-image-unavailable, which would claim them: a truncated layer from a registry mirror that filled its disk, and an
-     * uppercase first component, which the daemon reads as a registry host and fails to look up.
+     * uppercase first component, which the daemon reads as a registry host and fails to look up; and a registry lookup DNS
+     * did not answer, above the entrypoint rule that would quote compose's "git" warning printed beside it.
      *
      * @return array<string, array{0: string, 1: callable(array<int|string, string>, string): ?string}>
      */
@@ -812,7 +816,56 @@ class DeployFailureExplainer
                         .'The file that names it has to say "'.self::lowercaseRepository($m[1]).'".';
                 },
             ],
+
+            'build-dns-unavailable' => [
+                self::DNS_LOOKUP_FAILURE,
+                static fn (array $m, string $output = ''): string => self::dnsFailure($m[1], $m[2], $m[3], $output),
+            ],
         ];
+    }
+
+    /**
+     * A lookup Go's resolver made and DNS did not answer. With no nameserver in resolv.conf Go asks 127.0.0.1:53 and
+     * [::1]:53, so a refusal there means the process that looked the name up had no DNS server at all.
+     */
+    private static function dnsFailure(string $host, string $server, string $said, string $output): string
+    {
+        $subject = self::lookedUpFor($output);
+        $lead = $subject === null ? "The build could not look up {$host}" : "{$subject} could not be downloaded: the build could not look up {$host}";
+
+        if (self::isResolverFallback($server, $said)) {
+            return "{$lead}, because no DNS server was configured where it was looked up: Go fell back to {$server}:53, "
+                .'where none listens. This is a fault on the server, not in the project, and deploying again will not '
+                .'help until it is fixed. Images from Docker Hub are not affected, as they come through the server\'s '
+                .'registry mirror.';
+        }
+
+        return "{$lead}: the DNS server at {$server} answered \"".self::clip(trim($said)).'". This is a DNS problem on '
+            .'the server, not in the project; deploy again, and if it repeats, the server\'s DNS needs fixing.';
+    }
+
+    private static function isResolverFallback(string $server, string $said): bool
+    {
+        return in_array($server, ['127.0.0.1', '[::1]'], true)
+            && preg_match('/cannot assign requested address|connection refused|network is unreachable/i', $said) === 1;
+    }
+
+    /**
+     * The base image whose metadata BuildKit was loading when the lookup failed, as its error block names it, else the
+     * repository of the registry token it was fetching; compose prints only the latter on stderr.
+     */
+    private static function lookedUpFor(string $output): ?string
+    {
+        foreach (['/>\s*\[[^\]\n]*\]\s*load metadata for (\S+?):?\s*$/m', '/failed to resolve source metadata for (\S+?):\s/i'] as $pattern) {
+            if (preg_match($pattern, $output, $m) === 1) {
+                return 'The base image '.preg_replace('#^docker\.io/(?:library/)?#', '', $m[1]);
+            }
+        }
+        if (preg_match('/token\/?\?scope=repository(?:%3A|:)([^&"\s]+?)(?:%3A|:)pull&service=([^&"\s]+)/i', $output, $m) === 1) {
+            return 'The image '.rawurldecode($m[2]).'/'.rawurldecode($m[1]);
+        }
+
+        return null;
     }
 
     /**

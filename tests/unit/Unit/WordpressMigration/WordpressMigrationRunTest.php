@@ -196,7 +196,7 @@ class WordpressMigrationRunTest extends WordpressMigrationTestCase
         return (new RoutedSourceHttpClient())
             ->requiringToken(self::SOURCE_TOKEN)
             ->on('GET', 'https://example.com/wp-json/wp-migrator/v1/remote-sync/status/mig-files', new SourceHttpResponse(
-                json_encode(['success' => true, 'status' => ['status' => 'running', 'phase' => 'files']], JSON_THROW_ON_ERROR),
+                json_encode(['success' => true, 'status' => ['status' => 'in_progress', 'phase' => 'ready', 'backup_running' => false]], JSON_THROW_ON_ERROR),
                 200,
             ))
             ->on('POST', 'https://example.com/wp-json/wp-migrator/v1/remote-sync/process-batch', function () use (&$sent, $batches): SourceHttpResponse {

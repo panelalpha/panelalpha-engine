@@ -165,16 +165,30 @@ final class Ftp extends AbstractStorage
             return new Filesystem($adapter);
         }
 
-        $adapter = new FtpAdapter(new FtpConnectionOptions(
+        return new Filesystem(new FtpAdapter(self::ftpConnectionOptions($container)));
+    }
+
+    /**
+     * Ignores the PASV address the server sends back. pure-ftpd in the Engine answers with
+     * `localhost`, and NAT setups can also send a private address, so data goes to the control host.
+     *
+     * @internal
+     */
+    public static function ftpConnectionOptions(BackupContainer $container): FtpConnectionOptions
+    {
+        $credentials = self::requireCredentials($container, $container->driver);
+        $host = self::requireCredential($credentials, 'host', $container->driver);
+        $username = self::requireCredential($credentials, 'username', $container->driver);
+
+        return new FtpConnectionOptions(
             host: $host,
             root: $container->location,
             username: $username,
-            password: $password,
+            password: $credentials['password'] ?? '',
             port: (int) ($credentials['port'] ?? 21),
             ssl: $container->driver === 'ftps',
-        ));
-
-        return new Filesystem($adapter);
+            ignorePassiveAddress: true,
+        );
     }
 
     private static function requireCredentials(BackupContainer $container, string $driver): array

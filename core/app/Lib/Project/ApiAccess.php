@@ -88,6 +88,19 @@ class ApiAccess
         return $entry === null ? null : self::reported($entry);
     }
 
+    /** The project whose API access entry holds this token, current or still pending revocation, or null. */
+    public function projectHolding(PersonalAccessToken $token): ?string
+    {
+        $id = (int) $token->getKey();
+        foreach ($this->entries() as $entry) {
+            if (in_array($id, [self::idOf($entry['token_id'] ?? null), self::idOf($entry[self::PENDING] ?? null)], true)) {
+                return (string) $entry['project'];
+            }
+        }
+
+        return null;
+    }
+
     /**
      * Every entry, without the tokens.
      *

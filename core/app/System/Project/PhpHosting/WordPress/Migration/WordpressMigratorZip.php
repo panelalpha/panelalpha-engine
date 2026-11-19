@@ -189,7 +189,7 @@ class WordpressMigratorZip
     /**
      * The `Version:` header of the plugin's main file, as WordPress reads it.
      */
-    private static function versionOf(string $installZip): ?string
+    public static function versionOf(string $installZip): ?string
     {
         $zip = new ZipArchive;
         if ($zip->open($installZip) !== true) {

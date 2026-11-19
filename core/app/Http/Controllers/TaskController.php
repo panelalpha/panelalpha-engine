@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Auth\SystemProjects;
 use App\Auth\TokenAbilities;
 use App\Http\Controllers\Concerns\StreamsNdjson;
 use App\Http\Requests\TaskListRequest;
@@ -168,6 +169,7 @@ class TaskController extends Controller
         if ($projects !== null) {
             $query->whereIn('username', $projects);
         }
+        SystemProjects::forRequest()->withoutHidden($query);
     }
 
     #[OA\Get(

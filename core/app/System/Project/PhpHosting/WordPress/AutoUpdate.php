@@ -5,10 +5,14 @@ namespace App\System\Project\PhpHosting\WordPress;
 /**
  * Auto-updates of core (WP_AUTO_UPDATE_CORE: off|on|minor), plugins and themes (`auto-updates enable|disable --all`).
  * The read lists every plugin and theme too, since the aggregate cannot show a partly enabled type.
+ * It reports the wp-config.php constants that block updates and never fails on an unknown core value.
  */
 final class AutoUpdate
 {
     private const CORE_CONSTANT = 'WP_AUTO_UPDATE_CORE';
+
+    /** Constants that block automatic updates when true, in the order they are reported. */
+    private const BLOCKING_CONSTANTS = ['DISALLOW_FILE_MODS', 'AUTOMATIC_UPDATER_DISABLED'];
 
     public function __construct(
         private WpCli $cli,
@@ -21,6 +25,7 @@ final class AutoUpdate
      *     themes: string,
      *     plugin_items: array<string, string>,
      *     theme_items: array<string, string>,
+     *     blocked_by: list<string>,
      * }
      */
     public function get(): array
@@ -29,12 +34,20 @@ final class AutoUpdate
         $pluginItems = $this->readItems('plugin');
         $themeItems = $this->readItems('theme');
 
+        $blockedBy = $core === null ? [self::CORE_CONSTANT] : [];
+        foreach (self::BLOCKING_CONSTANTS as $name) {
+            if ($this->isConstantTrue($name)) {
+                $blockedBy[] = $name;
+            }
+        }
+
         return [
-            'core' => $core,
+            'core' => $core ?? 'off',
             'plugins' => $this->aggregate($pluginItems),
             'themes' => $this->aggregate($themeItems),
             'plugin_items' => $pluginItems,
             'theme_items' => $themeItems,
+            'blocked_by' => $blockedBy,
         ];
     }
 
@@ -64,8 +77,9 @@ final class AutoUpdate
     /**
      * An undefined constant reads as minor: WordPress defaults to minor-only core updates. Read as JSON, since WP-CLI
      * otherwise echoes a false constant as an empty line, which would read as minor too.
+     * Null means the constant has a value WordPress cannot use.
      */
-    private function readCore(): string
+    private function readCore(): ?string
     {
         $result = $this->cli->run(
             ['config', 'get', self::CORE_CONSTANT, '--type=constant', '--format=json'],
@@ -96,19 +110,31 @@ final class AutoUpdate
         );
     }
 
-    private function mapCoreFromWp(string $raw): string
+    private function mapCoreFromWp(string $raw): ?string
     {
-        $normalized = strtolower(trim($raw, " \t\n\r\0\x0B\"'"));
-
-        return match ($normalized) {
+        return match ($this->normalize($raw)) {
             'false', '0', 'off' => 'off',
             'true', '1', 'on' => 'on',
             'minor', '' => 'minor',
-            default => throw new Exception(
-                "Unexpected WP_AUTO_UPDATE_CORE value: {$raw}.",
-                500,
-            ),
+            default => null,
         };
+    }
+
+    /** True when the constant is defined and its value is true, 1 or on. */
+    private function isConstantTrue(string $name): bool
+    {
+        $result = $this->cli->run(['config', 'get', $name, '--type=constant']);
+
+        if (($result['exit_code'] ?? 1) !== 0) {
+            return false;
+        }
+
+        return in_array($this->normalize($result['stdout']), ['true', '1', 'on'], true);
+    }
+
+    private function normalize(string $raw): string
+    {
+        return strtolower(trim($raw, " \t\n\r\0\x0B\"'"));
     }
 
     /**

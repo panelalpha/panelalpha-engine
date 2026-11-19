@@ -51,15 +51,143 @@ class AutoUpdateTest extends TestCase
             $sequence[2]
         );
         $this->assertSame(
+            ['config', 'get', 'DISALLOW_FILE_MODS', '--type=constant', '--path=/home/alice/example.test/public_html'],
+            $sequence[3]
+        );
+        $this->assertSame(
+            ['config', 'get', 'AUTOMATIC_UPDATER_DISABLED', '--type=constant', '--path=/home/alice/example.test/public_html'],
+            $sequence[4]
+        );
+        $this->assertSame(
             [
                 'core' => 'minor',
                 'plugins' => 'on',
                 'themes' => 'off',
                 'plugin_items' => ['akismet' => 'enabled', 'hello' => 'enabled'],
                 'theme_items' => ['twentytwentyfour' => 'disabled'],
+                'blocked_by' => [],
             ],
             $body
         );
+    }
+
+    public function test_get_unknown_core_value_reads_off_and_is_reported(): void
+    {
+        foreach (['bogus', "'bogus'"] as $raw) {
+            $sequence = [];
+            $auto = $this->autoUpdateWithFakeRunner(
+                $sequence,
+                results: [
+                    ['exit_code' => 0, 'stdout' => $raw, 'stderr' => ''],
+                    ['exit_code' => 0, 'stdout' => '[{"name":"akismet","status":"enabled"}]', 'stderr' => ''],
+                    ['exit_code' => 0, 'stdout' => '[{"name":"twentytwentyfour","status":"disabled"}]', 'stderr' => ''],
+                ],
+            );
+
+            $body = $auto->get();
+
+            $this->assertSame('off', $body['core'], $raw);
+            $this->assertSame(['WP_AUTO_UPDATE_CORE'], $body['blocked_by'], $raw);
+            $this->assertSame(['akismet' => 'enabled'], $body['plugin_items'], $raw);
+            $this->assertSame(['twentytwentyfour' => 'disabled'], $body['theme_items'], $raw);
+        }
+    }
+
+    public function test_get_reports_disallow_file_mods_and_automatic_updater_disabled(): void
+    {
+        $sequence = [];
+        $auto = $this->autoUpdateWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => 'minor', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => '[]', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => '[]', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => 'true', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => '1', 'stderr' => ''],
+            ],
+        );
+
+        $this->assertSame(['DISALLOW_FILE_MODS', 'AUTOMATIC_UPDATER_DISABLED'], $auto->get()['blocked_by']);
+    }
+
+    public function test_get_blocked_by_keeps_a_fixed_order(): void
+    {
+        $sequence = [];
+        $auto = $this->autoUpdateWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => 'bogus', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => '[]', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => '[]', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => 'true', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => 'true', 'stderr' => ''],
+            ],
+        );
+
+        $this->assertSame(
+            ['WP_AUTO_UPDATE_CORE', 'DISALLOW_FILE_MODS', 'AUTOMATIC_UPDATER_DISABLED'],
+            $auto->get()['blocked_by'],
+        );
+    }
+
+    public function test_get_blocking_constant_counts_only_true_values(): void
+    {
+        $blocked = ['true', 'TRUE', '1', 'on', '"true"', "'on'"];
+        $notBlocked = [
+            ['exit_code' => 0, 'stdout' => 'false'],
+            ['exit_code' => 0, 'stdout' => '0'],
+            ['exit_code' => 0, 'stdout' => 'off'],
+            ['exit_code' => 0, 'stdout' => ''],
+            ['exit_code' => 0, 'stdout' => 'yes'],
+            ['exit_code' => 1, 'stdout' => '', 'stderr' => 'Error: Constant DISALLOW_FILE_MODS not defined.'],
+            ['stdout' => 'true'],  // no exit_code: treated as a failure
+        ];
+
+        foreach ($blocked as $raw) {
+            $sequence = [];
+            $auto = $this->autoUpdateWithFakeRunner(
+                $sequence,
+                results: [
+                    ['exit_code' => 0, 'stdout' => 'minor', 'stderr' => ''],
+                    ['exit_code' => 0, 'stdout' => '[]', 'stderr' => ''],
+                    ['exit_code' => 0, 'stdout' => '[]', 'stderr' => ''],
+                    ['exit_code' => 0, 'stdout' => $raw, 'stderr' => ''],
+                ],
+            );
+            $this->assertSame(['DISALLOW_FILE_MODS'], $auto->get()['blocked_by'], $raw);
+        }
+
+        foreach ($notBlocked as $result) {
+            $sequence = [];
+            $auto = $this->autoUpdateWithFakeRunner(
+                $sequence,
+                results: [
+                    ['exit_code' => 0, 'stdout' => 'minor', 'stderr' => ''],
+                    ['exit_code' => 0, 'stdout' => '[]', 'stderr' => ''],
+                    ['exit_code' => 0, 'stdout' => '[]', 'stderr' => ''],
+                    ['stderr' => '', ...$result],
+                ],
+            );
+            $this->assertSame([], $auto->get()['blocked_by'], $result['stdout']);
+        }
+    }
+
+    public function test_get_valid_core_false_is_not_blocked(): void
+    {
+        $sequence = [];
+        $auto = $this->autoUpdateWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => 'false', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => '[]', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => '[]', 'stderr' => ''],
+            ],
+        );
+
+        $body = $auto->get();
+
+        $this->assertSame('off', $body['core']);
+        $this->assertSame([], $body['blocked_by']);
     }
 
     public function test_get_reports_a_partly_enabled_type_item_by_item(): void

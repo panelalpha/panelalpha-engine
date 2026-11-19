@@ -32,4 +32,40 @@ class JsonOutputTest extends TestCase
             $this->assertSame('WP-CLI returned invalid JSON.', $e->getMessage());
         }
     }
+
+    public function test_strip_noise_drops_php_diagnostics_and_blank_lines(): void
+    {
+        $output = "PHP Deprecated:  Foo is deprecated in /a/b.php on line 1\n\nWarning: Undefined array key \"x\" in /a/c.php on line 3\nError: real\n";
+
+        $this->assertSame('Error: real', JsonOutput::stripNoise($output));
+    }
+
+    public function test_strip_noise_keeps_fatal_errors(): void
+    {
+        $line = 'PHP Fatal error:  Uncaught Error: boom in /a/b.php on line 4';
+
+        $this->assertSame($line, JsonOutput::stripNoise($line."\n"));
+    }
+
+    public function test_strip_noise_drops_timestamped_php_diagnostics(): void
+    {
+        $output = "[17-Nov-2026 10:00:00 UTC] PHP Deprecated:  Foo is deprecated in /a/b.php on line 1\nError: real\n";
+
+        $this->assertSame('Error: real', JsonOutput::stripNoise($output));
+    }
+
+    public function test_strip_noise_keeps_timestamped_fatal_errors(): void
+    {
+        $line = '[17-Nov-2026 10:00:00 UTC] PHP Fatal error:  Uncaught Error: boom in /a/b.php on line 4';
+
+        $this->assertSame($line, JsonOutput::stripNoise($line."\n"));
+    }
+
+    public function test_php_fatal_error_ahead_of_the_json_is_dropped(): void
+    {
+        $stdout = "PHP Fatal error:  Uncaught Error: boom in /a/b.php on line 4\n"
+            . '[{"name":"akismet"}]';
+
+        $this->assertSame([['name' => 'akismet']], JsonOutput::decodeList($stdout));
+    }
 }
