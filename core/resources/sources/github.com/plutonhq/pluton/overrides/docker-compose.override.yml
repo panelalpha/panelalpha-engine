@@ -1,0 +1,8 @@
+# Layers over the repository's docker-compose.yml: only the login changes.
+services:
+  pluton:
+    env_file:
+      # PLUTON_USER_NAME / PLUTON_USER_PASSWORD, the login the engine generates.
+      # Pluton prefers them over USER_NAME / USER_PASSWORD, which the compose
+      # file still sets from .env (the template's admin / your-secure-password).
+      - ../.panelalpha/app-credentials.env

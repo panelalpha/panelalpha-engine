@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Pluton, a backup tool (restic and rclone behind a web UI, one Node binary
+  with SQLite under /data). The repository's docker-compose.yml runs the
+  published plutonhq/pluton image and the engine runs it as is. Pluton's only
+  login is USER_NAME / USER_PASSWORD from the environment, which that compose
+  file interpolates from .env, and the engine writes .env from .env.template:
+  admin / your-secure-password on every deploy, a login anyone can read in
+  the repository. So the engine generates a login (`credentials:` below,
+  returned by GET /projects/{name}/app-credentials) and
+  overrides/docker-compose.override.yml hands it to the container as
+  PLUTON_USER_NAME / PLUTON_USER_PASSWORD, which Pluton reads in place of
+  USER_NAME / USER_PASSWORD; the template's login no longer signs in. In
+  Docker the login lives in the environment only (the web UI has no password
+  change), so the engine's stored values stay the login across restarts and
+  redeploys. Everything else is the repository's compose file.
+credentials:
+  login_path: /login
+  fields:
+    PLUTON_USER_NAME: {kind: username}
+    PLUTON_USER_PASSWORD: {kind: password}
