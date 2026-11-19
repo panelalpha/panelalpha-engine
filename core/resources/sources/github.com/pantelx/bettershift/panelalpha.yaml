@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  BetterShift, a shift calendar (Next.js with Better Auth and SQLite, the
+  published ghcr.io/pantelx/bettershift image). The repository's
+  docker-compose.yml runs that image with env_file .env, which the engine
+  writes from .env.example, and the engine runs it as is. Sign-up is open
+  and the first account becomes superadmin, so a visitor gets in by
+  registering, but only from an address Better Auth trusts: .env.example
+  sets BETTER_AUTH_URL to http://localhost:3000, so every sign-up and sign-in
+  from the site was refused (403 Invalid origin), and its BETTER_AUTH_SECRET
+  is left blank (Compose reads its inline comment as the value, the same on
+  every install). overrides/docker-compose.override.yml sets the site's
+  address and a secret hooks/prepare.sh generates once into
+  ~/.panelalpha/bettershift, only while the two still have those defaults,
+  then runs the image's own entrypoint. No login is seeded: the visitor's
+  own registration is the way in. Everything else is the repository's
+  compose file.

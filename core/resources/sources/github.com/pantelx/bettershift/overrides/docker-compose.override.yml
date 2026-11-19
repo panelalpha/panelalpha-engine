@@ -1,0 +1,28 @@
+# Layers over the repository's docker-compose.yml, which runs the published
+# image with env_file .env (the engine writes it from .env.example).
+services:
+  bettershift:
+    env_file:
+      # BETTERSHIFT_AUTH_SECRET, generated once by hooks/prepare.sh.
+      - ../.panelalpha/bettershift/secret.env
+    # .env.example's BETTER_AUTH_URL is http://localhost:3000, which Better
+    # Auth also takes as the only trusted origin: every sign-up and sign-in
+    # from the site's own address is refused (403 Invalid origin). Its
+    # BETTER_AUTH_SECRET is empty but for an inline comment, which Compose
+    # reads as the value ("# Generate with: ..."), the same on every install.
+    # Only while they are those defaults, this entrypoint sets the site's
+    # address (PA_PUBLIC_URL, which the engine gives the service) and the
+    # generated secret, then runs the image's own entrypoint and command.
+    entrypoint:
+      - /usr/bin/dumb-init
+      - --
+      - /bin/sh
+      - -c
+      - >-
+        case "$${BETTER_AUTH_URL:-}" in ""|http://localhost:3000)
+        [ -z "$${PA_PUBLIC_URL:-}" ] || export BETTER_AUTH_URL="$$PA_PUBLIC_URL";; esac;
+        case "$${BETTER_AUTH_SECRET:-}" in ""|"#"*)
+        export BETTER_AUTH_SECRET="$${BETTERSHIFT_AUTH_SECRET:-}";; esac;
+        exec /app/docker-entrypoint.sh "$$@"
+      - --
+    command: ["sh", "-c", "node scripts/migrate.mjs && node server.js"]
