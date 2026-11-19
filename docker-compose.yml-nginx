@@ -26,7 +26,7 @@ services:
       - ./webserver-config/nginx/vhosts:/etc/nginx/conf.d
       - ./third-party/modsecurity-3.0.15/lib/libmodsecurity.so.3.0.15:/usr/lib/libmodsecurity.so.3
       - ./third-party/modsecurity-3.0.15/deps/libyajl.so.2:/usr/lib/libyajl.so.2
-      - ./third-party/modsecurity-3.0.15/connector-nginx-1.31.1/ngx_http_modsecurity_module.so:/etc/nginx/modules/ngx_http_modsecurity_module.so
+      - ./third-party/modsecurity-3.0.15/connector-nginx-1.31.9/ngx_http_modsecurity_module.so:/etc/nginx/modules/ngx_http_modsecurity_module.so
       - ./config/modsecurity:/opt/modsecurity
       - /etc/letsencrypt:/etc/letsencrypt
       - /var/lib/letsencrypt:/var/lib/letsencrypt
