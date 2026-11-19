@@ -556,6 +556,36 @@ expect 'hub report never prints the code' '0' "$(printf '%s\n' "$report" | grep 
 HUB_CODE=''
 expect 'no code, no connect' '' "$(PATH="${HUB_BIN}:${PATH}" connect_hub; report_hub_connection)"
 
+# finish_installation: the panel's install (--full-privileges) ends without a Claude Code
+# token; any other install mints one and ends with the command to paste.
+sed -n '/^finish_installation() {/,/^}$/p' "${SCRIPT_DIR}/installer.sh" >"${WORK_DIR}/finish.sh"
+# shellcheck source=/dev/null
+source "${WORK_DIR}/finish.sh"
+report_deployed_project() { :; }
+report_hub_connection() { :; }
+DOCKER_LOG="${WORK_DIR}/docker-calls"
+docker() {
+    echo "$*" >>"$DOCKER_LOG"
+    [[ "$*" == *mcp:connect:claude* ]] && echo 'claude mcp add engine --token T'
+    return 0
+}
+finish_run() { # finish_run <full privileges 0|1>: the outro the TUI shows
+    local run_dir="${WORK_DIR}/run-$1"
+    mkdir -p "$run_dir"
+    : >"$DOCKER_LOG"
+    RUN_DIR="$run_dir" DEPLOY_FULL_PRIVILEGES="$1" DEPLOY_ONLY=0 HUB_ONLY=0 HUB_CODE='' \
+        ENGINE_OP=install ENGINE_CERT_IP='' ENGINE_CERT_DOMAIN=example.com \
+        API_URL=https://example.com:2011/api MCP_URL=https://example.com:2011/mcp \
+        finish_installation >/dev/null
+    cat "$run_dir/outro"
+}
+outro=$(finish_run 1)
+expect 'panel install mints no Claude Code token' '0' "$(grep -c 'mcp:connect:claude' "$DOCKER_LOG")"
+expect 'panel install ends without the command to paste' '0' "$(printf '%s\n' "$outro" | grep -c 'Claude Code')"
+outro=$(finish_run 0)
+expect 'engine install mints a Claude Code token' '1' "$(grep -c 'mcp:connect:claude' "$DOCKER_LOG")"
+expect 'engine install ends with the command to paste' '1' "$(printf '%s\n' "$outro" | grep -c 'Run this in your Claude Code')"
+
 echo
 if [ "$failures" -eq 0 ]; then
     echo "All tests passed."

@@ -2959,6 +2959,14 @@ finish_installation() {
     echo_info "AI agents connect: pae connect"
     echo_info ""
 
+    # The panel's install (--full-privileges): the panel is what its owner uses, so no Claude
+    # Code token is minted and no command to paste ends the install.
+    if [ "${DEPLOY_FULL_PRIVILEGES:-0}" = 1 ]; then
+        outro_nl
+        finish_commit
+        return
+    fi
+
     # One MCP token for Claude Code, minted now so the last lines are commands to paste.
     # Keep each command on its own line: `&&` fails in Windows PowerShell 5.1, and
     # joining with a space would turn two commands into one broken argv.
