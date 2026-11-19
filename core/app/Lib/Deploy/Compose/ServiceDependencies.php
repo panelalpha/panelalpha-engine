@@ -95,6 +95,28 @@ final class ServiceDependencies
     }
 
     /**
+     * The services a file's services name that the file does not define: a slice such as `docker-compose.https.yml`
+     * (a proxy in front of `atlas`) or `compose.drizzle.yaml` (a console on `db`) extends another file.
+     *
+     * @param  array<array-key, mixed>  $services
+     * @return list<string>
+     */
+    public static function undefinedIn(array $services): array
+    {
+        $defined = array_change_key_case(array_flip(array_map('strval', array_keys($services))));
+        $missing = [];
+        foreach ($services as $service) {
+            foreach (is_array($service) ? self::namesIn($service) : [] as $name) {
+                if (! isset($defined[strtolower($name)])) {
+                    $missing[] = $name;
+                }
+            }
+        }
+
+        return array_values(array_unique($missing));
+    }
+
+    /**
      * Points every reference to $from at $to, keeping a `links` alias.
      *
      * @param  array<string, mixed>  $service

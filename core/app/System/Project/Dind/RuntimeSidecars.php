@@ -6,6 +6,7 @@ use App\Lib\Deploy\CacheManager\RegistryImageConfig;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Compose\ComposeFileReferences;
 use App\Lib\Deploy\Compose\ComposeHarden;
+use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Compose\MovedImages;
 use App\Lib\Deploy\Compose\RuntimeSidecars as ComposeSidecars;
@@ -23,6 +24,9 @@ class RuntimeSidecars
 {
     /** Words a compose filename uses for a stack that is not the deployment. */
     private const NON_PRODUCTION_WORDS = ['dev', 'development', 'local', 'test', 'tests', 'testing', 'ci', 'e2e', 'debug'];
+
+    /** Words a compose filename uses for the author's own deployment. */
+    private const PRODUCTION_WORDS = ['prod', 'production'];
 
     /** Words a compose filename uses for the database a stack variant runs on. */
     private const DATABASE_WORDS = ['mysql', 'mariadb', 'postgres', 'postgresql', 'pgsql', 'sqlite', 'sqlite3', 'db'];
@@ -168,7 +172,7 @@ class RuntimeSidecars
         $rootBuildNames = $this->rootBuildNames($projectDir);
         foreach ($candidates as $candidate) {
             $raw = $this->dind->projectTree()->read($projectDir.'/'.$candidate);
-            if ($raw === null) {
+            if ($raw === null || $this->extendsAnotherFile($candidate, $raw)) {
                 continue;
             }
             $extracted = ComposeHarden::extractRuntimeSidecarsFromYaml(
@@ -199,6 +203,25 @@ class RuntimeSidecars
         }
 
         return null;
+    }
+
+    /**
+     * A slice naming services it does not define is a layer over another file, not a stack: Atlas's
+     * `docker-compose.https.yml` gave the app a Caddy in front of it and no database.
+     */
+    private function extendsAnotherFile(string $candidate, string $raw): bool
+    {
+        $services = ComposeYaml::parse($raw)['services'] ?? null;
+        $undefined = is_array($services) ? ServiceDependencies::undefinedIn($services) : [];
+        if ($undefined === []) {
+            return false;
+        }
+        $this->dind->shell()->logger()?->info(
+            "Skipped {$candidate} as a source of backing services: it extends another compose file, naming "
+            .implode(', ', $undefined).' without defining '.(count($undefined) === 1 ? 'it' : 'them')
+        );
+
+        return true;
     }
 
     /**
@@ -283,7 +306,7 @@ class RuntimeSidecars
     {
         return array_values(array_filter(
             self::exampleComposeFilenames($projectDir),
-            static fn (string $name): bool => self::suffixWords($name, ['prod', 'production']) !== []
+            static fn (string $name): bool => self::suffixWords($name, self::PRODUCTION_WORDS) !== []
         ));
     }
 
@@ -303,7 +326,8 @@ class RuntimeSidecars
     }
 
     /**
-     * Stack templates, then the `docker-compose.<x>.yml` slices on disk, non-production ones (`.dev`, `.test`) last.
+     * Stack templates, then the `docker-compose.<x>.yml` slices on disk: production ones (`.prod`) first, so Atlas's
+     * `.production` stack beats its `.https` proxy layer, and non-production ones (`.dev`, `.test`) last.
      *
      * @return list<string>
      */
@@ -318,7 +342,11 @@ class RuntimeSidecars
                 $found,
                 static fn (string $name): bool => self::suffixWords($name, self::NON_PRODUCTION_WORDS) !== []
             ));
-            $names = array_merge($names, array_diff($found, $nonProduction), $nonProduction);
+            $production = array_values(array_filter(
+                $found,
+                static fn (string $name): bool => self::suffixWords($name, self::PRODUCTION_WORDS) !== []
+            ));
+            $names = array_merge($names, $production, array_diff($found, $nonProduction, $production), $nonProduction);
             if (self::shipsAFileDatabaseVariant($found)) {
                 $names = array_filter(
                     $names,
