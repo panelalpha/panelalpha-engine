@@ -1,0 +1,23 @@
+# Compose-replace: the repository has no compose file the engine runs (only
+# docker-compose.yml.example, which pulls the release image).
+# Builds its Dockerfile as the dockerfile strategy would, with the engine's token.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "2260:2260"
+    env_file:
+      # RESIN_PROXY_TOKEN, RESIN_PORT and the rest, made from .env.example.
+      - .env
+      # RESIN_ADMIN_TOKEN, the token the engine generates; later, so it wins.
+      - ../.panelalpha/app-credentials.env
+    volumes:
+      - resin-cache:/var/cache/resin
+      - resin-state:/var/lib/resin
+      - resin-log:/var/log/resin
+
+volumes:
+  resin-cache: {}
+  resin-state: {}
+  resin-log: {}

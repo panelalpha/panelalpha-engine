@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Resin, a sticky proxy pool (one Go binary with its React console on :2260,
+  state in /var/lib/resin). The repository's own Dockerfile is how upstream
+  ships it and the engine builds it as is. The console and its API take only
+  the admin token RESIN_ADMIN_TOKEN, which the engine used to take from
+  .env.example (`change-me-admin-token`), a value nobody deploying it is told
+  and anybody can read in the repository. So the engine generates the token
+  (`credentials:` below, one password field, returned by
+  GET /projects/{name}/app-credentials) and the compose file hands it to Resin
+  over the .env made from .env.example. Resin reads the token from its
+  environment only and has no way to change it in the console, so every start
+  uses the engine's. Everything else, RESIN_PROXY_TOKEN included, still comes
+  from .env; the three data directories stay on named volumes, as the
+  Dockerfile declares them.
+credentials:
+  login_path: /ui/login
+  fields:
+    RESIN_ADMIN_TOKEN: {kind: password}
