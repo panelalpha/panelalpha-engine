@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Edi Life OS, a personal dashboard (habits, notes, finance, kanban): PHP on
+  Apache with MySQL, run from the repository's docker-compose.yml as is. Its
+  first sign-in comes from LIFEOS_USERNAME / LIFEOS_PASSWORD, which that
+  compose file interpolates with an empty default, and the engine leaves
+  .env.example's placeholders to it, so a new instance had no account: the
+  first sign-in failed with "Initial sign-in setup requires configuration".
+  So the engine generates the login (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials) and files/panelalpha/lifeos-start.sh,
+  before the image's own entrypoint, exports it under those two names. Life OS
+  copies them into MySQL only while it has no credentials yet, so a password
+  changed in the app (Settings) is never overwritten. Everything else is the
+  repository's compose file.
+credentials:
+  login_path: /login.php
+  fields:
+    LIFEOS_USERNAME: {kind: username}
+    LIFEOS_PASSWORD: {kind: password}

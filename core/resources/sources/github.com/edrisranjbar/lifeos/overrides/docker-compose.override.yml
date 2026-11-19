@@ -1,0 +1,14 @@
+# Layers over the repository's own docker-compose.yml, which is otherwise used
+# as it is.
+services:
+  app:
+    # Exports the engine's login as LIFEOS_USERNAME / LIFEOS_PASSWORD, then
+    # execs the image's own entrypoint and command (php:8.3-apache's). The
+    # compose file sets both from ${...:-}, which beats an env_file, so they are
+    # set here instead. Setting entrypoint clears the image's CMD, hence command.
+    entrypoint: ["/bin/sh", "/panelalpha/lifeos-start.sh"]
+    command: ["apache2-foreground"]
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+      # LIFEOS_USERNAME / LIFEOS_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env:/pa/app-credentials.env:ro
