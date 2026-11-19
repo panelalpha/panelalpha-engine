@@ -315,6 +315,22 @@ class SelfBuiltImageTagTest extends TestCase
         $this->assertSame('dpaste', DeployCompose::builtImageNameFromYaml($compose));
     }
 
+    /** A tag a variable's default names is the one its siblings run: XRK-AGT builds `xrk-agt:${XRK_DOCKER_TAG:-latest}`. */
+    public function test_a_build_tag_spelled_with_a_variable_default_is_read_at_that_default(): void
+    {
+        $compose = <<<'YAML'
+        services:
+          xrk-agt:
+            build: .
+            image: xrk-agt:${XRK_DOCKER_TAG:-latest}
+          xrk-subserver:
+            image: xrk-agt:latest
+        YAML;
+
+        $this->assertSame('xrk-agt:latest', DeployCompose::builtImageNameFromYaml($compose));
+        $this->assertNull(DeployCompose::builtImageNameFromYaml(str_replace('${XRK_DOCKER_TAG:-latest}', '${XRK_DOCKER_TAG}', $compose)));
+    }
+
     /** A registry-pinned build is left alone however it is referenced. */
     public function test_built_image_name_from_yaml_ignores_a_registry_pinned_build(): void
     {

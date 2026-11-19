@@ -210,15 +210,13 @@ class DeployCompose
      * The local tag a repo's own compose gives the image it builds, when its app
      * service declares one. Only a name with no registry in it. A trailing `:tag`
      * is kept — `image: myapp:latest` beside a `build:` names no registry, since a
-     * registry reference needs a `/` — and travels with the name verbatim.
+     * registry reference needs a `/` — and travels with the name verbatim. A variable is read at its default, as
+     * Compose names the image when nothing sets it (`xrk-agt:${XRK_DOCKER_TAG:-latest}` is `xrk-agt:latest`).
      */
     private static function builtImageName(mixed $declared): ?string
     {
-        if (! is_string($declared)) {
-            return null;
-        }
-        $name = trim($declared);
-        if ($name === '' || str_contains($name, '/') || str_contains($name, '@')) {
+        $name = is_string($declared) ? self::atDefaults(trim($declared)) : null;
+        if ($name === null || $name === '' || str_contains($name, '/') || str_contains($name, '@')) {
             return null;
         }
 
@@ -230,6 +228,17 @@ class DeployCompose
         }
 
         return $name;
+    }
+
+    /** $value interpolated with no variable set, or null when that is not one value. */
+    private static function atDefaults(string $value): ?string
+    {
+        if (! str_contains($value, '$')) {
+            return $value;
+        }
+        $candidates = ComposeInterpolation::candidates($value, []);
+
+        return $candidates !== null && count($candidates) === 1 ? $candidates[0] : null;
     }
 
     private static function isSafeTag(string $name): bool
