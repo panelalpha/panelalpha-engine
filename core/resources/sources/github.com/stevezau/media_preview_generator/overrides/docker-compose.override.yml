@@ -1,0 +1,13 @@
+# Layers over the compose file the dockerfile strategy generates (service `app`,
+# the repository's Dockerfile).
+services:
+  app:
+    # Writes the generated token to /config/auth.json while it holds none, then
+    # execs the image's own entrypoint (/init /app/wrapper.sh, s6-overlay).
+    entrypoint: ["/bin/sh", "/panelalpha/media-preview-start.sh"]
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+      # MEDIA_PREVIEW_TOKEN, generated and kept by the engine. Mounted rather
+      # than an env_file, so only this step reads it and the running server's
+      # environment never has it.
+      - ../.panelalpha/app-credentials.env:/pa/app-credentials.env:ro

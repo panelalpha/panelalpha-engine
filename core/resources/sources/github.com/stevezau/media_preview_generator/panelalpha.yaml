@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Media Preview Generator, preview thumbnails and intro/credits markers for
+  Plex, Emby and Jellyfin: a Flask app in a linuxserver.io image (s6-overlay
+  /init), settings under /config. The engine builds the repository's
+  Dockerfile as is. Its web UI signs in with one access token, which the app
+  generates at random on the first start into /config/auth.json and prints
+  only masked to the log, so the login page ("check /config/auth.json in your
+  config volume") was a wall nobody deploying it could pass. So the engine
+  generates the token (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials) and
+  files/panelalpha/media-preview-start.sh, before the image's own /init,
+  writes it to /config/auth.json only while that file holds no token. The
+  token is not set as WEB_AUTH_TOKEN: that variable always wins and locks the
+  token, while auth.json keeps the app's own "set a custom token" (setup
+  wizard step 5, Settings) working; a token changed there is never
+  overwritten.
+credentials:
+  login_path: /login
+  fields:
+    # A token-only login: the form asks for nothing else.
+    MEDIA_PREVIEW_TOKEN: {kind: password}
