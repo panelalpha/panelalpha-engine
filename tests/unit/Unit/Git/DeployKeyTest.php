@@ -379,7 +379,7 @@ class DeployKeyTest extends DeployHookTestCase
         // Both files are put in place for the command and removed after it.
         preg_match_all('#\.panelalpha-git-ssh-(?:key|known-hosts)-[0-9a-f]{16}#', $lsRemote[0], $m);
         foreach ($m[0] as $file) {
-            $this->assertTrue($this->called("install -m 0600 "), $file);
+            $this->assertTrue($this->calledWith('chmod -- "$1" "$3" sh 0600 ', $file), $file);
             $this->assertTrue($this->called('rm -f ') && $this->calledWith('rm -f', $file), $file);
         }
         // A command that does not reach a remote gets no key.

@@ -9,6 +9,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts" && pwd)"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/test-network.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -17,6 +18,8 @@ for fn in webserver_config_state webserver_running render_webserver_config; do
 done
 # shellcheck source=/dev/null
 source "$TMP/funcs.sh"
+ADDRESS=$(tn_host PUBLIC 7)
+SECOND_ADDRESS=$(tn_host PUBLIC 8)
 
 PASS=0
 FAIL=0
@@ -55,13 +58,13 @@ host() { # <webserver> <operation>
     rm -rf "$HOST" "$TMP/calls" "$TMP/rebuild-fails"
     mkdir -p "$HOST/webserver-config"/{nginx-proxy/vhosts,apache/vhosts,litespeed/vhosts,litespeed-admin,openlitespeed/vhosts,openlitespeed-admin}
     printf 'services:\n  sites-http:\n    labels:\n      - com.panelalpha.webserver=%s\n' "$1" >"$HOST/docker-compose.yml-webserver"
-    echo 'listen 203.0.113.7:80;' >"$HOST/webserver-config/nginx-proxy/nginx.conf"
+    echo "listen $ADDRESS:80;" >"$HOST/webserver-config/nginx-proxy/nginx.conf"
     echo 'server_name a.example.com;' >"$HOST/webserver-config/nginx-proxy/vhosts/a.example.com.conf"
-    echo 'Listen 203.0.113.7:80' >"$HOST/webserver-config/apache/httpd.conf"
+    echo "Listen $ADDRESS:80" >"$HOST/webserver-config/apache/httpd.conf"
     echo '<VirtualHost *:80>' >"$HOST/webserver-config/apache/vhosts/a.example.com.conf"
-    echo '<address>203.0.113.7:80</address>' >"$HOST/webserver-config/litespeed/httpd_config.xml"
+    echo "<address>$ADDRESS:80</address>" >"$HOST/webserver-config/litespeed/httpd_config.xml"
     echo '<vhRoot>a</vhRoot>' >"$HOST/webserver-config/litespeed/vhosts/a.example.com.xml"
-    echo 'address 203.0.113.7:80' >"$HOST/webserver-config/openlitespeed/httpd_config.conf"
+    echo "address $ADDRESS:80" >"$HOST/webserver-config/openlitespeed/httpd_config.conf"
     echo 'vhRoot a' >"$HOST/webserver-config/openlitespeed/vhosts/a.example.com.conf"
     echo 'core sites-http' | tr ' ' '\n' >"$TMP/running"
     : >"$TMP/render"
@@ -72,13 +75,13 @@ renders() { printf '%s\n' "$1" >"$TMP/render"; }
 calls() { tr '\n' ' ' <"$TMP/calls" | sed 's/ $//'; }
 
 host nginx-proxy update
-renders 'echo "listen 203.0.113.7:80;" >nginx-proxy/nginx.conf; echo "server_name a.example.com;" >nginx-proxy/vhosts/a.example.com.conf'
+renders "echo \"listen $ADDRESS:80;\" >nginx-proxy/nginx.conf; echo \"server_name a.example.com;\" >nginx-proxy/vhosts/a.example.com.conf"
 out=$(render_webserver_config)
 check "an update whose render changes nothing leaves sites-http running" "rebuild" "$(calls)"
 check "and says so" "info:The webserver configuration did not change; sites-http keeps running" "$out"
 
 host nginx-proxy update
-renders 'echo "listen 203.0.113.7:80; listen 203.0.113.8:80;" >nginx-proxy/nginx.conf'
+renders "echo \"listen $ADDRESS:80; listen $SECOND_ADDRESS:80;\" >nginx-proxy/nginx.conf"
 out=$(render_webserver_config)
 check "a render that moves the listeners restarts it" "rebuild restart" "$(calls)"
 

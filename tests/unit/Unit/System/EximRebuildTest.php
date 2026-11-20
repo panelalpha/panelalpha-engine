@@ -397,7 +397,7 @@ class EximRebuildTest extends TestCase
     }
 
     /**
-     * The account's own Docker daemon gives its docker0 172.17.0.1, so docker0's gateway on a host with Docker's default
+     * The account's own Docker daemon gives its docker0 {@see TestNetwork::DOCKER_BRIDGE_GATEWAY}, so docker0's gateway on a host with Docker's default
      * address is the account itself; the tenant network's gateway is an address the account reaches the host on.
      */
     public function test_a_project_is_given_the_tenant_gateway_exim_listens_on(): void
@@ -405,7 +405,7 @@ class EximRebuildTest extends TestCase
         $system = $this->recordingSystem();
         $tenantGateway = TestNetwork::private(1);
         $exim = $this->eximWithConfig($system, [], [
-            'bridge' => ['subnet' => '172.17.0.0/16', 'gateway' => Exim::FALLBACK_BRIDGE_GATEWAY],
+            'bridge' => ['subnet' => TestNetwork::DOCKER_BRIDGE_CIDR, 'gateway' => Exim::FALLBACK_BRIDGE_GATEWAY],
             'pash-tenants' => ['subnet' => TestNetwork::prefix($tenantGateway, 16), 'gateway' => $tenantGateway],
         ]);
 

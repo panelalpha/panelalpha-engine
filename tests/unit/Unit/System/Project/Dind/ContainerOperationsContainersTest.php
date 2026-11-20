@@ -10,6 +10,7 @@ use App\System\Project\Dind\ContainerOperations;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\LocalRoot;
+use Tests\Support\TestNetwork;
 
 /** The containers list of the API is the account daemon's stack, every container in the rows `compose ps --all` prints. */
 final class ContainerOperationsContainersTest extends TestCase
@@ -26,12 +27,12 @@ final class ContainerOperationsContainersTest extends TestCase
             ]),
             json_encode([
                 ['State' => ['Status' => 'exited', 'ExitCode' => 0]],
-                ['State' => ['Status' => 'running'], 'NetworkSettings' => ['Ports' => ['80/tcp' => [['HostIp' => '0.0.0.0', 'HostPort' => '8080']]]]],
+                ['State' => ['Status' => 'running'], 'NetworkSettings' => ['Ports' => ['80/tcp' => [['HostIp' => TestNetwork::ANY, 'HostPort' => '8080']]]]],
             ]),
         ])->getContainers();
 
         $this->assertSame(
-            [['migrate', 'shop', 'exited', 'Exited (0) 1 minute ago', ''], ['web', 'nginx', 'running', 'Up 5 minutes', '0.0.0.0:8080->80/tcp']],
+            [['migrate', 'shop', 'exited', 'Exited (0) 1 minute ago', ''], ['web', 'nginx', 'running', 'Up 5 minutes', TestNetwork::ANY.':8080->80/tcp']],
             array_map(static fn (array $row): array => [$row['Service'], $row['Image'], $row['State'], $row['Status'], $row['Ports']], $containers),
         );
         $this->assertSame(['shop-migrate-run-1', 'shop-web-1'], array_column($containers, 'Name'));

@@ -11,6 +11,7 @@
 set -uo pipefail
 
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../scripts" && pwd)/tenant-egress-limits.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/test-network.sh"
 W="$(mktemp -d)"
 trap 'kill "${ACCOUNT_PID:-}" 2>/dev/null; rm -rf "$W"' EXIT
 fails=0
@@ -106,31 +107,41 @@ cat >"$W/host.sh" <<HOST
 set -u
 W="$W"
 SCRIPT="$SCRIPT"
+TENANT_GATEWAY="$(tn_add "${TN_TENANT_NETWORK_CIDR%/*}" 1)"
+TENANT="$TN_TENANT_ACCOUNT"
+UPLINK="$(tn_host PUBLIC_3 1)"
+UPLINK_ROUTER="$(tn_host PUBLIC_3 2)"
+SMTP_SERVER="$(tn_host PUBLIC_2 7)"
+DESTINATIONS="$(tn_host PUBLIC 10) $(tn_host PUBLIC 11) $(tn_host PUBLIC 12)"
+SERVICE_GATEWAY="$(tn_host CONTAINER 1)"
+SERVICE="$(tn_host CONTAINER 8)"
+OUTSIDE="$(tn_host PUBLIC 99)"
+FLOODED="$(tn_host PUBLIC 200)"
 HOST
 cat >>"$W/host.sh" <<'HOST'
 export PA_ENV_FILE="$W/env"
 echo 1 >/proc/sys/net/ipv4/ip_forward
 ip link add br-pa-tenants type bridge && ip link set br-pa-tenants up
-ip addr add 10.200.0.1/16 dev br-pa-tenants
+ip addr add "$TENANT_GATEWAY/16" dev br-pa-tenants
 ip link add up0 type dummy && ip link set up0 up
-ip addr add 192.0.2.1/24 dev up0
-ip route add default via 192.0.2.2 dev up0 onlink
+ip addr add "$UPLINK/24" dev up0
+ip route add default via "$UPLINK_ROUTER" dev up0 onlink
 unshare -n sleep 600 &
 ACCOUNT=$!
 sleep 0.3
 ip link add vh type veth peer name vc netns /proc/$ACCOUNT/ns/net
 ip link set vh master br-pa-tenants && ip link set vh up
-nsenter -t "$ACCOUNT" -n sh -c 'ip link set lo up; ip link set vc up; ip addr add 10.200.128.5/16 dev vc; ip route add default via 10.200.0.1'
+nsenter -t "$ACCOUNT" -n sh -c "ip link set lo up; ip link set vc up; ip addr add $TENANT/16 dev vc; ip route add default via $TENANT_GATEWAY"
 in_account() { nsenter -t "$ACCOUNT" -n "$@"; }
 elements() { nft -j list set inet pa_egress "$1" 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin)["nftables"]; s=[x["set"] for x in d if "set" in x][0]; print(" ".join(sorted(str(e["elem"]["val"] if isinstance(e,dict) else e) for e in s.get("elem",[]))))'; }
 
 sh "$SCRIPT" >/dev/null || { echo "apply failed"; exit 1; }
 echo "apply: $(sh "$SCRIPT")"
 
-in_account python3 "$W/connect.py" 25 198.51.100.7
+in_account python3 "$W/connect.py" 25 "$SMTP_SERVER"
 echo "smtp: $(elements smtp4)"
 
-in_account python3 "$W/connect.py" 22 203.0.113.10 203.0.113.11 203.0.113.12
+in_account python3 "$W/connect.py" 22 $DESTINATIONS
 echo "three new destinations: blocked=[$(elements blocked4)]"
 
 web=$(for i in $(seq 20 27); do printf '203.0.113.%s ' "$i"; done)
@@ -144,19 +155,19 @@ sh "$SCRIPT" >/dev/null
 echo "after re-apply: blocked=[$(elements blocked4)]"
 
 ip link add svc0 type dummy && ip link set svc0 up
-ip addr add 172.18.0.1/16 dev svc0
+ip addr add "$SERVICE_GATEWAY/16" dev svc0
 nft add table ip published
 nft add chain ip published prerouting '{ type nat hook prerouting priority dstnat; }'
-nft add rule ip published prerouting ip daddr 192.0.2.1 tcp dport 2011 dnat to 172.18.0.8
+nft add rule ip published prerouting ip daddr "$UPLINK" tcp dport 2011 dnat to "$SERVICE"
 nft add chain ip published forward '{ type filter hook forward priority filter; }'
-nft add rule ip published forward ip daddr 172.18.0.8 tcp dport 2011 counter
-nft add rule ip published forward ip daddr 203.0.113.99 counter
-in_account python3 "$W/connect.py" 2011 192.0.2.1
-in_account python3 "$W/connect.py" 443 203.0.113.99
+nft add rule ip published forward ip daddr "$SERVICE" tcp dport 2011 counter
+nft add rule ip published forward ip daddr "$OUTSIDE" counter
+in_account python3 "$W/connect.py" 2011 "$UPLINK"
+in_account python3 "$W/connect.py" 443 "$OUTSIDE"
 echo "published port while blocked: $(nft list chain ip published forward | grep -o 'packets [0-9]*' | tr '\n' ' ')"
 
 unblock() {
-    nft delete element inet pa_egress blocked4 '{ 10.200.128.5 }'
+    nft delete element inet pa_egress blocked4 "{ $TENANT }"
     for name in newdst4 newdstweb4 seen4 seenweb4; do nft flush set inet pa_egress "$name"; done
 }
 unblock
@@ -165,7 +176,7 @@ in_account python3 "$W/connect.py" 80 $addresses
 echo "web scan: blocked=[$(elements blocked4)]"
 
 unblock
-burst=$(for i in $(seq 1 400); do printf '203.0.113.200 '; done)
+burst=$(for i in $(seq 1 400); do printf '%s ' "$FLOODED"; done)
 in_account python3 "$W/connect.py" 8443 $burst
 echo "flood: $(elements flood4) blocked=[$(elements blocked4)]"
 
@@ -183,14 +194,14 @@ HOST
 out=$(unshare -rn bash "$W/host.sh" 2>&1)
 echo "$out" | sed 's/^/     | /'
 check "the transaction applies on a live netns" "echo \"\$out\" | grep -q '^apply: tenant-egress-limits: applied (smtp blocked, new connections 20/s, scans over 5 then 2/min new destinations, on ports 80 and 443 over 10 then 4/min, blocked 2m)'"
-check "SMTP to the outside is marked" "echo \"\$out\" | grep -q '^smtp: 10.200.128.5'"
+check "SMTP to the outside is marked" "echo \"\$out\" | grep -q '^smtp: $TN_TENANT_ACCOUNT'"
 check "three new destinations block nothing" "echo \"\$out\" | grep -q '^three new destinations: blocked=\[\]'"
 check "eight new web destinations block nothing" "echo \"\$out\" | grep -q '^eight new web destinations: blocked=\[\]'"
-check "a scan blocks its source, the same addresses on the web ports not seen for it" "echo \"\$out\" | grep -q '^scan: blocked=\[10.200.128.5\]'"
-check "a scan of the web ports over their own limit blocks too" "echo \"\$out\" | grep -q '^web scan: blocked=\[10.200.128.5\]'"
-check "re-applying keeps the block" "echo \"\$out\" | grep -q '^after re-apply: blocked=\[10.200.128.5\]'"
+check "a scan blocks its source, the same addresses on the web ports not seen for it" "echo \"\$out\" | grep -q '^scan: blocked=\[$TN_TENANT_ACCOUNT\]'"
+check "a scan of the web ports over their own limit blocks too" "echo \"\$out\" | grep -q '^web scan: blocked=\[$TN_TENANT_ACCOUNT\]'"
+check "re-applying keeps the block" "echo \"\$out\" | grep -q '^after re-apply: blocked=\[$TN_TENANT_ACCOUNT\]'"
 check "a blocked source still reaches this server's published ports, and nothing else" "echo \"\$out\" | grep -q '^published port while blocked: packets 1 packets 0 '"
-check "a flood to one destination is marked, not blocked" "echo \"\$out\" | grep -q '^flood: 10.200.128.5 blocked=\[\]'"
+check "a flood to one destination is marked, not blocked" "echo \"\$out\" | grep -q '^flood: $TN_TENANT_ACCOUNT blocked=\[\]'"
 check "a table of another shape is rebuilt" "echo \"\$out\" | grep -q '^other shape: tenant-egress-limits: rebuilt, blocks and counters reset'"
 check "a table holding hand-made sets or chains is replaced" "echo \"\$out\" | grep -q '^hand-made objects: tenant-egress-limits: rebuilt, blocks and counters reset.* left=\[0\]'"
 check "and the next run keeps it" "echo \"\$out\" | grep -q '^again: tenant-egress-limits: applied'"

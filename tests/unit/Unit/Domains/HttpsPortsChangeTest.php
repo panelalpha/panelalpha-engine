@@ -11,6 +11,7 @@ use App\Models\Setting;
 use App\System;
 use App\System\Services\Webserver\ProxyListenPort;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -100,7 +101,7 @@ class HttpsPortsChangeTest extends TestCase
         $this->assertSame('Port 8080 is used by proxy rule 2 (http).', $this->change()->refusal($domain, [8080], 8080)['message'] ?? null);
         $this->assertNull($this->change()->refusal($domain, [9443], 9443));
 
-        $this->system = $this->hostListening('LISTEN 0 4096 0.0.0.0:9443 0.0.0.0:*');
+        $this->system = $this->hostListening('LISTEN 0 4096 '.TestNetwork::ANY.':9443 '.TestNetwork::ANY.':*');
         $this->assertSame('Port 9443 is already in use on this host.', $this->change()->refusal($domain, [9443], 9443)['message'] ?? null);
     }
 
@@ -110,7 +111,7 @@ class HttpsPortsChangeTest extends TestCase
         $blog = $this->domain('blog');
         $blog->setDetails([HttpsPorts::PORTS_KEY => [8443], HttpsPorts::MAIN_KEY => 8443]);
         $blog->save();
-        $this->system = $this->hostListening('LISTEN 0 4096 0.0.0.0:8443 0.0.0.0:*');
+        $this->system = $this->hostListening('LISTEN 0 4096 '.TestNetwork::ANY.':8443 '.TestNetwork::ANY.':*');
 
         $this->assertNull($this->change()->refusal($this->domain('shop'), [443, 8443], 443));
     }

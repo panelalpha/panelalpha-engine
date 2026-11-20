@@ -428,7 +428,7 @@ class SandboxTest(Scratch):
 
     def test_the_accounts_env_file_and_project_name_do_not_reach_the_render(self):
         self.write('users/alice/.env', 'COMPOSE_PROJECT_NAME=bob\nTAG=evil\nCOMPOSE_PROFILES=later\n')
-        content = 'name: bob\n' + self.template.replace(':v2.2.0-20261028', ':${TAG:-v2.2.0-20261028}')
+        content = 'name: bob\n' + self.template.replace(':v2.3.1-20261119', ':${TAG:-v2.3.1-20261119}')
         self.write('users/alice/docker-compose.yml', content)
         self.up()
 

@@ -10,6 +10,7 @@ use App\System\Project\Dind\AppPortAlignment;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\LocalRoot;
+use Tests\Support\TestNetwork;
 
 /**
  * Ticket 04: port detection has to read the run file the engine generated
@@ -117,7 +118,7 @@ class AppPortAlignmentTest extends TestCase
                     return $this->procNetTcp;
                 }
                 if ($action === 'account-docker.containers') {
-                    return '[{"NetworkSettings":{"Networks":{"project_default":{"IPAddress":"172.18.0.5"}}}}]';
+                    return '[{"NetworkSettings":{"Networks":{"project_default":{"IPAddress":"'.TestNetwork::container(5).'"}}}}]';
                 }
                 if (str_contains($line, 'ps -q app')) {
                     return "app1\n";

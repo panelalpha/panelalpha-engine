@@ -44,6 +44,7 @@ TN_RESOLVED_STUB=127.0.0.53
 TN_ENGINE_DNS_PROXY=127.0.0.54
 TN_HEALTH_PROBE_CLIENT=192.0.2.1
 TN_TENANT_NETWORK_CIDR=10.200.0.0/16
+TN_TENANT_ACCOUNT=10.200.128.5
 
 tn_net() { # <name> -- TEST_NET_<name> as a CIDR: the environment's, else the config file's
     local variable="TEST_NET_$1" value

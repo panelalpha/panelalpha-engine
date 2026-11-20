@@ -14,6 +14,7 @@ use App\System\Project\Dind\ShellOperations;
 use Symfony\Component\Process\Process;
 use Tests\Support\LocalRoot;
 use Tests\Support\StagedRename;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 use Tests\Unit\System\Project\SuccessfulProcess;
 
@@ -237,12 +238,12 @@ class AppPortAlignmentRealignTest extends TestCase
                     return $this->procNetTcp;
                 }
                 if ($action === 'account-docker.containers') {
-                    return '[{"NetworkSettings":{"Networks":{"bridge":{"IPAddress":""},"project_default":{"IPAddress":"172.18.0.5"}}}}]';
+                    return '[{"NetworkSettings":{"Networks":{"bridge":{"IPAddress":""},"project_default":{"IPAddress":"'.TestNetwork::container(5).'"}}}}]';
                 }
                 if ($action === 'account-docker.listContainers' && str_contains($line, 'label com.docker.compose.service=app')) {
                     return '[{"Id":"app1","Names":["/project-app-1"]},{"Id":"app2","Names":["/project-app-2"]}]';
                 }
-                if (str_contains($line, 'curl') && preg_match('/ probe 172\.18\.0\.5 (\d+)$/', $line, $m) === 1) {
+                if (str_contains($line, 'curl') && preg_match('/ probe '.preg_quote(TestNetwork::container(5), '/').' (\d+)$/', $line, $m) === 1) {
                     $this->probed[] = $m[1];
 
                     return $this->statuses[(int) $m[1]] ?? '000';

@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Every image the engine builds is tagged with the engine's release, so an install pulls the images of its release.
-# A hotfix's fourth number (2.3.2.1) keeps the images of its release.
+# A hotfix's fourth version number (2.3.2.1) keeps the images of its release.
 #
 #   bash tests/scripts/engine-image-tags.test.sh
 

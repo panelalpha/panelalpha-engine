@@ -75,9 +75,9 @@ final class DockerBrokerCases
         yield 'createBridgeNetwork' => [fn () => $d()->createBridgeNetwork('panelalpha-build', 'br-pa-build', 'build'), false];
         yield 'connectNetwork' => [fn () => $d()->connectNetwork('pash-tenants', 'alice'), false];
         yield 'disconnectNetwork' => [fn () => $d()->disconnectNetwork('pash-default-network', 'alice'), false];
-        yield 'pull' => [fn () => $d()->pull('ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028'), false];
+        yield 'pull' => [fn () => $d()->pull('ghcr.io/panelalpha/engine-user-dind:v2.3.1-20261119'), false];
         yield 'inspectManifest' => [fn () => $d()->inspectManifest('node:22-bookworm-slim'), false];
-        yield 'inspectImage' => [fn () => $d()->inspectImage('ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028'), false];
+        yield 'inspectImage' => [fn () => $d()->inspectImage('ghcr.io/panelalpha/engine-user-dind:v2.3.1-20261119'), false];
         yield 'imageId' => [fn () => $d()->imageId(TestNetwork::LOOPBACK.':5000/panelalpha/php:8.3-cli-bookworm-pa1234abcd'), false];
         yield 'imageExposedPorts' => [fn () => $d()->imageExposedPorts('nginx:1.27'), false];
         yield 'imagesLastTagTime' => [fn () => $d()->imagesLastTagTime('panelalpha/php:8.3-cli', 'composer:2'), false];

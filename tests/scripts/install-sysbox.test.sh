@@ -11,6 +11,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts" && pwd)"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/test-network.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -109,12 +110,12 @@ install_sysbox_state() {
     printf '[Service]\nEnvironment=GOGC=50\n' >"$SYSTEMD_UNIT_DIR/sysbox-mgr.service.d/panelalpha-gogc.conf"
     printf '[Service]\nLimitNOFILE=1048576\n' >"$SYSTEMD_UNIT_DIR/docker.service.d/panelalpha-lxcfs.conf"
     printf '#!/bin/bash\n' >"$RECOVER_SCRIPT"
-    cat >"$DAEMON_JSON" <<'JSON'
+    cat >"$DAEMON_JSON" <<JSON
 {
-  "bip": "172.20.0.1/16",
+  "bip": "$TN_DOCKER_BRIDGE_GATEWAY/16",
   "runtimes": {"runc": {"path": "runc"}, "sysbox-runc": {"path": "/usr/bin/sysbox-runc"}},
   "features": {"time-namespaces": false},
-  "registry-mirrors": ["http://127.0.0.1:5001"]
+  "registry-mirrors": ["http://$TN_LOOPBACK:5001"]
 }
 JSON
     printf 'sysbox\n' >"$STUB_DIR/users"
@@ -141,11 +142,11 @@ check "the service user, its group and its home go" "yes yes no" \
 check "the recovery script goes" "no" "$(there "$RECOVER_SCRIPT")"
 
 if command -v jq >/dev/null 2>&1; then
-    check "daemon.json keeps the runtime and the network settings it does not own" "runc|172.20.0.1/16" \
+    check "daemon.json keeps the runtime and the network settings it does not own" "runc|$TN_DOCKER_BRIDGE_GATEWAY/16" \
         "$(jq -r '[(.runtimes | keys | join(",")), .bip] | join("|")' "$DAEMON_JSON")"
     check "the sysbox runtime and the time-namespaces setting are gone" "null null" \
         "$(jq -r '.runtimes["sysbox-runc"], .features["time-namespaces"]' "$DAEMON_JSON" | paste -sd' ')"
-    check "the registry mirror stays: uninstall.sh removes it, not a runtime switch" '["http://127.0.0.1:5001"]' \
+    check "the registry mirror stays: uninstall.sh removes it, not a runtime switch" "[\"http://$TN_LOOPBACK:5001\"]" \
         "$(jq -c '.["registry-mirrors"]' "$DAEMON_JSON")"
 else
     echo "  skip  daemon.json checks: jq is not installed"

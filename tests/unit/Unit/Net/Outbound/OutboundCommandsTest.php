@@ -8,6 +8,7 @@ use App\Models\OutboundEvent;
 use App\Rules\EgressOwner;
 use Illuminate\Support\Carbon;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /** `pae system:egress:*` and `/system/egress`: what they print and answer, the broker faked. */
@@ -27,7 +28,7 @@ class OutboundCommandsTest extends TestCase
         $this->broker('{"active": true, "settings": {"EGRESS_BLOCK_SMTP": 1, "EGRESS_NEW_CONNECTIONS_PER_SECOND": 100,'
             .' "EGRESS_NEW_DESTINATIONS_PER_MINUTE": 20, "EGRESS_NEW_DESTINATIONS_BURST": 60,'
             .' "EGRESS_WEB_NEW_DESTINATIONS_PER_MINUTE": 200, "EGRESS_WEB_NEW_DESTINATIONS_BURST": 600, "EGRESS_SCAN_BLOCK_MINUTES": 30},'
-            .' "blocks": [{"owner": "shop", "network": "tenants", "address": "10.200.128.5", "since": 1800000000, "until": 1800001800}], "marks": []}');
+            .' "blocks": [{"owner": "shop", "network": "tenants", "address": "'.TestNetwork::TENANT_ACCOUNT.'", "since": 1800000000, "until": 1800001800}], "marks": []}');
     }
 
     protected function tearDown(): void
@@ -36,7 +37,7 @@ class OutboundCommandsTest extends TestCase
         parent::tearDown();
     }
 
-    private function broker(string $report, string $unblocked = '{"owner": "shop", "addresses": ["10.200.128.5"]}'): void
+    private function broker(string $report, string $unblocked = '{"owner": "shop", "addresses": ["'.TestNetwork::TENANT_ACCOUNT.'"]}'): void
     {
         $this->app->instance(OutboundStatus::class, new OutboundStatus(new OutboundLimits(function (array $argv) use ($report, $unblocked): string {
             $this->asked[] = implode(' ', $argv);
@@ -51,7 +52,7 @@ class OutboundCommandsTest extends TestCase
             ->expectsOutputToContain('The outbound limits are in place: SMTP to other servers blocked, 100 new connections a second, 60 new addresses at once, then 20 a minute, on ports 80 and 443 600 new addresses at once, then 200 a minute, then blocked for 30 minutes.')
             ->expectsTable(
                 ['Project or build', 'Network', 'What', 'Address', 'Since (UTC)', 'Last seen / blocked until (UTC)', 'State'],
-                [['shop', 'tenants', 'scan, blocked', '10.200.128.5', '2027-01-15 08:00', '2027-01-15 08:30', 'in force']],
+                [['shop', 'tenants', 'scan, blocked', TestNetwork::TENANT_ACCOUNT, '2027-01-15 08:00', '2027-01-15 08:30', 'in force']],
             )
             ->expectsOutputToContain('Lift a block early: pae system:egress:unblock <project>')
             ->assertExitCode(0);
@@ -87,7 +88,7 @@ class OutboundCommandsTest extends TestCase
         $this->artisan('system:egress:sync')->assertExitCode(0);
 
         $this->artisan('system:egress:unblock shop')
-            ->expectsOutput('Lifted the outbound block of shop (10.200.128.5); its count of new addresses starts again.')
+            ->expectsOutput('Lifted the outbound block of shop ('.TestNetwork::TENANT_ACCOUNT.'); its count of new addresses starts again.')
             ->assertExitCode(0);
         $this->assertSame('pae', OutboundEvent::query()->sole()->lifted_by);
     }
@@ -126,7 +127,7 @@ class OutboundCommandsTest extends TestCase
     {
         $this->getJson('/api/system/egress')->assertStatus(200);
 
-        $this->deleteJson('/api/system/egress/shop')->assertStatus(200)->assertExactJson(['lifted' => true, 'addresses' => ['10.200.128.5']]);
+        $this->deleteJson('/api/system/egress/shop')->assertStatus(200)->assertExactJson(['lifted' => true, 'addresses' => [TestNetwork::TENANT_ACCOUNT]]);
         $this->assertSame('api', OutboundEvent::query()->sole()->lifted_by);
     }
 

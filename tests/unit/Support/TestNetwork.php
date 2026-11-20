@@ -93,6 +93,9 @@ final class TestNetwork
     /** The tenant network's default (docker-compose.yml's TENANT_NETWORK_PREFIX), the first /16 tenant-network-firewall.sh tries. */
     public const TENANT_NETWORK_CIDR = '10.200.0.0/16';
 
+    /** A sample of the addresses accounts get on the tenant network: tenant-network-firewall.sh's --ip-range, its upper half. */
+    public const TENANT_ACCOUNT = '10.200.128.5';
+
     /** An address on the public internet; the default network is documentation only (RFC 5737). */
     public static function public(int $host = 1): string
     {

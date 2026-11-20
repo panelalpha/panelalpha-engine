@@ -64,7 +64,7 @@ class ProjectDomainTest extends TestCase
         $user->method('hasGitProject')->willReturn(false);
         $user->method('getTemplate')->willReturn('dind');
 
-        $domainModel = $this->createStub(DomainModel::class);
+        $domainModel = $this->getMockBuilder(DomainModel::class)->onlyMethods(['sslEnabled', 'getDocumentRoot'])->getMock();
         $domainModel->method('sslEnabled')->willReturn(false);
         $domainModel->method('getDocumentRoot')->willReturn('/public_html');
         $domainModel->domain = 'app.example.test';

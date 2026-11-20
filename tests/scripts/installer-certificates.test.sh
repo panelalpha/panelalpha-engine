@@ -52,7 +52,7 @@ docker() {
 
 ip() { printf 'dev eth0 proto kernel scope link src %s uid 0\n' "$ADDRESS"; }
 
-ipcalc() { printf 'Address:\t%s\nNetmask:\t255.255.255.0\n' "$1"; }
+ipcalc() { printf 'Address:\t%s\nNetmask:\t%s\n' "$1" "$TN_MASK_24"; }
 
 curl() { printf '%s\n' "$ADDRESS"; }
 
@@ -85,7 +85,7 @@ reset() { # <recorded cert_domain, empty for none>
     ENGINE_CERT_DOMAIN=''
     ENGINE_CERT_IP=''
     IPV4=''
-    CORE_URL='https://127.0.0.1:2011'
+    CORE_URL="https://$TN_LOOPBACK:2011"
     API_URL=''
     MCP_URL=''
     NAME_CERT_FAILS=0

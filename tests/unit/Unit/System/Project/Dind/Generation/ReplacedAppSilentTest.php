@@ -478,7 +478,7 @@ class ReplacedAppSilentTest extends TestCase
                 'State' => ['Status' => 'running', 'ExitCode' => 0],
                 'RestartCount' => 0,
                 'NetworkSettings' => [
-                    'Networks' => ['project-next_default' => ['IPAddress' => '172.18.0.9']],
+                    'Networks' => ['project-next_default' => ['IPAddress' => TestNetwork::container(9)]],
                     'Ports' => $container === 'next1' ? ['8080/tcp' => [['HostIp' => TestNetwork::ANY, 'HostPort' => (string) self::COPY]]] : [],
                 ],
             ], explode(' ', $m[1])));
@@ -486,7 +486,7 @@ class ReplacedAppSilentTest extends TestCase
         if (str_contains($line, 'account-docker.listeningSockets')) {
             return self::HEADER . "\n   0: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1000 1\n";
         }
-        if (str_contains($line, 'curl') && str_contains($line, ' probe 172.18.0.9 ')) {
+        if (str_contains($line, 'curl') && str_contains($line, ' probe '.TestNetwork::container(9).' ')) {
             return '200';
         }
         if (str_contains($line, 'account-docker.logTail')) {

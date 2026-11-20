@@ -65,7 +65,8 @@ class NginxProxyBrotliTest extends TestCase
         $this->assertMatchesRegularExpression('#^COPY nginx/modules-http/ /etc/nginx/modules-http/$#m', $dockerfile);
         $this->assertMatchesRegularExpression('#^COPY --from=brotli /out/ /usr/lib/nginx/modules/$#m', $dockerfile);
         // The modules only load into the nginx they were built against.
-        $this->assertSame(2, preg_match_all('/^FROM nginx:1\.31\.1\b/m', $dockerfile));
+        $this->assertSame(2, preg_match_all('/^FROM nginx:(\S+)/m', $dockerfile, $from));
+        $this->assertSame($from[1][0], $from[1][1]);
     }
 
     public function test_both_nginx_variants_name_the_same_image(): void

@@ -3,6 +3,7 @@
 namespace Tests\Unit\System;
 
 use Illuminate\Support\Facades\Blade;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -21,10 +22,10 @@ class DindVhostHttpsPortsTest extends TestCase
 
     public function test_every_port_is_a_listener_of_the_one_tls_server(): void
     {
-        $vhost = $this->render(['https_ports' => [443, 8443], 'https_redirect_port' => 8443, 'ips_v4' => ['198.51.100.7']]);
+        $vhost = $this->render(['https_ports' => [443, 8443], 'https_redirect_port' => 8443, 'ips_v4' => [TestNetwork::public2(7)]]);
         [$http, $https] = $this->blocks($vhost);
 
-        $this->assertSame(['198.51.100.7:443', '198.51.100.7:8443'], $this->listenPorts($https));
+        $this->assertSame([TestNetwork::public2(7).':443', TestNetwork::public2(7).':8443'], $this->listenPorts($https));
         $this->assertStringNotContainsString('return 301', $http, 'with 443 still served, :80 serves the app as before');
     }
 
@@ -53,7 +54,7 @@ class DindVhostHttpsPortsTest extends TestCase
     {
         $conf = Blade::render($this->file('templates/webserver-nginx-proxy.blade.php'), [
             'modsecurity_enabled' => false,
-            'ips_v4' => ['198.51.100.7'],
+            'ips_v4' => [TestNetwork::public2(7)],
             'ips_v6' => [],
             'fallback_proxy' => false,
             'ssl_cert_file' => '/tmp/server.cert',
@@ -61,8 +62,8 @@ class DindVhostHttpsPortsTest extends TestCase
             'extra_https_ports' => [8443],
         ]);
 
-        $this->assertStringContainsString('listen 198.51.100.7:8443 ssl default_server;', $conf);
-        $this->assertStringContainsString('listen 198.51.100.7:443 ssl default_server;', $conf);
+        $this->assertStringContainsString('listen '.TestNetwork::public2(7).':8443 ssl default_server;', $conf);
+        $this->assertStringContainsString('listen '.TestNetwork::public2(7).':443 ssl default_server;', $conf);
     }
 
     /**

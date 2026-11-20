@@ -6,6 +6,7 @@ use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Findings\FindingCodes;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /** A registry name the build could not look up is a DNS fault on the server, not the git warning printed beside it. */
 class DeployFailureExplainerDnsTest extends TestCase
@@ -59,7 +60,7 @@ OUT;
     {
         $match = DeployFailureExplainer::match('failed to solve: failed to resolve source metadata for public.ecr.aws/docker/library/alpine:3.20: '
             .'failed to do request: Head "https://public.ecr.aws/v2/docker/library/alpine/manifests/3.20": dial tcp: '
-            ."lookup public.ecr.aws on 127.0.0.1:53: read udp 127.0.0.1:40188->127.0.0.1:53: read: connection refused\n");
+            .'lookup public.ecr.aws on '.TestNetwork::LOOPBACK.':53: read udp '.TestNetwork::LOOPBACK.':40188->'.TestNetwork::LOOPBACK.":53: read: connection refused\n");
 
         $this->assertSame('build-dns-unavailable', $match['rule'] ?? null);
         $this->assertStringStartsWith('The base image public.ecr.aws/docker/library/alpine:3.20 could not be downloaded: the build '
@@ -70,17 +71,17 @@ OUT;
     {
         $this->assertSame([
             'rule' => 'build-dns-unavailable',
-            'message' => 'The build could not look up ghcr.io: the DNS server at 127.0.0.11 answered "server misbehaving". '
+            'message' => 'The build could not look up ghcr.io: the DNS server at '.TestNetwork::DOCKER_DNS.' answered "server misbehaving". '
                 .'This is a DNS problem on the server, not in the project; deploy again, and if it repeats, the server\'s '
                 .'DNS needs fixing.',
-        ], DeployFailureExplainer::match("dial tcp: lookup ghcr.io on 127.0.0.11:53: server misbehaving\n"));
+        ], DeployFailureExplainer::match('dial tcp: lookup ghcr.io on '.TestNetwork::DOCKER_DNS.":53: server misbehaving\n"));
     }
 
     public function test_a_name_that_does_not_exist_is_not_a_dns_fault(): void
     {
         $match = DeployFailureExplainer::match('failed to solve: failed to resolve source metadata for registry.example.invalid/app:1: '
             .'failed to do request: Head "https://registry.example.invalid/v2/app/manifests/1": dial tcp: '
-            ."lookup registry.example.invalid on 127.0.0.11:53: no such host\n");
+            .'lookup registry.example.invalid on '.TestNetwork::DOCKER_DNS.":53: no such host\n");
 
         $this->assertSame('base-image-unavailable', $match['rule'] ?? null);
     }

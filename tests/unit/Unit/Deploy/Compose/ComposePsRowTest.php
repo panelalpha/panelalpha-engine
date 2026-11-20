@@ -5,6 +5,7 @@ namespace Tests\Unit\Deploy\Compose;
 use App\Lib\Deploy\Compose\ComposePsRow;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /** The rows are compose 5.6.1's on a test host, from the list and inspect its daemon answered for the same stack. */
 final class ComposePsRowTest extends TestCase
@@ -18,7 +19,7 @@ final class ComposePsRowTest extends TestCase
         $row = ComposePsRow::of(
             $this->listed('08b3082237e3aff8dc324ef30d3ee1bb8b72f1da2e2ea6a88dabe3c913b1ddbd', 'app', '/usr/local/bin/entrypoint.sh', 'running', 'Up 3 hours (healthy)', [self::volume()]),
             ['State' => ['Status' => 'running', 'ExitCode' => 0, 'Health' => ['Status' => 'healthy']], 'NetworkSettings' => ['Ports' => [
-                '8000/tcp' => [['HostIp' => '0.0.0.0', 'HostPort' => '8000'], ['HostIp' => '::', 'HostPort' => '8000']],
+                '8000/tcp' => [['HostIp' => TestNetwork::ANY, 'HostPort' => '8000'], ['HostIp' => '::', 'HostPort' => '8000']],
             ]]],
             self::CREATED + 3 * 3600 + 600,
         );
@@ -37,10 +38,10 @@ final class ComposePsRowTest extends TestCase
             'Name' => 'project-app-1',
             'Names' => 'project-app-1',
             'Networks' => 'project_default',
-            'Ports' => '0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp',
+            'Ports' => TestNetwork::ANY.':8000->8000/tcp, [::]:8000->8000/tcp',
             'Project' => 'project',
             'Publishers' => [
-                ['URL' => '0.0.0.0', 'TargetPort' => 8000, 'PublishedPort' => 8000, 'Protocol' => 'tcp'],
+                ['URL' => TestNetwork::ANY, 'TargetPort' => 8000, 'PublishedPort' => 8000, 'Protocol' => 'tcp'],
                 ['URL' => '::', 'TargetPort' => 8000, 'PublishedPort' => 8000, 'Protocol' => 'tcp'],
             ],
             'RunningFor' => '3 hours ago',
@@ -101,22 +102,22 @@ final class ComposePsRowTest extends TestCase
 
         yield 'nothing' => [[], ''];
         yield 'exposed only' => [['9229/tcp' => null], '9229/tcp'];
-        yield 'one port on both families' => [['80/tcp' => [$bound('0.0.0.0', 80), $bound('::', 80)]], '0.0.0.0:80->80/tcp, [::]:80->80/tcp'];
+        yield 'one port on both families' => [['80/tcp' => [$bound(TestNetwork::ANY, 80), $bound('::', 80)]], TestNetwork::ANY.':80->80/tcp, [::]:80->80/tcp'];
         yield 'a published port of another number comes last' => [
-            ['80/tcp' => [$bound('0.0.0.0', 8080)], '9000/tcp' => [$bound('127.0.0.1', 9000)]],
-            '127.0.0.1:9000->9000/tcp, 0.0.0.0:8080->80/tcp',
+            ['80/tcp' => [$bound(TestNetwork::ANY, 8080)], '9000/tcp' => [$bound(TestNetwork::LOOPBACK, 9000)]],
+            TestNetwork::LOOPBACK.':9000->9000/tcp, '.TestNetwork::ANY.':8080->80/tcp',
         ];
         yield 'consecutive ports as a range' => [
-            ['3000/tcp' => [$bound('0.0.0.0', 3000)], '3001/tcp' => [$bound('0.0.0.0', 3001)], '3002/tcp' => [$bound('0.0.0.0', 3002)]],
-            '0.0.0.0:3000-3002->3000-3002/tcp',
+            ['3000/tcp' => [$bound(TestNetwork::ANY, 3000)], '3001/tcp' => [$bound(TestNetwork::ANY, 3001)], '3002/tcp' => [$bound(TestNetwork::ANY, 3002)]],
+            TestNetwork::ANY.':3000-3002->3000-3002/tcp',
         ];
         yield 'a gap ends a range' => [
-            ['80/tcp' => [$bound('0.0.0.0', 80), $bound('::', 80)], '443/tcp' => [$bound('0.0.0.0', 443), $bound('::', 443)]],
-            '0.0.0.0:80->80/tcp, [::]:80->80/tcp, 0.0.0.0:443->443/tcp, [::]:443->443/tcp',
+            ['80/tcp' => [$bound(TestNetwork::ANY, 80), $bound('::', 80)], '443/tcp' => [$bound(TestNetwork::ANY, 443), $bound('::', 443)]],
+            TestNetwork::ANY.':80->80/tcp, [::]:80->80/tcp, '.TestNetwork::ANY.':443->443/tcp, [::]:443->443/tcp',
         ];
         yield 'each protocol its own' => [
-            ['53/udp' => [$bound('0.0.0.0', 53)], '53/tcp' => [$bound('0.0.0.0', 53)], '54/tcp' => null],
-            '0.0.0.0:53->53/tcp, 0.0.0.0:53->53/udp, 54/tcp',
+            ['53/udp' => [$bound(TestNetwork::ANY, 53)], '53/tcp' => [$bound(TestNetwork::ANY, 53)], '54/tcp' => null],
+            TestNetwork::ANY.':53->53/tcp, '.TestNetwork::ANY.':53->53/udp, 54/tcp',
         ];
     }
 

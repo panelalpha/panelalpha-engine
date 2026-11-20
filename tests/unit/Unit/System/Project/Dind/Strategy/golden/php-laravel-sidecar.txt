@@ -120,7 +120,7 @@ app:x:1001:
 [1 log lines] exec /usr/local/lib/panelalpha/pa-root account.makeDirectories -- 1001 1001 {dir}/.cache/composer
 
 
-[1 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- bridge
+[1 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- pash-tenants
 
 
 [1 log lines] compose {dir} chown=1001:1001

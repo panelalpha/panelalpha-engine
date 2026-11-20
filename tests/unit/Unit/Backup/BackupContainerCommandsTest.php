@@ -5,6 +5,7 @@ namespace Tests\Unit\Backup;
 use App\Models\BackupContainer;
 use Illuminate\Testing\PendingCommand;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -129,12 +130,12 @@ class BackupContainerCommandsTest extends TestCase
         BackupContainer::create(['name' => 'bucket', 'driver' => 's3', 'location' => 'my-bucket', 'credentials' => [
             'access_key_id' => 'AKIAIOSFODNN7EXAMPLE',
             'secret_access_key' => 'wJalrXUtnFEMI-K7MDENG',
-            'endpoint' => 'http://127.0.0.1:1',
+            'endpoint' => 'http://'.TestNetwork::LOOPBACK.':1',
             'use_path_style_endpoint' => true,
         ]]);
 
         $this->artisan('backup:container:test bucket')
-            ->expectsOutputToContain('Backup storage is not writable: Error executing "PutObject" on "http://127.0.0.1:1/my-bucket/')
+            ->expectsOutputToContain('Backup storage is not writable: Error executing "PutObject" on "http://'.TestNetwork::LOOPBACK.':1/my-bucket/')
             ->assertExitCode(1);
     }
 

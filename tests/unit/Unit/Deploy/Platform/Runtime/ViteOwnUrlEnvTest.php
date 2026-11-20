@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Platform\Runtime;
 
 use App\Lib\Deploy\Platform\Runtime\ViteOwnUrlEnv;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 class ViteOwnUrlEnvTest extends TestCase
 {
@@ -39,7 +40,7 @@ class ViteOwnUrlEnvTest extends TestCase
                 ? "https://admin.onrender.com/api"
                 : "http://localhost:4000/api");
             TS);
-        $this->source('Form.tsx', "const url = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://127.0.0.1:3001');");
+        $this->source('Form.tsx', "const url = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://".TestNetwork::LOOPBACK.":3001');");
 
         $this->assertSame([
             'VITE_ADMIN_API' => self::OWN.'/api',

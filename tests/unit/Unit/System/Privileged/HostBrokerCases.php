@@ -124,7 +124,7 @@ final class HostBrokerCases
         yield 'buildKit, plain Dockerfile' => fn () => $builder->buildArgv(self::WORK.'/src', self::WORK.'/out-0a1b2c3d', $plain);
         yield 'buildKit, default network' => fn () => (new BuildCacheBuilder(null))->buildArgv(self::WORK.'/src', self::WORK.'/out-ffffffff', $plain);
         yield 'buildKit, railpack' => fn () => $builder->railpackBuildArgv(self::WORK.'/src', self::WORK.'/plan', self::WORK.'/out-0a1b2c3d');
-        yield 'railpackPrepare' => fn () => $builder->railpackPrepareArgv('ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028', self::WORK.'/src', self::WORK.'/plan');
+        yield 'railpackPrepare' => fn () => $builder->railpackPrepareArgv('ghcr.io/panelalpha/engine-user-dind:v2.3.1-20261119', self::WORK.'/src', self::WORK.'/plan');
         yield 'copyImageToLayout' => fn () => $builder->exportLayoutArgv('acme/base:1.2', self::WORK.'/layout-0a1b2c3d');
         yield 'copyImageToLayout, no tag' => fn () => $builder->exportLayoutArgv('ghcr.io/acme/tools', self::WORK.'/layout-4e5f6a7b');
     }

@@ -7,6 +7,7 @@ use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AccountDaemon;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 final class AccountDaemonTest extends TestCase
 {
@@ -228,7 +229,7 @@ final class AccountDaemonTest extends TestCase
             ]),
             json_encode([
                 ['State' => ['Status' => 'running', 'ExitCode' => 0, 'Health' => ['Status' => 'healthy']], 'NetworkSettings' => ['Ports' => [
-                    '3000/tcp' => [['HostIp' => '0.0.0.0', 'HostPort' => '8000'], ['HostIp' => '::', 'HostPort' => '8000']],
+                    '3000/tcp' => [['HostIp' => TestNetwork::ANY, 'HostPort' => '8000'], ['HostIp' => '::', 'HostPort' => '8000']],
                     '9229/tcp' => null,
                 ]]],
                 ['State' => ['Status' => 'exited', 'ExitCode' => 1, 'Health' => ['Status' => 'unhealthy']], 'NetworkSettings' => ['Ports' => []]],
@@ -243,9 +244,9 @@ final class AccountDaemonTest extends TestCase
                 'ExitCode' => 0, 'Health' => 'healthy', 'ID' => str_repeat('a', 12), 'Image' => 'shop-app',
                 'Labels' => 'com.docker.compose.project=shop,com.docker.compose.service=app', 'LocalVolumes' => '1',
                 'Mounts' => 'shop_data,/home/alice/pr…', 'Name' => 'shop-app-1', 'Names' => 'shop-app-1', 'Networks' => 'shop_default,pash-tenants',
-                'Ports' => '9229/tcp, 0.0.0.0:8000->3000/tcp, [::]:8000->3000/tcp',
+                'Ports' => '9229/tcp, '.TestNetwork::ANY.':8000->3000/tcp, [::]:8000->3000/tcp',
                 'Project' => 'shop', 'Publishers' => [
-                    ['URL' => '0.0.0.0', 'TargetPort' => 3000, 'PublishedPort' => 8000, 'Protocol' => 'tcp'],
+                    ['URL' => TestNetwork::ANY, 'TargetPort' => 3000, 'PublishedPort' => 8000, 'Protocol' => 'tcp'],
                     ['URL' => '::', 'TargetPort' => 3000, 'PublishedPort' => 8000, 'Protocol' => 'tcp'],
                     ['URL' => '', 'TargetPort' => 9229, 'PublishedPort' => 0, 'Protocol' => 'tcp'],
                 ],

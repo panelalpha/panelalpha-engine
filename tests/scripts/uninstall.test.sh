@@ -11,6 +11,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts" && pwd)"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/test-network.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -43,8 +44,8 @@ export ENGINE_CONF_DIR="$TMP/etc/panelalpha"
 DOCKER_NETWORK_NAME="pash-default-network"
 TENANT_NETWORK_NAME="pash-tenants"
 BUILD_NETWORK_NAME="panelalpha-build"
-REGISTRY_MIRROR_URL="http://127.0.0.1:5001"
-ENGINE_IMAGE_PATTERN='^(ghcr\.io/panelalpha/|panelalpha/|127\.0\.0\.1:5000/panelalpha/|moby/buildkit:|ghcr\.io/regclient/regctl:|certbot/certbot:)'
+REGISTRY_MIRROR_URL="http://$TN_LOOPBACK:5001"
+ENGINE_IMAGE_PATTERN='^(ghcr\.io/panelalpha/|panelalpha/|'"${TN_LOOPBACK//./\\.}"':5000/panelalpha/|moby/buildkit:|ghcr\.io/regclient/regctl:|certbot/certbot:)'
 ENGINE_IMAGES=()
 # shellcheck source=/dev/null
 source "$TMP/funcs.sh"
@@ -213,11 +214,11 @@ check "every network the engine made goes" "no no no" \
 check "and the tenant guard's nft table with them" "yes" "$(logged 'nft delete table bridge pa_tenants')"
 
 reset
-cat >"$STUB_DIR/images" <<'EOF'
+cat >"$STUB_DIR/images" <<EOF
 ghcr.io/panelalpha/engine-core:v2.3.0
 panelalpha/php:8.3-apache-bookworm-pa20261007
 panelalpha/ruby:3.3-slim-bookworm-pa0c53db49
-127.0.0.1:5000/panelalpha/php:8.3-apache-bookworm-pa20261007
+$TN_LOOPBACK:5000/panelalpha/php:8.3-apache-bookworm-pa20261007
 moby/buildkit:v0.34.1
 ghcr.io/regclient/regctl:v0.11.7
 certbot/certbot:latest
@@ -231,11 +232,11 @@ check "without --purge-images the images are listed" "yes" "$(grep -qF 'panelalp
 check "and none is removed" "0" "$(grep -c '^docker rmi' "$STUB_DIR/calls")"
 
 reset
-cat >"$STUB_DIR/images" <<'EOF'
+cat >"$STUB_DIR/images" <<EOF
 ghcr.io/panelalpha/engine-core:v2.3.0
 panelalpha/php:8.3-apache-bookworm-pa20261007
 panelalpha/ruby:3.3-slim-bookworm-pa0c53db49
-127.0.0.1:5000/panelalpha/php:8.3-apache-bookworm-pa20261007
+$TN_LOOPBACK:5000/panelalpha/php:8.3-apache-bookworm-pa20261007
 moby/buildkit:v0.34.1
 ghcr.io/regclient/regctl:v0.11.7
 certbot/certbot:latest
@@ -246,7 +247,7 @@ ENGINE_IMAGES=(registry:3.1.1)
 PURGE_IMAGES=1
 purge_engine_images_if_requested >/dev/null
 check "with --purge-images every image the engine built, cached or pulled goes" \
-    "$(printf '%s\n' 127.0.0.1:5000/panelalpha/php:8.3-apache-bookworm-pa20261007 certbot/certbot:latest ghcr.io/panelalpha/engine-core:v2.3.0 ghcr.io/regclient/regctl:v0.11.7 moby/buildkit:v0.34.1 panelalpha/php:8.3-apache-bookworm-pa20261007 panelalpha/ruby:3.3-slim-bookworm-pa0c53db49 registry:3.1.1 | LC_ALL=C sort | paste -sd' ')" \
+    "$(printf '%s\n' "$TN_LOOPBACK":5000/panelalpha/php:8.3-apache-bookworm-pa20261007 certbot/certbot:latest ghcr.io/panelalpha/engine-core:v2.3.0 ghcr.io/regclient/regctl:v0.11.7 moby/buildkit:v0.34.1 panelalpha/php:8.3-apache-bookworm-pa20261007 panelalpha/ruby:3.3-slim-bookworm-pa0c53db49 registry:3.1.1 | LC_ALL=C sort | paste -sd' ')" \
     "$(sed -n 's/^docker rmi -f //p' "$STUB_DIR/calls" | tr ' ' '\n' | LC_ALL=C sort | paste -sd' ')"
 check "images from elsewhere on the host stay" "no no" \
     "$(grep -q nginx:alpine "$STUB_DIR/calls" && echo yes || echo no) $(grep -q python:3.13-slim "$STUB_DIR/calls" && echo yes || echo no)"
@@ -254,22 +255,22 @@ check "images from elsewhere on the host stay" "no no" \
 if command -v jq >/dev/null 2>&1; then
     reset
     mkdir -p "$(dirname "$DOCKER_DAEMON_JSON")"
-    cat >"$DOCKER_DAEMON_JSON" <<'EOF'
+    cat >"$DOCKER_DAEMON_JSON" <<EOF
 {
-  "bip": "172.20.0.1/16",
+  "bip": "$TN_DOCKER_BRIDGE_GATEWAY/16",
   "features": {"time-namespaces": false},
-  "registry-mirrors": ["http://127.0.0.1:5001", "https://mirror.example"]
+  "registry-mirrors": ["http://$TN_LOOPBACK:5001", "https://mirror.example"]
 }
 EOF
     remove_engine_daemon_json >/dev/null
     check "the installer's mirror entry goes" "https://mirror.example" \
         "$(jq -r '.["registry-mirrors"] | join(",")' "$DOCKER_DAEMON_JSON")"
-    check "everything else in daemon.json is kept" "172.20.0.1/16 false" \
+    check "everything else in daemon.json is kept" "$TN_DOCKER_BRIDGE_GATEWAY/16 false" \
         "$(jq -r '.bip, .features["time-namespaces"]' "$DOCKER_DAEMON_JSON" | paste -sd' ')"
     check "the daemon is reloaded" "yes" "$(logged 'systemctl reload docker')"
 
-    cat >"$DOCKER_DAEMON_JSON" <<'EOF'
-{"registry-mirrors": ["http://127.0.0.1:5001"]}
+    cat >"$DOCKER_DAEMON_JSON" <<EOF
+{"registry-mirrors": ["http://$TN_LOOPBACK:5001"]}
 EOF
     remove_engine_daemon_json >/dev/null
     check "a list holding only that entry loses it rather than staying empty" "{}" \

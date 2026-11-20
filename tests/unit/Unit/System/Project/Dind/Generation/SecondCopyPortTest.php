@@ -415,7 +415,7 @@ class SecondCopyPortTest extends TestCase
 
             return self::HEADER . "\n" . sprintf('   0: 00000000:%04X 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1000 1', $this->bound) . "\n";
         }
-        if (str_contains($line, 'curl') && preg_match('/ probe 172\.18\.0\.9 (\d+)$/', $line, $m) === 1) {
+        if (str_contains($line, 'curl') && preg_match('/ probe '.preg_quote(TestNetwork::container(9), '/').' (\d+)$/', $line, $m) === 1) {
             return (int) $m[1] === $this->bound ? '200' : '000';
         }
         if (preg_match('/for port in ([\d ]+); do/', $line, $m) === 1) {
@@ -450,7 +450,7 @@ class SecondCopyPortTest extends TestCase
         return [
             'State' => ['Status' => $status, 'ExitCode' => (int) $exitCode],
             'RestartCount' => (int) $restarts,
-            'NetworkSettings' => ['Networks' => ['project-next_default' => ['IPAddress' => '172.18.0.9']], 'Ports' => $ports],
+            'NetworkSettings' => ['Networks' => ['project-next_default' => ['IPAddress' => TestNetwork::container(9)]], 'Ports' => $ports],
         ];
     }
 

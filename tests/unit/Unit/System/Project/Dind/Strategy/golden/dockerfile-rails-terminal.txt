@@ -1,4 +1,4 @@
-[3 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- bridge
+[3 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- pash-tenants
 
 
 [3 log lines] compose {dir} chown=1001:1001

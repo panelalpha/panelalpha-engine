@@ -13,6 +13,7 @@ use App\System\Services\Webserver\NginxProxy;
 use App\System\Services\Webserver\Openlitespeed;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -135,7 +136,7 @@ class WebserverDefaultCertificateTest extends TestCase
 
             public function getAllIpsVars(): array
             {
-                return ['ips_v4' => ['203.0.113.7'], 'ips_v6' => []];
+                return ['ips_v4' => [TestNetwork::public(7)], 'ips_v6' => []];
             }
 
             public function restart(): void {}

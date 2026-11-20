@@ -24,7 +24,7 @@
 {"kind": "image", "value": "0123456789ab", "accepted": true},
 {"kind": "image", "value": "node:22-bookworm-slim", "accepted": true},
 {"kind": "image", "value": "oven/bun:1", "accepted": true},
-{"kind": "image", "value": "ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028", "accepted": true},
+{"kind": "image", "value": "ghcr.io/panelalpha/engine-user-dind:v2.3.1-20261119", "accepted": true},
 {"kind": "image", "value": "registry.example.com/a__b/c---d:Tag_1.0-rc", "accepted": true},
 {"kind": "apacheModule", "value": "proxy_fcgi", "accepted": true},
 {"kind": "operand", "value": "until=3600s", "accepted": true},

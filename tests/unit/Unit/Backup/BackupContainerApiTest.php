@@ -9,6 +9,7 @@ use App\Models\BackupContainer;
 use App\Models\BackupSchedule;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -137,13 +138,13 @@ class BackupContainerApiTest extends TestCase
         $box = BackupContainer::create(['name' => 'bucket', 'driver' => 's3', 'location' => 'my-bucket', 'credentials' => [
             'access_key_id' => 'AKIAIOSFODNN7EXAMPLE',
             'secret_access_key' => 'wJalrXUtnFEMI-K7MDENG',
-            'endpoint' => 'http://127.0.0.1:1',
+            'endpoint' => 'http://'.TestNetwork::LOOPBACK.':1',
             'use_path_style_endpoint' => true,
         ]]);
 
         $response = $this->postJson("/api/backup-containers/{$box->id}/test")->assertUnprocessable();
 
-        $this->assertStringContainsString('http://127.0.0.1:1/my-bucket/', (string) $response->json('message'));
+        $this->assertStringContainsString('http://'.TestNetwork::LOOPBACK.':1/my-bucket/', (string) $response->json('message'));
         $this->assertStringNotContainsString('wJalrXUtnFEMI-K7MDENG', (string) $response->getContent());
     }
 

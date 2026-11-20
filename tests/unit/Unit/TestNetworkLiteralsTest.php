@@ -17,7 +17,7 @@ use Tests\Support\TestNetwork;
 class TestNetworkLiteralsTest extends TestCase
 {
     /** Also right after an escape such as `\n`, before a full stop and with regex-escaped dots; not inside a longer dotted number, a name like `net45.1.1.11` or a `1.2.3.4-rc` version. */
-    private const IPV4 = '~(?:(?<![\w.-])|(?<=\\[nrtv0])|(?<=\\x[0-9a-fA-F]{2}))(\d{1,3}(?:\\\\?\.\d{1,3}){3})(?!\.?\d)(?![-\w])~';
+    private const IPV4 = '~(?:(?<![\w.-])|(?<=\\\\[nrtv0])|(?<=\\\\x[0-9a-fA-F]{2}))(\d{1,3}(?:\\\\?\.\d{1,3}){3})(?!\.?\d)(?![-\w])~';
 
     public function test_no_test_writes_an_ip_address(): void
     {
@@ -40,7 +40,7 @@ class TestNetworkLiteralsTest extends TestCase
                 if (stripos($line, 'version') !== false) {
                     continue;
                 }
-                foreach ($this->addressesIn($line) as $address) {
+                foreach ($this->addressesIn($line, $this->relative($file).':'.($number + 1)) as $address) {
                     $found[] = $this->relative($file).':'.($number + 1).': '.$address;
                 }
             }
@@ -50,9 +50,11 @@ class TestNetworkLiteralsTest extends TestCase
     }
 
     /** @return list<string> */
-    private function addressesIn(string $line): array
+    private function addressesIn(string $line, string $where): array
     {
-        preg_match_all(self::IPV4, $line, $matches);
+        if (preg_match_all(self::IPV4, $line, $matches) === false) {
+            throw new \RuntimeException($where.' ('.strlen($line).' bytes) could not be scanned: '.preg_last_error_msg());
+        }
 
         return array_values(array_filter(
             array_map(static fn (string $match): string => str_replace('\\', '', $match), $matches[1]),

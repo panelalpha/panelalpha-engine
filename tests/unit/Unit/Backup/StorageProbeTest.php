@@ -5,6 +5,7 @@ namespace Tests\Unit\Backup;
 use App\Lib\Backup\StorageProbe;
 use App\Models\BackupContainer;
 use RuntimeException;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -22,26 +23,26 @@ class StorageProbeTest extends TestCase
 
     public function test_an_unreachable_endpoint_is_named_with_the_bucket_and_the_drivers_error(): void
     {
-        $message = $this->failure($this->s3('http://127.0.0.1:1'));
+        $message = $this->failure($this->s3('http://'.TestNetwork::LOOPBACK.':1'));
 
-        $this->assertStringStartsWith('s3 http://127.0.0.1:1 my-bucket: Backup storage is not writable: ', $message);
-        $this->assertStringContainsString('http://127.0.0.1:1/my-bucket/', $message);
-        $this->assertStringContainsString('Failed to connect to 127.0.0.1', $message);
+        $this->assertStringStartsWith('s3 http://'.TestNetwork::LOOPBACK.':1 my-bucket: Backup storage is not writable: ', $message);
+        $this->assertStringContainsString('http://'.TestNetwork::LOOPBACK.':1/my-bucket/', $message);
+        $this->assertStringContainsString('Failed to connect to '.TestNetwork::LOOPBACK, $message);
         $this->assertStringNotContainsString("\n", $message);
     }
 
     public function test_the_answer_masks_the_containers_credentials(): void
     {
-        $message = $this->failure($this->s3('http://127.0.0.1:1/wJalrXUtnFEMI-K7MDENG'));
+        $message = $this->failure($this->s3('http://'.TestNetwork::LOOPBACK.':1/wJalrXUtnFEMI-K7MDENG'));
 
         $this->assertStringNotContainsString('wJalrXUtnFEMI-K7MDENG', $message);
-        $this->assertStringStartsWith('s3 http://127.0.0.1:1/*** my-bucket: ', $message);
-        $this->assertStringContainsString('http://127.0.0.1:1/***/my-bucket/', $message);
+        $this->assertStringStartsWith('s3 http://'.TestNetwork::LOOPBACK.':1/*** my-bucket: ', $message);
+        $this->assertStringContainsString('http://'.TestNetwork::LOOPBACK.':1/***/my-bucket/', $message);
     }
 
     public function test_the_answer_masks_the_s3_access_key_id(): void
     {
-        $message = $this->failure($this->s3('http://127.0.0.1:1/AKIAIOSFODNN7EXAMPLE'));
+        $message = $this->failure($this->s3('http://'.TestNetwork::LOOPBACK.':1/AKIAIOSFODNN7EXAMPLE'));
 
         $this->assertStringNotContainsString('AKIAIOSFODNN7EXAMPLE', $message);
         $this->assertStringContainsString('***', $message);
@@ -49,9 +50,9 @@ class StorageProbeTest extends TestCase
 
     public function test_a_secret_too_short_to_mask_leaves_the_answer_whole(): void
     {
-        $message = $this->failure($this->s3('http://127.0.0.1:1', '1'));
+        $message = $this->failure($this->s3('http://'.TestNetwork::LOOPBACK.':1', '1'));
 
-        $this->assertStringContainsString('http://127.0.0.1:1/my-bucket/', $message);
+        $this->assertStringContainsString('http://'.TestNetwork::LOOPBACK.':1/my-bucket/', $message);
         $this->assertStringNotContainsString('***', $message);
     }
 
@@ -60,11 +61,11 @@ class StorageProbeTest extends TestCase
         $container = new BackupContainer;
         $container->driver = 'sftp';
         $container->location = '/backups';
-        $container->credentials = ['host' => '127.0.0.1', 'port' => 1, 'username' => 'backup', 'password' => 'correct-horse-battery'];
+        $container->credentials = ['host' => TestNetwork::LOOPBACK, 'port' => 1, 'username' => 'backup', 'password' => 'correct-horse-battery'];
 
         $message = $this->failure($container);
 
-        $this->assertStringStartsWith('sftp 127.0.0.1:1 /backups: Backup storage is not writable: ', $message);
+        $this->assertStringStartsWith('sftp '.TestNetwork::LOOPBACK.':1 /backups: Backup storage is not writable: ', $message);
         $this->assertStringNotContainsString('correct-horse-battery', $message);
     }
 

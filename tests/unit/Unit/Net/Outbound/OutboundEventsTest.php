@@ -11,6 +11,7 @@ use App\Lib\Net\Outbound\OutboundStatus;
 use App\Models\OutboundEvent;
 use Illuminate\Support\Carbon;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /** The broker's report kept as events, each new one told in the project's deploy log, and a block lifted. */
@@ -36,7 +37,7 @@ class OutboundEventsTest extends TestCase
 
     private static function block(int $until = self::SINCE + 1800): array
     {
-        return ['owner' => self::PROJECT, 'network' => 'tenants', 'address' => '10.200.128.5', 'since' => self::SINCE, 'until' => $until];
+        return ['owner' => self::PROJECT, 'network' => 'tenants', 'address' => TestNetwork::TENANT_ACCOUNT, 'since' => self::SINCE, 'until' => $until];
     }
 
     private static function now(int $offset = 60): Carbon
@@ -54,7 +55,7 @@ class OutboundEventsTest extends TestCase
         $this->assertCount(1, $begun);
         $this->assertSame([], $again);
         $event = OutboundEvent::query()->sole();
-        $this->assertSame([self::PROJECT, 'scan', '10.200.128.5'], [$event->owner, $event->kind, $event->address]);
+        $this->assertSame([self::PROJECT, 'scan', TestNetwork::TENANT_ACCOUNT], [$event->owner, $event->kind, $event->address]);
         $this->assertSame(self::SINCE + 1900, $event->until_at->getTimestamp(), 'a longer block is followed');
         $this->assertTrue($event->isActive(self::now(120)));
         $this->assertFalse($event->isActive(self::now(1901)));
@@ -62,7 +63,7 @@ class OutboundEventsTest extends TestCase
 
     public function test_a_mark_is_an_episode_until_it_goes_quiet(): void
     {
-        $mark = ['owner' => self::PROJECT, 'network' => 'build', 'kind' => 'smtp', 'address' => '172.30.0.2', 'since' => self::SINCE, 'last' => self::SINCE + 30];
+        $mark = ['owner' => self::PROJECT, 'network' => 'build', 'kind' => 'smtp', 'address' => TestNetwork::container2(2), 'since' => self::SINCE, 'last' => self::SINCE + 30];
         (new OutboundEvents)->sync(self::report([], [$mark]), self::now());
 
         $event = OutboundEvent::query()->sole();
@@ -89,7 +90,7 @@ class OutboundEventsTest extends TestCase
     public function test_an_owner_that_is_no_project_is_only_logged(): void
     {
         $events = new OutboundEvents;
-        $mark = ['owner' => 'eager_turing', 'network' => 'build', 'kind' => 'flood', 'address' => '172.30.0.9', 'since' => self::SINCE, 'last' => self::SINCE];
+        $mark = ['owner' => 'eager_turing', 'network' => 'build', 'kind' => 'flood', 'address' => TestNetwork::container2(9), 'since' => self::SINCE, 'last' => self::SINCE];
 
         foreach ($events->sync(self::report([], [$mark]), self::now()) as $begun) {
             $events->announce($begun, []);
@@ -112,11 +113,11 @@ class OutboundEventsTest extends TestCase
 
     public function test_lifting_a_block_marks_its_event_lifted_and_leaves_the_limits_that_still_apply(): void
     {
-        $smtp = ['owner' => self::PROJECT, 'network' => 'tenants', 'kind' => 'smtp', 'address' => '10.200.128.5', 'since' => self::SINCE, 'last' => self::SINCE + 30];
+        $smtp = ['owner' => self::PROJECT, 'network' => 'tenants', 'kind' => 'smtp', 'address' => TestNetwork::TENANT_ACCOUNT, 'since' => self::SINCE, 'last' => self::SINCE + 30];
         (new OutboundEvents)->sync(self::report([self::block()], [$smtp]), self::now());
-        $status = new OutboundStatus(new OutboundLimits(static fn (): string => '{"owner": "egshop", "addresses": ["10.200.128.5"]}'));
+        $status = new OutboundStatus(new OutboundLimits(static fn (): string => '{"owner": "egshop", "addresses": ["'.TestNetwork::TENANT_ACCOUNT.'"]}'));
 
-        $this->assertSame(['10.200.128.5'], $status->unblock(self::PROJECT, OutboundStatus::LIFTED_BY_CLI, self::now(120)));
+        $this->assertSame([TestNetwork::TENANT_ACCOUNT], $status->unblock(self::PROJECT, OutboundStatus::LIFTED_BY_CLI, self::now(120)));
 
         $this->assertNull(OutboundEvent::query()->where('kind', OutboundEvent::KIND_SMTP)->sole()->lifted_at, 'SMTP stays blocked, so its event is not lifted');
         $event = OutboundEvent::query()->where('kind', OutboundEvent::KIND_SCAN)->sole();

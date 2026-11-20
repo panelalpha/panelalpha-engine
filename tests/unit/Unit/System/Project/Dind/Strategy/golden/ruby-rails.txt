@@ -119,7 +119,7 @@ Rails.application.config.after_initialize do
 end
 
 
-[2 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- bridge
+[2 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- pash-tenants
 
 
 [2 log lines] compose {dir} chown=1001:1001
