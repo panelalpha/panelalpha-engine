@@ -31,7 +31,7 @@ final class WpCliWordpressInstaller implements WordpressInstaller
 
     public function ensureDatabase(User $user, string $database, string $databaseUser, string $password): void
     {
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
         if (! $mysql->databases()->databaseExists($database)) {
             $mysql->databases()->createDatabase($database);
         }

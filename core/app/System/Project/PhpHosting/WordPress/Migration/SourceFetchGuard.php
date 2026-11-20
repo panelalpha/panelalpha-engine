@@ -197,28 +197,31 @@ final class SourceFetchGuard
     }
 
     /**
+     * @param  null|callable(string): mixed  $dnsRecords  the host's A and AAAA records; dns_get_record() by default
+     * @param  null|callable(string): mixed  $hostByName  the host's IPv4 addresses; gethostbynamel() by default
      * @return list<string>
      */
-    public static function resolveHost(string $host): array
+    public static function resolveHost(string $host, ?callable $dnsRecords = null, ?callable $hostByName = null): array
     {
         $ips = [];
-        if (function_exists('dns_get_record')) {
-            $ips = self::dnsRecordAddresses($host);
+        if ($dnsRecords !== null || function_exists('dns_get_record')) {
+            $ips = self::dnsRecordAddresses($host, $dnsRecords ?? static fn (string $name): mixed => @dns_get_record($name, DNS_A + DNS_AAAA));
         }
-        if ($ips === [] && function_exists('gethostbynamel')) {
-            $ips = self::hostByNameAddresses($host);
+        if ($ips === [] && ($hostByName !== null || function_exists('gethostbynamel'))) {
+            $ips = self::hostByNameAddresses($host, $hostByName ?? static fn (string $name): mixed => @gethostbynamel($name));
         }
 
         return array_values(array_unique($ips));
     }
 
     /**
+     * @param  callable(string): mixed  $dnsRecords
      * @return list<string>
      */
-    private static function dnsRecordAddresses(string $host): array
+    private static function dnsRecordAddresses(string $host, callable $dnsRecords): array
     {
         $ips = [];
-        $records = @dns_get_record($host, DNS_A + DNS_AAAA);
+        $records = $dnsRecords($host);
         if (is_array($records)) {
             foreach ($records as $record) {
                 if (! is_array($record)) {
@@ -237,12 +240,13 @@ final class SourceFetchGuard
     }
 
     /**
+     * @param  callable(string): mixed  $hostByName
      * @return list<string>
      */
-    private static function hostByNameAddresses(string $host): array
+    private static function hostByNameAddresses(string $host, callable $hostByName): array
     {
         $ips = [];
-        $v4 = @gethostbynamel($host);
+        $v4 = $hostByName($host);
         if (is_array($v4)) {
             foreach ($v4 as $ip) {
                 if (is_string($ip)) {

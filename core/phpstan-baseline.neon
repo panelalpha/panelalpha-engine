@@ -1885,18 +1885,6 @@ parameters:
 			path: app/System/Project/PhpHosting/WordPress/Migration/MigrationTargetResolver.php
 
 		-
-			message: '#^Call to function is_array\(\) with array will always evaluate to true\.$#'
-			identifier: function.alreadyNarrowedType
-			count: 1
-			path: app/System/Project/PhpHosting/WordPress/Migration/SourceFetchGuard.php
-
-		-
-			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
-			identifier: function.alreadyNarrowedType
-			count: 1
-			path: app/System/Project/PhpHosting/WordPress/Migration/SourceFetchGuard.php
-
-		-
 			message: '#^Negated boolean expression is always false\.$#'
 			identifier: booleanNot.alwaysFalse
 			count: 1

@@ -14,9 +14,11 @@ final class AccountImportedSiteRemover implements ImportedSiteRemover
 {
     private const PLACEHOLDER = 'index.html';
 
+    public function __construct(private readonly ?ProjectDeleter $deleter = null) {}
+
     public function deleteProject(User $user): void
     {
-        (new ProjectDeleter)->delete($user);
+        ($this->deleter ?? new ProjectDeleter)->delete($user);
     }
 
     public function removeFiles(User $user, string $installPath): void
@@ -35,7 +37,7 @@ final class AccountImportedSiteRemover implements ImportedSiteRemover
 
     public function dropDatabase(User $user, string $database, ?string $databaseUser): void
     {
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
         if ($mysql->databases()->databaseExists($database)) {
             $mysql->databases()->deleteDatabase($database);
         }

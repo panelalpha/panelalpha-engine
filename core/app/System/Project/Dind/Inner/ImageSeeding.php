@@ -322,7 +322,7 @@ class ImageSeeding
                 30
             );
         } catch (\Exception $e) {
-            return (new RegistryImageConfig)->exposedPorts($image);
+            return $this->registryImageConfig()->exposedPorts($image);
         }
 
         return ImageTransfer::parseExposedPorts(is_string($output) ? $output : '');
@@ -346,11 +346,17 @@ class ImageSeeding
             $held = null;
         }
         if ($held === null) {
-            return (new RegistryImageConfig)->environment($image);
+            return $this->registryImageConfig()->environment($image);
         }
         $env = $held['Config']['Env'] ?? null;
 
         return is_array($env) ? array_values(array_filter($env, 'is_string')) : [];
+    }
+
+    /** What the registries say about an image neither the host nor the account holds. */
+    protected function registryImageConfig(): RegistryImageConfig
+    {
+        return new RegistryImageConfig;
     }
 
     public function ensure(string $image): void
