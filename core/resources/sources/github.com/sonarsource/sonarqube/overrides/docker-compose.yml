@@ -62,7 +62,28 @@ services:
       start_period: 60s
     mem_limit: 3g
 
-  # No-op gate: `compose up -d` returns only once SonarQube reports UP.
+  # One-shot, once SonarQube reports UP: the engine's login on the built-in
+  # admin while it still has the password `admin`, through SonarQube's own web
+  # API (panelalpha/sonarqube/set-admin-login.sh). A failure there leaves
+  # admin/admin and says so; it never holds the stack back.
+  admin-login:
+    image: docker.io/library/sonarqube:26.9.0.129388-community
+    restart: "no"
+    entrypoint: ["/bin/bash", "/pa/set-admin-login.sh"]
+    env_file:
+      # SONARQUBE_ADMIN_USERNAME / SONARQUBE_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
+    volumes:
+      - ./panelalpha/sonarqube:/pa:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    mem_limit: 64m
+
+  # No-op gate: `compose up -d` returns only once SonarQube reports UP and
+  # has the engine's login.
   ready:
     image: docker.io/library/postgres:17-alpine
     restart: "no"
@@ -70,6 +91,8 @@ services:
     depends_on:
       app:
         condition: service_healthy
+      admin-login:
+        condition: service_completed_successfully
     mem_limit: 32m
 
 volumes:

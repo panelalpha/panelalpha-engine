@@ -13,5 +13,17 @@ description: >-
   the Elasticsearch ulimits are upstream's documented values. A `ready` gate
   makes the deploy finish only once /api/system/status reports UP.
 
-  First run is upstream's: the default admin / admin login, which SonarQube
-  asks to change on first sign-in, is left as shipped.
+  A new database gets SonarQube's built-in admin with the password `admin`,
+  which nobody deploying it is told and anyone with the address could use
+  (the first sign-in only asks to change it). So the engine generates a login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials)
+  and the one-shot `admin-login`, once SonarQube reports UP, sets it on that
+  admin through SonarQube's own web API
+  (files/panelalpha/sonarqube/set-admin-login.sh), only while the admin still
+  has the default password: a password changed in SonarQube is never
+  touched. The password has a symbol, as SonarQube's password policy demands.
+credentials:
+  login_path: /sessions/new
+  fields:
+    SONARQUBE_ADMIN_USERNAME: {kind: username}
+    SONARQUBE_ADMIN_PASSWORD: {kind: password, symbol: true}
