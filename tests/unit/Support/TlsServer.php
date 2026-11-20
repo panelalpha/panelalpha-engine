@@ -18,6 +18,8 @@ final class TlsServer
         while (true) { $client = @stream_socket_accept($server, -1); if ($client) { fclose($client); } }
         PHP;
 
+    private const SIGNING = ['digest_alg' => 'sha256'];
+
     /** @param resource $process */
     private function __construct(private $process, public readonly string $address) {}
 
@@ -29,14 +31,14 @@ final class TlsServer
     public static function start(string $dir, string $host, string $name, int $days, bool $selfSigned = true): self
     {
         $key = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
-        $request = openssl_csr_new(['commonName' => $name], $key);
+        $request = openssl_csr_new(['commonName' => $name], $key, self::SIGNING);
 
         if ($selfSigned) {
-            $certificate = openssl_csr_sign($request, null, $key, $days);
+            $certificate = openssl_csr_sign($request, null, $key, $days, self::SIGNING);
         } else {
             $caKey = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
-            $ca = openssl_csr_sign(openssl_csr_new(['commonName' => 'Wizard Test CA', 'organizationName' => 'Wizard Test CA'], $caKey), null, $caKey, $days);
-            $certificate = openssl_csr_sign($request, $ca, $caKey, $days);
+            $ca = openssl_csr_sign(openssl_csr_new(['commonName' => 'Wizard Test CA', 'organizationName' => 'Wizard Test CA'], $caKey, self::SIGNING), null, $caKey, $days, self::SIGNING);
+            $certificate = openssl_csr_sign($request, $ca, $caKey, $days, self::SIGNING);
         }
 
         openssl_x509_export($certificate, $pem);
