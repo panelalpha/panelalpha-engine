@@ -7,6 +7,11 @@ services:
     environment:
       # Links, redirects and the login Origin check use the public domain.
       GF_SERVER_ROOT_URL: ${PA_PUBLIC_URL}
+    env_file:
+      # GF_SECURITY_ADMIN_USER / GF_SECURITY_ADMIN_PASSWORD, the login the engine
+      # generates. Grafana creates its admin from them on a new database only, so
+      # a password changed in Grafana is never overwritten.
+      - ../.panelalpha/app-credentials.env
     volumes:
       # grafana.db, plugins and sessions; survives redeploys.
       - grafana-data:/var/lib/grafana
@@ -20,11 +25,17 @@ services:
       start_period: 10s
     mem_limit: 1g
 
-  # No-op gate: `compose up -d` returns only once Grafana answers /api/health.
+  # Gate: `compose up -d` returns only once Grafana answers /api/health. A
+  # database made before the recipe had the engine's login still has
+  # admin/admin; while that signs in, this sets the engine's login on it.
   ready:
     image: grafana/grafana:13.2.2
     restart: "no"
-    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    entrypoint: ["/bin/sh", "/panelalpha/grafana-login.sh"]
+    env_file:
+      - ../.panelalpha/app-credentials.env
+    volumes:
+      - ./panelalpha/grafana-login.sh:/panelalpha/grafana-login.sh:ro
     depends_on:
       app:
         condition: service_healthy

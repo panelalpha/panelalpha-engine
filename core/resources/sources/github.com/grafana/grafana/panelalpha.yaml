@@ -12,5 +12,19 @@ description: >-
   account's public URL so links, redirects and the login origin check use the
   real domain rather than http://localhost:3000.
 
-  Everything else is upstream's default, including the first login admin/admin
-  (Grafana asks to change it on first sign-in).
+  A new database gets Grafana's built-in admin with the password admin, which
+  anyone with the URL could use and nobody deploying it is told. So the engine
+  generates a login (`credentials:` below, returned by GET
+  /projects/{name}/app-credentials) and Grafana reads it from
+  app-credentials.env as GF_SECURITY_ADMIN_USER / GF_SECURITY_ADMIN_PASSWORD,
+  its own variables for the admin it creates on a new database; admin/admin
+  no longer signs in and a password changed in Grafana is never overwritten. A
+  database made before the recipe had the engine's login still has
+  admin/admin: while that signs in, the `ready` gate
+  (files/panelalpha/grafana-login.sh) sets the engine's login on it through
+  Grafana's own API. Everything else is upstream's default.
+credentials:
+  login_path: /login
+  fields:
+    GF_SECURITY_ADMIN_USER: {kind: username}
+    GF_SECURITY_ADMIN_PASSWORD: {kind: password}
