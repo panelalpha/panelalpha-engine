@@ -46,10 +46,10 @@ final class BackupRestore
     public function restoreDind(array $only, array $exclude): void
     {
         $record = $this->record;
-        $storage = ($this->storage)();
         $this->rollbackStepFailed = false;
 
         try {
+            $storage = ($this->storage)();
             $selectedItems = $this->restorableItems($only, $exclude);
 
             $this->project->system()->filesystem()->assertFreeSpace(
@@ -72,11 +72,11 @@ final class BackupRestore
     public function restoreClassic(array $only, array $exclude, bool $deleteExistingFiles): void
     {
         $record = $this->record;
-        $storage = ($this->storage)();
         $this->rollbackStepFailed = false;
         $stagingDir = $this->staging->path($record->username, $record->id);
 
         try {
+            $storage = ($this->storage)();
             $selectedItems = $this->restorableItems($only, $exclude);
 
             $this->project->system()->filesystem()->assertFreeSpace(

@@ -236,6 +236,21 @@ class LocalStorageEdgesTest extends TestCase
         $this->assertFileDoesNotExist($this->brokerLog());
     }
 
+    public function test_a_store_root_whose_parent_segment_passes_a_file_creates_nothing_beside_it(): void
+    {
+        touch(dirname($this->root).'/file');
+        $storeRoot = dirname($this->root).'/file/../store';
+
+        try {
+            $this->write(new Local($storeRoot), 'alice/a.bin', 'x');
+            $this->fail('a root with .. must be refused');
+        } catch (InvalidArgumentException $e) {
+            $this->assertSame('Directory must stay inside the storage root.', $e->getMessage());
+        }
+
+        $this->assertDirectoryDoesNotExist(dirname($this->root).'/store');
+    }
+
     public function test_a_system_directory_is_never_chowned(): void
     {
         $this->expectException(RuntimeException::class);

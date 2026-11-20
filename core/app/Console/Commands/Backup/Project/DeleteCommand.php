@@ -49,7 +49,7 @@ class DeleteCommand extends Command
 
         try {
             $user->project()->backup($record)->delete();
-        } catch (\RuntimeException $e) {
+        } catch (\Throwable $e) {
             $this->error($e->getMessage());
 
             return 1;

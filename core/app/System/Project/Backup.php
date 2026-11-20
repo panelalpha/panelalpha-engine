@@ -54,11 +54,12 @@ class Backup
     {
         $record = $this->record;
         $container = $this->requireContainer();
-        $storage = $this->resolveStorage($container);
+        $storage = null;
 
         $lock = DeployLock::acquireFor($this->project->username(), DeployLock::HOLDER_BACKUP);
 
         try {
+            $storage = $this->resolveStorage($container);
             $this->assertRoomForBackup();
 
             $record->saveBackupStatus('running');
@@ -200,14 +201,14 @@ class Backup
 
     private function markBackupFailed(
         BackupContainer $container,
-        BackupStorage $storage,
+        ?BackupStorage $storage,
         Throwable $e,
     ): void {
         $record = $this->record;
         $cleanupError = null;
 
         try {
-            $storage->deletePrefix(BackupTransfer::prefix($container, $record->username, $record->id));
+            $storage?->deletePrefix(BackupTransfer::prefix($container, $record->username, $record->id));
             BackupItem::query()->where('backup_id', $record->id)->delete();
         } catch (Throwable $cleanup) {
             $cleanupError = $cleanup->getMessage();

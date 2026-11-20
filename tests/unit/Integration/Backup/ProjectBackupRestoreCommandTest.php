@@ -44,6 +44,34 @@ class ProjectBackupRestoreCommandTest extends TestCase
         $this->assertNull($backup->refresh()->restoreStatus());
     }
 
+    public function test_a_dind_restore_whose_store_cannot_be_opened_is_marked_failed(): void
+    {
+        $this->assertRestoreFromAnUnopenableStoreFails($this->makeUser('alice', ['template' => 'dind']));
+    }
+
+    public function test_a_classic_restore_whose_store_cannot_be_opened_is_marked_failed(): void
+    {
+        $this->assertRestoreFromAnUnopenableStoreFails($this->makeUser('alice', ['template' => 'default']));
+    }
+
+    private function assertRestoreFromAnUnopenableStoreFails(User $user): void
+    {
+        $backup = $this->completedBackup($user);
+        $backup->container->update(['driver' => 's3', 'location' => 'bucket']);
+
+        $this->artisan('project:backup:restore', [
+            'project' => $user->username,
+            'backup' => (string) $backup->id,
+            '--force' => true,
+        ])
+            ->expectsOutputToContain('Restore finished (status: failed).')
+            ->assertExitCode(1);
+
+        $backup->refresh();
+        $this->assertSame('failed', $backup->restoreStatus());
+        $this->assertSame('Credentials are required for s3 backup storage.', $backup->error);
+    }
+
     private function completedBackup(User $user): BackupRecord
     {
         $container = BackupContainer::create([

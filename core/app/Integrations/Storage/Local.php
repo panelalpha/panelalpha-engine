@@ -301,6 +301,10 @@ final class Local extends AbstractStorage
             return;
         }
 
+        if (str_contains($dir, '..')) {
+            throw new InvalidArgumentException('Directory must stay inside the storage root.');
+        }
+
         if (@mkdir($dir, 0775, true) || (is_dir($dir) && is_writable($dir))) {
             return;
         }
@@ -322,9 +326,6 @@ final class Local extends AbstractStorage
         $dir = self::normalizedDir($dir);
         if (! self::isInside($dir, $root)) {
             throw new RuntimeException("Refusing to create directory outside storage root: {$dir}");
-        }
-        if (str_contains($dir, '..')) {
-            throw new InvalidArgumentException('Directory must stay inside the storage root.');
         }
 
         $this->assertSafeToChown($root);

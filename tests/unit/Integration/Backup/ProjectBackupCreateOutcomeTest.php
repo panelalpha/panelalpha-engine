@@ -70,6 +70,20 @@ class ProjectBackupCreateOutcomeTest extends TestCase
             ->assertExitCode(1);
     }
 
+    public function test_a_backup_whose_store_cannot_be_opened_is_marked_failed(): void
+    {
+        $this->makeUser('alice', ['template' => 'dind']);
+        BackupContainer::create(['name' => 'bucket', 'driver' => 's3', 'location' => 'bucket', 'credentials' => null]);
+
+        $this->artisan('project:backup:create', ['project' => 'alice', '--container' => 'bucket'])
+            ->expectsOutputToContain('status: failed).')
+            ->assertExitCode(1);
+
+        $record = BackupRecord::query()->sole();
+        $this->assertSame('failed', $record->backupStatus());
+        $this->assertSame('Credentials are required for s3 backup storage.', $record->error);
+    }
+
     public function test_a_backup_the_host_refuses_is_reported_as_failed_with_its_error(): void
     {
         $this->makeUser('alice', ['template' => 'dind']);

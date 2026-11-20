@@ -105,6 +105,18 @@ class ProjectBackupDeleteCommandTest extends TestCase
         $this->assertFileExists("{$this->root}/alice/{$record->id}/files.tar.gz");
     }
 
+    public function test_a_store_that_cannot_be_opened_is_reported_and_the_row_kept(): void
+    {
+        $record = $this->backup($this->makeUser('alice'));
+        $record->container->update(['driver' => 's3', 'location' => 'bucket']);
+
+        $this->artisan('project:backup:delete', ['project' => 'alice', 'backup' => (string) $record->id, '--force' => true])
+            ->expectsOutputToContain('Credentials are required for s3 backup storage.')
+            ->assertExitCode(1);
+
+        $this->assertNotNull($record->fresh());
+    }
+
     private function backup(User $user): BackupRecord
     {
         $container = BackupContainer::create([
