@@ -9,7 +9,9 @@ use ReflectionProperty;
 
 /**
  * Drives a `pae configure` screen with faked keys against a throwaway `.env`,
- * and answers root broker requests with a script that records them.
+ * and answers root broker requests with a script that records them, refusing
+ * them until a test says otherwise, so a screen that goes off script never
+ * reaches the real broker.
  *
  * Any artisan call earlier in the process switches prompts to their fallback,
  * which answers with defaults and loops a menu forever, so it is switched off
@@ -28,6 +30,7 @@ trait WizardScreen
         file_put_contents($this->wizardDir.'/.env', $env);
         $this->app->useEnvironmentPath($this->wizardDir);
         $this->app->loadEnvironmentFrom('.env');
+        $this->brokerAnswers('', 1);
     }
 
     /** Undo the fallback an artisan call switches on, such as the one that migrates a test database. */
