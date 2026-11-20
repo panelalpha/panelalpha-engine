@@ -9,6 +9,17 @@ services:
       - "8080:80"
     environment:
       TZ: ${TZ:-UTC}
+      # Skip the install page, which wants a one-time secret only the app log
+      # or a hidden file in /etc/nginx-ui holds. With it skipped, Nginx UI
+      # makes its own JWT secret (kept in app.ini) and creates the predefined
+      # user below.
+      NGINX_UI_NODE_SKIP_INSTALLATION: "true"
+    env_file:
+      # NGINX_UI_PREDEFINED_USER_NAME / NGINX_UI_PREDEFINED_USER_PASSWORD, the
+      # login the engine generates. Nginx UI sets it on its first user only
+      # while that user has no password yet (a new database), so a password
+      # changed in the UI is never overwritten.
+      - ../.panelalpha/app-credentials.env
     volumes:
       # nginx config the UI edits. Starts empty (nocopy) like upstream's bind mount,
       # so the image's init-config seeds it with the UI's own proxy on :80.

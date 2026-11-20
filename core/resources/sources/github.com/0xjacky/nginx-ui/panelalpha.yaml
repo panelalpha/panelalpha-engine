@@ -12,5 +12,18 @@ description: >-
   upstream's example is left out; the UI starts without it. /etc/nginx
   starts empty (nocopy) as upstream's bind mount does, so the image's
   init-config seeds it with the UI's own :80 proxy; copied from the image it
-  holds no server block and nothing listens. First visit opens the app's own
-  install page, which asks for the one-time secret printed in the app log.
+  holds no server block and nothing listens.
+
+  Upstream's first visit is an install page that asks for a one-time secret
+  printed only in the app log and a hidden file in /etc/nginx-ui, valid for
+  10 minutes after the start, so a visitor could not get in. The recipe uses
+  upstream's own skip-installation mode (NGINX_UI_NODE_SKIP_INSTALLATION)
+  and its predefined user: the engine generates the login (`credentials:`
+  below, returned by GET /projects/{name}/app-credentials) and Nginx UI sets
+  NGINX_UI_PREDEFINED_USER_NAME / _PASSWORD on its first user only while that
+  user has no password, so a password changed in the UI is never overwritten.
+credentials:
+  login_path: '/#/login'
+  fields:
+    NGINX_UI_PREDEFINED_USER_NAME: {kind: username}
+    NGINX_UI_PREDEFINED_USER_PASSWORD: {kind: password}
