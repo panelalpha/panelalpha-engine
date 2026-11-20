@@ -10,9 +10,16 @@ services:
       PUID: "1000"
       PGID: "1000"
       TZ: Etc/UTC
+    env_file:
+      # CALIBRE_WEB_ADMIN_USER / CALIBRE_WEB_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
+    # Sets that login on the built-in admin/admin123 of a new app.db, then runs /init.
+    entrypoint: ["/bin/sh", "/panelalpha/start.sh"]
     volumes:
       - config:/config
       - books:/books
+      - ./panelalpha/start.sh:/panelalpha/start.sh:ro
+      - ./panelalpha/calibre-web-login.sh:/panelalpha/calibre-web-login.sh:ro
     depends_on:
       library-init:
         condition: service_completed_successfully

@@ -10,8 +10,20 @@ description: >-
   named volumes that survive redeploys. A one-shot service copies the
   repository's empty Calibre library (library/metadata.db) into /books when the
   volume holds none, so the database step of the first-run setup can point at
-  /books. Login, the default account and the setup flow are left as upstream
-  ships them.
+  /books. The setup flow is left as upstream ships it.
+
+  LOGIN. A new app.db gets Calibre-Web's built-in admin with the password
+  admin123, which anyone with the URL could use and nobody deploying it is
+  told. So the engine generates a login (`credentials:` below, returned by GET
+  /projects/{name}/app-credentials; the password has a symbol because
+  Calibre-Web's default password policy wants one) and the app service reads
+  it from app-credentials.env. Its entrypoint (files/panelalpha/start.sh)
+  installs files/panelalpha/calibre-web-login.sh as a LinuxServer custom init
+  script and runs the image's /init: after app.db exists and before
+  Calibre-Web starts, while the admin still has admin123, the script gives it
+  the engine's username and Calibre-Web's own `cps.py -s user:password` sets
+  the engine's password. admin/admin123 no longer signs in, and a password
+  changed in Calibre-Web is never touched.
 
   NGINX FRONT. The engine's account vhost sends `Connection:
   upgrade` on every request; Calibre-Web is served by gevent's pywsgi, which
@@ -21,3 +33,8 @@ description: >-
   Upgrade header and is the only service publishing a port (8083). It can be
   dropped once the engine's vhost stops sending `Connection: upgrade` on every
   request.
+credentials:
+  login_path: /login
+  fields:
+    CALIBRE_WEB_ADMIN_USER: {kind: username}
+    CALIBRE_WEB_ADMIN_PASSWORD: {kind: password, symbol: true}
