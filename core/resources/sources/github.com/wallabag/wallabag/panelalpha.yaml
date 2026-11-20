@@ -16,5 +16,17 @@ description: >-
   /var/www/wallabag/web/assets/images, both on named volumes that survive
   redeploys, and SYMFONY__ENV__DOMAIN_NAME set to the account's public URL
   so links and assets use the real domain. The image's entrypoint creates the
-  schema on first start. Everything else is upstream's default, including the
-  first login wallabag / wallabag.
+  schema on first start, with upstream's first user wallabag and the password
+  wallabag, which nobody deploying it is told, and wallabag has no sign-up
+  (registration is off in the image). So the engine generates the password
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
+  files/panelalpha-wallabag-start.sh sets it on that user with wallabag's own
+  fos:user:change-password, only while the user still has the password
+  wallabag: a password changed in wallabag is never touched. The username
+  stays wallabag, as the installer makes it. Everything else is upstream's
+  default.
+credentials:
+  login_path: /login
+  fields:
+    WALLABAG_USERNAME: {kind: username, value: wallabag}
+    WALLABAG_PASSWORD: {kind: password}

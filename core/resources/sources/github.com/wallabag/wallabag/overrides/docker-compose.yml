@@ -1,9 +1,16 @@
 # The repo's compose.yaml is a developer stack and the source build does not
-# serve; this runs the official image of the current release (2.6.14).
+# serve; this runs the official image of the current release (2.6.14), with
+# the login the engine generates.
 services:
   app:
     image: wallabag/wallabag:2.6.14
     restart: unless-stopped
+    # Sets the engine's password on the user wallabag while it still has the
+    # default one, then runs the image's /entrypoint.sh wallabag.
+    entrypoint: ["/bin/sh", "/panelalpha-wallabag-start.sh"]
+    env_file:
+      # WALLABAG_USERNAME / WALLABAG_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
     environment:
       # Absolute URLs (assets, links, API) use the account's domain.
       SYMFONY__ENV__DOMAIN_NAME: ${PA_PUBLIC_URL}
@@ -12,6 +19,7 @@ services:
       - wallabag-data:/var/www/wallabag/data
       # Images downloaded with saved articles.
       - wallabag-images:/var/www/wallabag/web/assets/images
+      - ./panelalpha-wallabag-start.sh:/panelalpha-wallabag-start.sh:ro
     ports:
       - "8000:80"
     healthcheck:
