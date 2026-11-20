@@ -14,5 +14,18 @@ description: >-
   image's volumes (server data, execution logs) are named volumes. A `ready`
   gate makes the deploy finish only once /user/login answers.
 
-  First run is upstream's: the default admin / admin login from the image's
-  realm.properties is left as shipped.
+  The image's realm.properties ships two logins, admin / admin and user /
+  user, which nobody deploying it is told and anyone with the address could
+  use. So the engine generates the admin's login (`credentials:` below,
+  returned by GET /projects/{name}/app-credentials) and
+  files/panelalpha-rundeck-login.sh, run before the image's own entrypoint,
+  puts it in place of admin / admin (as Jetty's MD5: credential, with the same
+  roles) and drops user / user, only while the file still has the shipped
+  admin line. The file lives in the image, not on a volume, so each new
+  container gets the same stored login again; Rundeck has no page to change a
+  realm.properties password, and a file edited by hand is left alone.
+credentials:
+  login_path: /user/login
+  fields:
+    RUNDECK_ADMIN_USERNAME: {kind: username}
+    RUNDECK_ADMIN_PASSWORD: {kind: password}

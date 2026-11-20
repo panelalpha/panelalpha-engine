@@ -24,6 +24,12 @@ services:
   app:
     image: docker.io/rundeck/rundeck:6.2.1
     restart: unless-stopped
+    # Sets the engine's login in realm.properties, then runs the image's own
+    # entrypoint (docker-lib/entry.sh under tini).
+    entrypoint: ["/tini", "--", "/bin/bash", "/panelalpha-rundeck-login.sh"]
+    env_file:
+      # RUNDECK_ADMIN_USERNAME / RUNDECK_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
     depends_on:
       db:
         condition: service_healthy
@@ -39,6 +45,7 @@ services:
       # The image's own VOLUMEs: server data and execution logs.
       - data:/home/rundeck/server/data
       - logs:/home/rundeck/var/logs
+      - ./panelalpha-rundeck-login.sh:/panelalpha-rundeck-login.sh:ro
     ports:
       - "4440:4440"
     healthcheck:
