@@ -9,9 +9,15 @@ services:
     environment:
       # Heap sized for the container, not the host.
       JAVA_OPTS: "-XX:MaxRAMPercentage=60"
+    env_file:
+      # JENKINS_ADMIN_USER / JENKINS_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
     volumes:
       # Jobs, plugins, credentials, build history and the setup state.
       - jenkins_home:/var/jenkins_home
+      # The image's jenkins.sh copies a ref file named *.override into
+      # $JENKINS_HOME on every start; Jenkins runs init.groovy.d/ at boot.
+      - ./panelalpha/panelalpha-login.groovy:/usr/share/jenkins/ref/init.groovy.d/panelalpha-login.groovy.override:ro
     healthcheck:
       # /login answers 200 once Jenkins is up (503 while it is loading).
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/login"]

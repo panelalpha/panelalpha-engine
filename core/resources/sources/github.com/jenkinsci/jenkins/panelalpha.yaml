@@ -7,5 +7,22 @@ description: >-
   needs a full Maven build of the multi-module tree. This recipe runs the
   official jenkins/jenkins image of the current LTS release (2.568.3, JDK 21)
   on port 8080 with /var/jenkins_home on a named volume. First run is
-  upstream's own setup wizard, unlocked with the initialAdminPassword Jenkins
-  writes to its log and to secrets/initialAdminPassword.
+  upstream's own setup wizard. Its "Unlock Jenkins" page is a sign-in as the
+  user `admin` the wizard creates with a random password, printed only to the
+  log and written to secrets/initialAdminPassword, which nobody deploying it
+  can read. So the engine generates a login (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials; the username is the wizard's fixed
+  `admin`) and files/panelalpha/panelalpha-login.groovy, an init script the
+  image's own ref mechanism installs into $JENKINS_HOME/init.groovy.d on every
+  start, gives `admin` the engine's password once the boot completes, and
+  writes it into secrets/initialAdminPassword too, only while `admin` still has
+  that file's password. The wizard then unlocks with the engine's password,
+  the logged one no longer works, and a password changed in Jenkins (or an
+  admin made in the wizard) is never touched. Everything else, the wizard's
+  plugin step included, is upstream's.
+credentials:
+  login_path: /login
+  fields:
+    # The wizard's unlock form always signs in as `admin`.
+    JENKINS_ADMIN_USER: {kind: username, value: admin}
+    JENKINS_ADMIN_PASSWORD: {kind: password}
