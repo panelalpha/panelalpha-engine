@@ -50,15 +50,32 @@ services:
       start_period: 300s
     mem_limit: 1g
 
+  # One-shot: upstream's docker-init.sh (migrations, admin user, roles), whose
+  # `fab create-admin` names the admin `admin` with ADMIN_PASSWORD, the
+  # password the engine generates, and leaves an existing admin alone. Then
+  # panelalpha/set-admin-login.py moves an admin an older deploy created as
+  # admin / admin onto that password; a failure there leaves admin / admin and
+  # says so, it never holds the services back.
   superset-init:
     image: *superset-image
     user: "root"
-    command: ["/app/docker/docker-init.sh"]
+    command:
+      - /bin/bash
+      - -c
+      - >-
+        /app/docker/docker-init.sh &&
+        { /app/.venv/bin/python /app/panelalpha/set-admin-login.py ||
+        echo "[panelalpha] superset: could not set the admin password; it stays admin/admin" >&2; }
     restart: "no"
     env_file:
       - ../.panelalpha/superset/superset.env
+      # ADMIN_PASSWORD (and SUPERSET_ADMIN_USERNAME, only reported), the login the engine generates.
+      - ../.panelalpha/app-credentials.env
     environment: *superset-env
-    volumes: *superset-volumes
+    volumes:
+      - superset-home:/app/superset_home
+      - ./panelalpha/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./panelalpha/set-admin-login.py:/app/panelalpha/set-admin-login.py:ro
     depends_on:
       db:
         condition: service_healthy

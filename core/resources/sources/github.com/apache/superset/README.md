@@ -21,6 +21,7 @@ compose files build the checkout or run a development stack.
   Postgres driver; `docker-bootstrap.sh` installs it for the web app and init
   only, so the worker and beat get the same pin (`psycopg2-binary==2.9.9`,
   6.1.0's `[postgres]` extra) through upstream's `requirements-local.txt` hook.
+- `files/panelalpha/set-admin-login.py`: see "The admin's login" below.
 - `hooks/prepare.sh` writes `SUPERSET_SECRET_KEY` and the database password
   once to `~/.panelalpha/superset/superset.env`.
 - `SUPERSET_ENV=production`, `FLASK_DEBUG=false`; example datasets are not
@@ -28,8 +29,20 @@ compose files build the checkout or run a development stack.
   boot).
 - A no-op `ready` service waits for `/health`, so the deploy ends after init.
 
-## First run
+## The admin's login
 
-Upstream's: `superset-init` creates the account `admin` / `admin`
-(`ADMIN_PASSWORD` in `docker-init.sh`). On later deploys it reports
-`User already exists admin` and leaves the account alone.
+Sign in at `/login/` with the login the engine generates: `admin`
+(`SUPERSET_ADMIN_USERNAME`, only reported: `docker-init.sh` always names its
+admin `admin`) and `ADMIN_PASSWORD`, read with
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`).
+
+- `superset-init` reads `../.panelalpha/app-credentials.env`, so upstream's
+  `docker-init.sh` runs `fab create-admin` with the engine's `ADMIN_PASSWORD`
+  instead of its default `admin`. On later deploys it reports
+  `User already exists admin` and leaves the account alone, so a password
+  changed in Superset is never overwritten.
+- After it, `files/panelalpha/set-admin-login.py` (Flask-AppBuilder's own
+  security manager) gives the engine's password to an admin an older deploy of
+  this recipe created as `admin` / `admin`, only while it still has `admin`.
+  A failure there leaves `admin` / `admin` and says so in the `superset-init`
+  log; it never holds the services back.

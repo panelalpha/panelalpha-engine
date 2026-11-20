@@ -9,5 +9,20 @@ description: >-
   with upstream's 6.1.0 docker/pythonpath_dev/superset_config.py.
   hooks/prepare.sh generates SUPERSET_SECRET_KEY and the database password
   once into ~/.panelalpha/superset/superset.env. Example datasets are not
-  loaded (SUPERSET_LOAD_EXAMPLES=no). First run is upstream's: superset-init
-  creates the account admin / admin.
+  loaded (SUPERSET_LOAD_EXAMPLES=no).
+
+  superset-init's docker-init.sh creates the account `admin` with the
+  password ADMIN_PASSWORD, `admin` when unset, which nobody deploying it is
+  told and anyone with the address could use. So the engine generates the
+  password (`credentials:` below, returned by GET
+  /projects/{name}/app-credentials) and superset-init reads it from
+  app-credentials.env; `fab create-admin` leaves an existing admin alone, so
+  a password changed in Superset is never overwritten. An admin an older
+  deploy created as admin / admin gets the generated password from
+  files/panelalpha/set-admin-login.py, only while it still has `admin`.
+credentials:
+  login_path: /login/
+  fields:
+    # docker-init.sh always names its admin `admin`; this field only reports it.
+    SUPERSET_ADMIN_USERNAME: {kind: username, value: admin}
+    ADMIN_PASSWORD: {kind: password}
