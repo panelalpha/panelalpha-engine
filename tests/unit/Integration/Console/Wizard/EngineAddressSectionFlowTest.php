@@ -68,6 +68,21 @@ class EngineAddressSectionFlowTest extends TestCase
         $this->assertScreenShows('Nothing answered on that address from here.');
     }
 
+    public function test_an_address_the_env_file_refuses_is_reported_and_not_used(): void
+    {
+        unlink($this->envPath());
+        $url = 'https://'.$this->silentAddress();
+        $this->keys([Key::ENTER, self::typed($url), Key::ENTER, ...self::row(self::CHECK), ...self::row(self::BACK)]);
+
+        $section = new EngineAddressSection();
+
+        $this->assertSame(0, $section->run(false));
+        $this->assertScreenShows('No .env file at '.$this->envPath().'.');
+        $this->assertScreenDoesNotShow('The engine uses this on its next request');
+        $this->assertSame('', config('app.url'));
+        $this->assertSame([], $section->receipt());
+    }
+
     public function test_an_address_without_a_scheme_is_refused_until_it_has_one(): void
     {
         $url = 'https://'.$this->silentAddress();

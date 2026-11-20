@@ -125,6 +125,13 @@ class TokenScopeEditor
         $allowed = array_values(array_intersect($selected, $offered));
         sort($allowed);
 
+        if ($allowed === []) {
+            error(sprintf('A token cannot be limited to no %s. Revoke it to turn it off; your ticks are still here.', $many));
+            pause('Press enter to carry on...');
+
+            return false;
+        }
+
         // Everything ticked is written as no limit at all, not as a list of
         // every one there is: the token then follows the engine, and anything
         // added later reaches it the way it reaches a token minted before any
@@ -143,10 +150,6 @@ class TokenScopeEditor
                 ? 'Every box is ticked, so it is stored as no limit at all.'
                 : sprintf('Stored on the token as %d abilities.', count($abilities)),
         ));
-
-        if ($allowed === []) {
-            warning(sprintf('This token would be able to call nothing. Revoking it is the way to turn one off.'));
-        }
 
         if ($this->dryRun) {
             note('Nothing was written: this was a dry run. Drop --dry-run to apply it.', 'warning');

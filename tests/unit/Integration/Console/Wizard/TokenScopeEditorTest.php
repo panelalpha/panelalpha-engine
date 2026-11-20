@@ -3,6 +3,7 @@
 namespace Tests\Integration\Console\Wizard;
 
 use App\Auth\TokenAbilities;
+use App\Console\Wizard\Scopes\RouteScope;
 use App\Console\Wizard\TokenScopeEditor;
 use App\Models\Admin;
 use App\Models\PersonalAccessToken;
@@ -97,15 +98,66 @@ class TokenScopeEditorTest extends TestCase
     public function test_a_dry_run_says_what_it_would_give_and_writes_nothing(): void
     {
         $token = $this->token(['mcp']);
-        $this->keys([...self::row(self::ITEMS), Key::CTRL_A, Key::ENTER, Key::ENTER, Key::ENTER]);
+        $this->keys([...self::row(self::ITEMS), Key::SPACE, Key::ENTER, Key::ENTER, Key::ENTER]);
 
         $editor = $this->editor(true);
         $editor->edit($token);
 
         $this->assertSame(['mcp'], $token->fresh()->abilities);
-        $this->assertSame(['A dry run would have given "bot" 0 of 3 commands.'], $editor->receipt());
-        $this->assertScreenShows('This token would be able to call nothing. Revoking it is the way to turn one off.');
+        $this->assertSame(['A dry run would have given "bot" 2 of 3 commands.'], $editor->receipt());
         $this->assertScreenShows('Review it — this is a dry run, so nothing will be written');
+    }
+
+    public function test_unticking_every_command_is_refused_and_points_at_revoking(): void
+    {
+        $token = $this->token(['mcp', 'mcp:alpha_list']);
+        $this->keys([
+            ...self::row(self::ITEMS), Key::CTRL_A, Key::CTRL_A, Key::ENTER,
+            Key::ENTER, Key::ENTER,
+            ...self::row(self::BACK), 'y', Key::ENTER,
+        ]);
+
+        $editor = $this->editor();
+        $editor->edit($token);
+
+        $this->assertSame(['alpha_list'], $this->commands($token));
+        $this->assertSame([], $editor->receipt());
+        $this->assertScreenShows('A token cannot be limited to no commands. Revoke it to turn it off; your ticks are still here.');
+    }
+
+    public function test_a_dry_run_with_every_command_unticked_is_refused_the_same_way(): void
+    {
+        $token = $this->token(['mcp']);
+        $this->keys([
+            ...self::row(self::ITEMS), Key::CTRL_A, Key::ENTER,
+            Key::ENTER, Key::ENTER,
+            ...self::row(self::BACK), 'y', Key::ENTER,
+        ]);
+
+        $editor = $this->editor(true);
+        $editor->edit($token);
+
+        $this->assertSame(['mcp'], $token->fresh()->abilities);
+        $this->assertSame([], $editor->receipt());
+        $this->assertScreenShows('A token cannot be limited to no commands.');
+    }
+
+    public function test_unticking_every_route_is_refused_and_leaves_the_token_unlimited(): void
+    {
+        $token = $this->token(['api']);
+        $this->keys([
+            ...self::row(self::ITEMS), Key::CTRL_A, Key::ENTER,
+            Key::ENTER, Key::ENTER,
+            ...self::row(self::BACK), 'y', Key::ENTER,
+        ]);
+
+        $editor = new TokenScopeEditor('API tokens', false, new RouteScope());
+        $editor->edit($token);
+
+        $this->assertSame(['api'], $token->fresh()->abilities);
+        $this->assertNull(TokenAbilities::of($token->fresh())->routes());
+        $this->assertSame([], $editor->receipt());
+        $this->assertScreenShows('A token cannot be limited to no operations.');
     }
 
     public function test_saving_without_a_change_says_so_and_leaving_does_not_ask(): void

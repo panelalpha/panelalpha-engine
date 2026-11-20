@@ -275,7 +275,9 @@ class EngineAddressSection implements Section
             return;
         }
 
-        $this->write(['APP_URL' => $url], sprintf('Address set to %s.', $url));
+        if (! $this->write(['APP_URL' => $url], sprintf('Address set to %s.', $url))) {
+            return;
+        }
 
         // The process booted with the old one and the header reads config();
         // without this the screen would still show what was just replaced.
@@ -520,8 +522,9 @@ class EngineAddressSection implements Section
 
     /**
      * @param  array<string, string>  $values
+     * @return bool whether the values were written
      */
-    private function write(array $values, string $said): void
+    private function write(array $values, string $said): bool
     {
         try {
             EnvFile::current()->set($values);
@@ -529,11 +532,13 @@ class EngineAddressSection implements Section
             error($e->getMessage());
             pause('Press enter to carry on...');
 
-            return;
+            return false;
         }
 
         $this->receipt[] = $said;
         note($said, 'info');
+
+        return true;
     }
 
     private function url(): string
