@@ -6,6 +6,7 @@ scripts/monit.conf
 scripts/monit-script.sh
 tests/unit/sessions/*/.env
 tests/unit/sessions/*/cache.json
+tests/unit/sessions/*-worker*/
 users/*
 version
 crt

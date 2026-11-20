@@ -248,15 +248,15 @@ class S6ServiceManagerTest extends TestCase
             SH);
         file_put_contents("{$bin}/s6-svc", "#!/bin/sh\nexit 0\n");
         file_put_contents("{$bin}/s6-svscanctl", "#!/bin/sh\nexit 0\n");
-        foreach (['s6-svok', 's6-svc', 's6-svscanctl'] as $tool) {
+        file_put_contents("{$bin}/sleep", "#!/bin/sh\necho \"\$1\" >> {$this->root}/sleeps\n");
+        foreach (['s6-svok', 's6-svc', 's6-svscanctl', 'sleep'] as $tool) {
             chmod("{$bin}/{$tool}", 0755);
         }
 
         $script = str_replace(['/etc/s6/account', '/run/service'], [$src, $scan], S6ServiceManager::syncScript());
         $sync = new Process(['sh', '-c', $script], null, ['PATH' => $bin . ':' . getenv('PATH')]);
-        $started = microtime(true);
         $sync->run();
-        $took = microtime(true) - $started;
+        $sleeps = file("{$this->root}/sleeps", FILE_IGNORE_NEW_LINES) ?: [];
 
         $this->assertSame(0, $sync->getExitCode(), $sync->getErrorOutput());
         $this->assertDirectoryExists("{$scan}/php-fpm8.3");
@@ -265,8 +265,7 @@ class S6ServiceManagerTest extends TestCase
         $this->assertDirectoryExists("{$scan}/.retired-php-fpm8.1-7", 'still supervised when the wait ran out');
         $this->assertDirectoryExists("{$scan}/.retired-php-fpm8.2-7", 'still supervised when the wait ran out');
         $this->assertDirectoryExists("{$scan}/.s6-svscan");
-        $this->assertGreaterThan(4.5, $took);
-        $this->assertLessThan(8, $took, 'one 5s wait for the whole sync, not one per dir');
+        $this->assertSame(array_fill(0, 50, '0.1'), $sleeps, 'one 5s wait for the whole sync, not one per dir');
     }
 
     public function test_a_name_that_is_not_a_plain_word_is_refused(): void

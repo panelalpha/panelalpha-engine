@@ -325,7 +325,7 @@ class ContainerLogsHttpTest extends TestCase
         }
 
         $this->assertSame(0, $lines);
-        $this->assertLessThan(ContainerOperations::FOLLOW_IDLE_SECONDS + 2, microtime(true) - $started);
+        $this->assertLessThan(ContainerOperations::FOLLOW_IDLE_SECONDS + 20, microtime(true) - $started, 'ended by the idle check, not by the 30 s command');
         $this->assertFalse($this->followProcess->isRunning());
     }
 

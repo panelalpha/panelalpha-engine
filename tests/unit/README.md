@@ -8,6 +8,7 @@ PHPUnit tests for `core/`: `Unit/`, `Integration/` and `Feature/` (the three tes
 cd core
 ./vendor/bin/phpunit --testsuite Unit
 ./vendor/bin/phpunit --testsuite Integration
+./vendor/bin/paratest -p 8 --testsuite Integration   # the same, on 8 workers
 ./vendor/bin/phpunit --testsuite Feature
 ```
 
@@ -15,7 +16,7 @@ cd core
 
 A test is in `Unit/` only when it tests code and nothing else: it extends `PHPUnit\Framework\TestCase`, boots no application, writes no file, starts no process and opens no connection. Reading files of the repository (fixtures, templates, manifests) is fine. Anything else is in `Integration/`: a test that boots Laravel (`Tests\TestCase`, a database, routes, facades), builds a temporary tree, or runs git, a script or a fake host. `Integration/` mirrors `Unit/`'s folders and its namespace is `Tests\Integration\`; a helper both use is in `Support/`.
 
-The Unit suite takes seconds, and it is safe to run in parallel because nothing in it shares state. The Integration suite takes about half an hour.
+The Unit suite takes seconds, and it is safe to run in parallel because nothing in it shares state. The Integration suite takes about an hour one test at a time and about ten minutes with ParaTest on 8 workers. Each ParaTest worker gets its own `sessions/<name>-worker<N>/` cache and its own storage tree under the system temp directory, so workers share no files; a test that writes elsewhere must use a path of its own (a temporary directory), never a fixed one.
 
 The Unit suite must pass in a sandbox that enforces the rule: a read-only tree, no network, and the functions that write files or start processes disabled, so a write that the code under test swallows still fails. A test that passes outside it and fails inside belongs in `Integration/`. Run it from `core/`; PHPUnit cannot create its cache directory inside the sandbox, so make it first:
 

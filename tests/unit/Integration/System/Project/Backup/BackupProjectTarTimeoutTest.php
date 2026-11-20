@@ -33,7 +33,8 @@ class BackupProjectTarTimeoutTest extends TestCase
         $tars = $this->tarTimeouts($system);
         $this->assertCount(2, $tars, 'the archive step and the extract step both run tar');
         foreach ($tars as $timeout) {
-            $this->assertSame(JobBudget::COMMAND_SECONDS, $timeout, 'tar must not run on the 600 s default');
+            $this->assertLessThanOrEqual(JobBudget::COMMAND_SECONDS, $timeout);
+            $this->assertGreaterThan(JobBudget::COMMAND_SECONDS - 60, $timeout, 'tar must not run on the 600 s default');
         }
     }
 

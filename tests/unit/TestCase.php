@@ -24,7 +24,7 @@ abstract class TestCase extends BaseTestCase
 
     public static function getFromCache(string $name): mixed
     {
-        $testingSessionName = (string)env('TESTING_SESSION', 'default');
+        $testingSessionName = self::sessionName();
         $cacheFile = __DIR__ . "/sessions/{$testingSessionName}/cache.json";
         if (!file_exists($cacheFile)) {
             return null;
@@ -33,9 +33,18 @@ abstract class TestCase extends BaseTestCase
         return $cache->get($name);
     }
 
+    /** One session per ParaTest worker, so workers never share a cache file. */
+    private static function sessionName(): string
+    {
+        $session = (string)env('TESTING_SESSION', 'default');
+        $worker = getenv('TEST_TOKEN');
+
+        return $worker === false || $worker === '' ? $session : "{$session}-worker{$worker}";
+    }
+
     protected function setUp(): void
     {
-        $testingSessionName = (string)env('TESTING_SESSION', 'default');
+        $testingSessionName = self::sessionName();
         $sessionDir = __DIR__ . "/sessions/{$testingSessionName}";
         if (!file_exists($sessionDir)) {
             mkdir($sessionDir, 0755, true);

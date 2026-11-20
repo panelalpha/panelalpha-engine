@@ -34,7 +34,8 @@ apt-get 11.9s, build 2.2s, inside a 53.1s critical path" is.
 ```bash
 cd core
 ./vendor/bin/phpunit --testsuite Unit          # seconds
-./vendor/bin/phpunit --testsuite Integration   # about half an hour
+./vendor/bin/phpunit --testsuite Integration   # about an hour
+./vendor/bin/paratest -p 8 --testsuite Integration   # about ten minutes
 ```
 
 Both are the gate. `Unit` holds only tests of code (no application, no files written, no processes); everything that boots Laravel, writes a tree or runs a command is in `Integration`. The rule is in [`tests/unit/README.md`](tests/unit/README.md#unit-or-integration).

@@ -31,6 +31,7 @@ cd core
 composer install                                              # or: php composer.phar install
 ./vendor/bin/phpunit --testsuite Unit                                # seconds; run it first
 ./vendor/bin/phpunit --testsuite Integration                         # the rest of the gate
+./vendor/bin/paratest -p 8 --testsuite Integration                   # the same, on 8 workers
 ./vendor/bin/phpunit --testsuite Feature
 ./vendor/bin/phpunit ../tests/unit/Integration/Mcp                   # one folder
 ./vendor/bin/phpunit ../tests/unit/Integration/Mcp/ToolNamesTest.php # one file
