@@ -20,7 +20,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * The catalogue reads the real shipped `config/core/images.yaml` —
  * CONFIG_PATH is a private const with no injection seam, the same arrangement
- * {@see \Tests\Unit\Deploy\CacheManager\ImageCatalogTest} works within.
+ * {@see \Tests\Integration\Deploy\CacheManager\ImageCatalogTest} works within.
  *
  * So the assertions here are about *rules that must hold whatever the config
  * says*, not about the values it currently holds. A host is expected to edit

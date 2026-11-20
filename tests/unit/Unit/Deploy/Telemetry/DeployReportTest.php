@@ -8,6 +8,7 @@ use App\Lib\Deploy\Telemetry\DeployReport;
 use App\System\Project\Deployment\RecipeFallback;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\AstroBuildFailure;
 use Tests\Support\TestNetwork;
 
 class DeployReportTest extends TestCase
@@ -334,7 +335,7 @@ class DeployReportTest extends TestCase
     public function test_a_build_step_no_rule_names_is_signed_by_what_it_printed_last(): void
     {
         $failure = DeployReport::build($this->input([
-            'error' => \Tests\Unit\Deploy\DeployLog\BuildStepOutputTest::ASTRO_BUILD_FAILURE,
+            'error' => AstroBuildFailure::OUTPUT,
         ]))['failure'];
 
         $this->assertSame('build-step-failed', $failure['rule']);

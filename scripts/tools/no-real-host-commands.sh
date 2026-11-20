@@ -13,8 +13,9 @@
 #   - the `docker compose ... ps` that webserver.sh runs on being sourced by
 #     tests/scripts/webserver-parse-args.test.sh; it degrades to "unknown" without docker
 #
-# Defaults to the two directories that are clean: tests/unit/Unit/System and
-# tests/unit/Unit/Deploy. Widen it as other trees are brought up to the same standard.
+# Defaults to tests/unit/Integration/System and tests/unit/Integration/Deploy;
+# the Unit suite cannot reach a host command at all. Widen it as other trees are
+# brought up to the same standard.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -28,7 +29,7 @@ for cmd in sudo docker nsenter systemctl useradd userdel; do
 done
 
 cd "$ROOT/core"
-if [ "$#" -eq 0 ]; then set -- ../tests/unit/Unit/System ../tests/unit/Unit/Deploy; fi
+if [ "$#" -eq 0 ]; then set -- ../tests/unit/Integration/System ../tests/unit/Integration/Deploy; fi
 
 OUT="$(mktemp)"
 trap 'rm -rf "$SHIM" "$LOG" "$OUT"' EXIT

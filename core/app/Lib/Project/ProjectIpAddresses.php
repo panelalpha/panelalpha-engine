@@ -8,7 +8,7 @@ use App\Models\Ipv4NatMap;
 use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Collection;
-use Tests\Unit\UserIpAddressesTest;
+use Tests\Integration\UserIpAddressesTest;
 
 /**
  * The addresses a project answers on: its dedicated IPs, else the engine's defaults, through the NAT map

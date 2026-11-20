@@ -9,6 +9,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\SourceSite;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceSiteResolver;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceWordpressClient;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RoutedSourceHttpClient;
 
 /**
  * manual_plugin lookup: the wp-migrator/v1 namespace at the URL, its parent,

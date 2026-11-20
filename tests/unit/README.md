@@ -1,14 +1,32 @@
 # PHPUnit tests
 
-PHPUnit tests for `core/`: `Unit/` and `Feature/` (the two testsuites in `core/phpunit.xml`), with their support code in `Support/`, `Attributes/`, `fixtures/`, `config/` and `sessions/`. The namespace is `Tests\`.
+PHPUnit tests for `core/`: `Unit/`, `Integration/` and `Feature/` (the three testsuites in `core/phpunit.xml`), with their support code in `Support/`, `Attributes/`, `fixtures/`, `config/` and `sessions/`. The namespace is `Tests\`.
 
 `core/phpunit.xml`, `core/composer.json` (`autoload-dev`) and `core/vendor` stay in `core/`, so run the tests from there:
 
 ```bash
 cd core
 ./vendor/bin/phpunit --testsuite Unit
+./vendor/bin/phpunit --testsuite Integration
 ./vendor/bin/phpunit --testsuite Feature
 ```
+
+## Unit or Integration
+
+A test is in `Unit/` only when it tests code and nothing else: it extends `PHPUnit\Framework\TestCase`, boots no application, writes no file, starts no process and opens no connection. Reading files of the repository (fixtures, templates, manifests) is fine. Anything else is in `Integration/`: a test that boots Laravel (`Tests\TestCase`, a database, routes, facades), builds a temporary tree, or runs git, a script or a fake host. `Integration/` mirrors `Unit/`'s folders and its namespace is `Tests\Integration\`; a helper both use is in `Support/`.
+
+The Unit suite takes seconds, and it is safe to run in parallel because nothing in it shares state. The Integration suite takes about half an hour.
+
+The Unit suite must pass in a sandbox that enforces the rule: a read-only tree, no network, and the functions that write files or start processes disabled, so a write that the code under test swallows still fails. A test that passes outside it and fails inside belongs in `Integration/`. Run it from `core/`; PHPUnit cannot create its cache directory inside the sandbox, so make it first:
+
+```bash
+mkdir -p .phpunit.cache
+docker run --rm --read-only --network none -v "$PWD/..:/app:ro" -w /app/core composer:2 \
+  php -d disable_functions=proc_open,popen,exec,shell_exec,system,passthru,pcntl_exec,fsockopen,stream_socket_client,curl_exec,curl_multi_exec,mail,file_put_contents,mkdir,rmdir,unlink,rename,copy,touch,tempnam,tmpfile,symlink,chmod,chown \
+  vendor/bin/phpunit --testsuite Unit --do-not-cache-result
+```
+
+`Unit/UnitSuiteBoundaryTest` fails on a test under `Unit/` that extends `Tests\TestCase`.
 
 Paths in a test: `base_path()` is still `core/`, so reach this directory with `base_path('../tests/unit/...')`. From a test file, `core/` is `dirname(__DIR__, N)` plus `/core`, and the repository root needs no `core/` segment.
 

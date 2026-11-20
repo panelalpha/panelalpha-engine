@@ -29,7 +29,7 @@ Say how you verified this. Operator-facing changes belong in docs/.
 Coding agents report measurements from AGENTS.md §3 — a status code alone is not a result.
 -->
 
-- [ ] `cd core && ./vendor/bin/phpunit --testsuite Unit` passes (or only the documented pre-existing failures remain)
+- [ ] `cd core && ./vendor/bin/phpunit --testsuite Unit` and `--testsuite Integration` pass (or only the documented pre-existing failures remain)
 - [ ] Relevant `tests/api/` specs pass (if this touches the API or a deploy)
 - [ ] I proved any pre-existing test failures are unrelated (`git stash`, re-run, compare)
 

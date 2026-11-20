@@ -13,6 +13,7 @@ use App\System\Project\PhpHosting\WordPress\WpCli;
 use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\FakeWordPressSite;
 
 /**
  * Contract for named search-replace: success body, failure as Exception, and

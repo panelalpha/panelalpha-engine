@@ -9,7 +9,7 @@ use Exception;
 use Illuminate\Support\Facades\App;
 use Laravel\Prompts\Output\ConsoleOutput;
 use Symfony\Component\Process\Process;
-use Tests\Unit\System\HostProcessTest;
+use Tests\Integration\System\HostProcessTest;
 
 /**
  * Runs commands here, or a gateway-built command in the host's namespaces ({@see Privileged::onHost()}).

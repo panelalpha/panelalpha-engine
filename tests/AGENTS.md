@@ -24,29 +24,32 @@ The canonical rules are `CODING_STANDARDS.md#remote-data` in the workspace. In s
 
 ## 1. PHPUnit (`tests/unit/`)
 
-The sources are in `tests/unit/` (`Unit/`, `Feature/`, `Support/`), but `phpunit.xml`, `composer.json` and `vendor/` stay in `core/`, so run from there. The checkout has no `vendor/`:
+The sources are in `tests/unit/` (`Unit/`, `Integration/`, `Feature/`, `Support/`), but `phpunit.xml`, `composer.json` and `vendor/` stay in `core/`, so run from there. The checkout has no `vendor/`:
 
 ```bash
 cd core
 composer install                                              # or: php composer.phar install
-./vendor/bin/phpunit --testsuite Unit                         # the default gate
+./vendor/bin/phpunit --testsuite Unit                                # seconds; run it first
+./vendor/bin/phpunit --testsuite Integration                         # the rest of the gate
 ./vendor/bin/phpunit --testsuite Feature
-./vendor/bin/phpunit ../tests/unit/Unit/Mcp                   # one folder
-./vendor/bin/phpunit ../tests/unit/Unit/Mcp/ToolNamesTest.php # one file
+./vendor/bin/phpunit ../tests/unit/Integration/Mcp                   # one folder
+./vendor/bin/phpunit ../tests/unit/Integration/Mcp/ToolNamesTest.php # one file
 ./vendor/bin/phpunit --filter Platform                        # by name
 ```
+
+`Unit/` holds only tests of code: no application, no files written, no processes. Everything else is in `Integration/`; the rule and the sandbox that checks it are in [`unit/README.md`](unit/README.md#unit-or-integration).
 
 Do not confuse it with `tests/api/tests/unit`: that is the TypeScript `unit` project of the API suite.
 
 **Database trap.** `phpunit.xml` does not force sqlite: those lines are commented out. Tests that need a database use `tests/unit/Support/InMemoryDatabase.php`, which switches to sqlite `:memory:` at runtime. That is safe on your own machine. Do not run PHPUnit inside a `core` container on a remote engine: its environment sets `DB_CONNECTION` itself. If you must, print the connection the run will use first, and take a backup.
 
-**Host-command trap.** `scripts/tools/no-real-host-commands.sh` runs PHPUnit with shims for `sudo`, `docker`, `nsenter`, `systemctl`, `useradd` and `userdel`, and reports any test that reaches one. Use it for changes under `tests/unit/Unit/System` or `tests/unit/Unit/Deploy` (its default scope).
+**Host-command trap.** `scripts/tools/no-real-host-commands.sh` runs PHPUnit with shims for `sudo`, `docker`, `nsenter`, `systemctl`, `useradd` and `userdel`, and reports any test that reaches one. Use it for changes under `tests/unit/Integration/System` or `tests/unit/Integration/Deploy` (its default scope); a Unit test cannot reach a host command.
 
 **Guards worth knowing:**
 
-- `tests/unit/Unit/Mcp/ToolNamesTest`: every API operation has a name in `core/app/Mcp/tool-names.php`, and the names follow `<resource>_<action>`.
-- `tests/unit/Unit/Mcp/GeneratedToolsDriftTest`: the committed tools in `core/app/Mcp/Tools/Api/` match what the generator produces. On drift, run `php artisan l5-swagger:generate && php artisan mcp:tool:generate` and commit the result.
-- Detection and recipe changes: run `--filter Platform`, then the Unit suite. `tests/unit/Unit/Deploy/Platform/ShippedManifestsTest` catches duplicate or misordered manifest priorities.
+- `tests/unit/Integration/Mcp/ToolNamesTest`: every API operation has a name in `core/app/Mcp/tool-names.php`, and the names follow `<resource>_<action>`.
+- `tests/unit/Integration/Mcp/GeneratedToolsDriftTest`: the committed tools in `core/app/Mcp/Tools/Api/` match what the generator produces. On drift, run `php artisan l5-swagger:generate && php artisan mcp:tool:generate` and commit the result.
+- Detection and recipe changes: run `--filter Platform`, then the Unit and Integration suites. `tests/unit/Unit/Deploy/Platform/ShippedManifestsTest` catches duplicate or misordered manifest priorities.
 
 **A failure is pre-existing only when proven:** `git stash`, re-run the same tests, see the same failure, `git stash pop`. Never write "probably pre-existing".
 

@@ -8,6 +8,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\SourceSite;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceWordpressClient;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
+use Tests\Support\FakeSourceHttpClient;
 
 /**
  * Pins how one process-batch answer becomes the batch result, and how failed calls are retried.

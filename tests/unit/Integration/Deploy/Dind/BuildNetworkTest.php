@@ -1,0 +1,117 @@
+<?php
+
+namespace Tests\Integration\Deploy\Dind;
+
+use App\Lib\Deploy\Dind\BuildNetwork;
+use App\Lib\Deploy\Dind\DindEngine;
+use App\Lib\Deploy\Dind\DindHostBuilder;
+use App\Lib\Deploy\Engine\EngineAccount;
+use App\Lib\Deploy\Platform\Runtime\Images;
+use Tests\Support\LocalRoot;
+use Tests\Support\TestNetwork;
+use Tests\TestCase;
+
+/**
+ * A host build ran the customer's scripts on Docker's default
+ * bridge, from where it reached the engine API (bridge gateway and public
+ * address), the host's private network and the metadata service. Builds now
+ * run on a network the firewall script limits to the internet.
+ */
+class BuildNetworkTest extends TestCase
+{
+    private function account(): EngineAccount
+    {
+        return new EngineAccount('acme', '/home/acme', '1001:1002');
+    }
+
+    /** @return array<string, array<string, mixed>> */
+    private function allBuilds(DindHostBuilder $builder): array
+    {
+        return array_map(LocalRoot::build(...), [
+            'node' => $builder->nodeBuildArgv($this->account(), Images::NODE_IMAGE, 'npm ci', 'npm run build'),
+            'php' => $builder->phpBuildArgv($this->account(), 'panelalpha/php:8.3-cli-bookworm-pa1', 'composer install'),
+            'composer' => $builder->composerInstallArgv($this->account()),
+        ]);
+    }
+
+    public function test_every_host_build_runs_on_the_build_network(): void
+    {
+        $builder = new DindHostBuilder(null, '', 'panelalpha-build');
+
+        foreach ($this->allBuilds($builder) as $kind => $build) {
+            $this->assertSame('panelalpha-build', $build['network'], "$kind build is off the build network");
+        }
+    }
+
+    public function test_the_engine_puts_builds_on_it_by_default(): void
+    {
+        config(['deploy.build_network' => 'panelalpha-build']);
+        $this->assertSame('panelalpha-build', (new DindEngine)->hostBuilder()->network());
+    }
+
+    public function test_an_empty_setting_opts_out_to_the_default_bridge(): void
+    {
+        config(['deploy.build_network' => '']);
+        $builder = (new DindEngine)->hostBuilder();
+
+        $this->assertNull($builder->network());
+        foreach ($this->allBuilds($builder) as $kind => $build) {
+            $this->assertSame('', $build['network'], $kind);
+        }
+    }
+
+    public function test_a_name_docker_would_refuse_falls_back_to_the_default(): void
+    {
+        $this->assertSame(BuildNetwork::DEFAULT_NAME, BuildNetwork::resolve('bad name; rm -rf /'));
+        $this->assertSame('my-build.net_1', BuildNetwork::resolve(' my-build.net_1 '));
+        $this->assertNull(BuildNetwork::resolve('  '));
+    }
+
+    public function test_the_network_has_a_fixed_bridge_and_leaves_br_netfilter_alone(): void
+    {
+        $request = BuildNetwork::createArgv('panelalpha-build');
+
+        $this->assertTrue(LocalRoot::isRequest($request));
+        $this->assertSame('docker.createBridgeNetwork', LocalRoot::action($request));
+        $this->assertSame(['panelalpha-build', 'br-pa-build', 'build'], LocalRoot::values($request));
+        // icc=false would make Docker load br_netfilter host-wide.
+        $this->assertStringNotContainsString('enable_icc', implode(' ', $request));
+        // br- so the DNAT for :2011 leaves it to docker-proxy like any bridge.
+        $this->assertStringStartsWith('br-', BuildNetwork::BRIDGE);
+        $this->assertLessThanOrEqual(15, strlen(BuildNetwork::BRIDGE), 'Linux interface names stop at 15');
+    }
+
+    public function test_the_firewall_runs_in_the_host_namespace(): void
+    {
+        $this->assertSame(
+            [LocalRoot::CLIENT, '--host', 'host.applyBuildNetworkFirewall', '--', 'panelalpha-build'],
+            BuildNetwork::firewallArgv('panelalpha-build')
+        );
+    }
+
+    public function test_the_firewall_script_refuses_the_host_and_every_private_range(): void
+    {
+        $path = __DIR__.'/../../../../../scripts/build-network-firewall.sh';
+        if (! is_file($path)) {
+            $this->markTestSkipped('scripts/ is not beside core/ here');
+        }
+        $script = (string) file_get_contents($path);
+
+        foreach ([TestNetwork::PRIVATE_10_CIDR, TestNetwork::PRIVATE_172_CIDR, TestNetwork::PRIVATE_192_CIDR, TestNetwork::LINK_LOCAL_CIDR, TestNetwork::CGNAT_CIDR, TestNetwork::LOOPBACK_CIDR] as $cidr) {
+            $this->assertStringContainsString($cidr, $script);
+        }
+        // The host itself, on any of its addresses, including the public one.
+        $this->assertStringContainsString('iptables -I INPUT -i "$bridge" -j REJECT', $script);
+        // The chain Docker evaluates first and keeps across a daemon restart.
+        $this->assertStringContainsString('for parent in DOCKER-USER FORWARD', $script);
+        // Egress still works after a flush has removed Docker's own NAT.
+        $this->assertStringContainsString('-j MASQUERADE', $script);
+        // The installer makes the network while Docker's chains are fresh. int-updater.sh is now only a
+        // redirect to updater.sh; HostCompile creates the network on demand before a host build.
+        $this->assertStringContainsString('--create', $script);
+        $this->assertStringContainsString(
+            'build-network-firewall.sh --create panelalpha-build',
+            (string) file_get_contents(dirname($path).'/installer.sh')
+        );
+    }
+}

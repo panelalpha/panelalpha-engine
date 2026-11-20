@@ -9,6 +9,7 @@ use Closure;
 use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\FakeWordPressSite;
 
 /**
  * A caller's value never reaches WP-CLI as a positional argument when it

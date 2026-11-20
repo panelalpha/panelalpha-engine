@@ -9,6 +9,7 @@ use App\System\Project\PhpHosting\WordPress\SiteCopy;
 use App\System\Services\Mysql\DatabaseCopyResult;
 use Mockery;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\FakeWordPressSite;
 
 /** A classic WordPress multisite after a staging, copy or push: its main site answers on the copy's host. */
 class SiteCopyMultisiteTest extends TestCase

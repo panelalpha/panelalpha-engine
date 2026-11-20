@@ -10,6 +10,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\SourceSiteResolver;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceUrl;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceWordpressClient;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RoutedSourceHttpClient;
 
 /**
  * wp_admin lookup: login page candidates in order, the home read from the

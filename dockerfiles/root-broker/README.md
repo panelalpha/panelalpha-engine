@@ -128,7 +128,7 @@ ways, the client's stdin included.
    `Arguments` and returns the `pa-root` request. Never a raw argv or a shell string.
 2. The broker side: an entry in the area's `ACTIONS` with its values checked; a path through `Param` and a root.
 3. A case in the area's `tests/*-cases.json` (the request, and for a command the argv it must run), mirrored by the
-   PHP provider in `tests/unit/Unit/System/Privileged/*Cases.php`: the broker's tests plan the case, the PHP tests
+   PHP provider in `tests/unit/{Unit,Integration}/System/Privileged/*Cases.php`: the broker's tests plan the case, the PHP tests
    build the same request. A native action gets its own test module against a fake daemon (`test_host_daemon.py` is
    the pattern).
 4. A docstring on a native action's work function: it is the action's line in ACTIONS.md. Then

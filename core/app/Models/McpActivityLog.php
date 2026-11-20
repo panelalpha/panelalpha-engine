@@ -36,7 +36,7 @@ class McpActivityLog extends Model
      *
      * These rows are readable through GET /api/mcp-activity-logs, so storing a
      * credential verbatim would put it in plaintext behind an ordinary read
-     * endpoint. Tests\Unit\Mcp\ActivityLogRedactionTest checks this list against
+     * endpoint. Tests\Integration\Mcp\ActivityLogRedactionTest checks this list against
      * the arguments the generated tools actually declare.
      */
     public const REDACT_SUFFIXES = [

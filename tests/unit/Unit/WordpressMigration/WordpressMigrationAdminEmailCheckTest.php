@@ -8,6 +8,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\SourceProbe;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceSiteResolver;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceWordpressClient;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RoutedSourceHttpClient;
 
 /**
  * WordPress answers a login that is due for its admin e-mail check with a

@@ -18,7 +18,7 @@ use Symfony\Component\Yaml\Yaml;
  * pointing at a file that does not exist, which is what a recipe's first check
  * shipped with, went unnoticed until it was read by eye.
  *
- * The same shape {@see \Tests\Unit\Deploy\Platform\SourceRecipeTest} already
+ * The same shape {@see \Tests\Integration\Deploy\Platform\SourceRecipeTest} already
  * uses for the manifest schemas: the lists are asserted equal, so adding a key
  * to one and forgetting the other is a failing test rather than a silent
  * divergence.

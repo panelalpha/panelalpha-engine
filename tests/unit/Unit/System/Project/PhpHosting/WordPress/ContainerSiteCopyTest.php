@@ -6,6 +6,7 @@ use App\Models\User;
 use App\System\Project\PhpHosting\WordPress\ContainerSiteCopy;
 use Mockery;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\FakeWordPressSite;
 
 /** A WordPress in the project's own containers after a staging, clone or push answers as its own domain. */
 class ContainerSiteCopyTest extends TestCase

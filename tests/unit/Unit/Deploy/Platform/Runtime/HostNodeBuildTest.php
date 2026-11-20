@@ -117,7 +117,7 @@ class HostNodeBuildTest extends TestCase
 
     /**
      * Which interpreter and which install line — the container that runs them
-     * is {@see \Tests\Unit\Deploy\Dind\DindHostBuilderTest}'s business.
+     * is {@see \Tests\Integration\Deploy\Dind\DindHostBuilderTest}'s business.
      */
     public function test_compiler_and_runtime_images_follow_the_lockfile(): void
     {

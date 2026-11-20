@@ -29,14 +29,17 @@ apt-get 11.9s, build 2.2s, inside a 53.1s critical path" is.
 
 ---
 
-## 1. Unit tests
+## 1. Unit and integration tests
 
 ```bash
 cd core
-./vendor/bin/phpunit --testsuite Unit
+./vendor/bin/phpunit --testsuite Unit          # seconds
+./vendor/bin/phpunit --testsuite Integration   # about half an hour
 ```
 
-The PHPUnit tests (Unit and Feature) live in [`tests/unit/`](tests/unit/README.md); `core/phpunit.xml` points at them.
+Both are the gate. `Unit` holds only tests of code (no application, no files written, no processes); everything that boots Laravel, writes a tree or runs a command is in `Integration`. The rule is in [`tests/unit/README.md`](tests/unit/README.md#unit-or-integration).
+
+The PHPUnit tests (Unit, Integration and Feature) live in [`tests/unit/`](tests/unit/README.md); `core/phpunit.xml` points at them.
 
 `composer analyse` (PHPStan level 5 against `core/phpstan-baseline.neon`) and `composer lint` (`pint --test`) must pass too; see [`CONTRIBUTING.md`](CONTRIBUTING.md#static-analysis-and-code-style). Never regenerate the baseline to hide an error your change introduced.
 
@@ -236,7 +239,7 @@ listening on the host's `127.0.0.1:5000` only, on no docker network an account i
 on. Core pushes and deletes through it (`CacheRegistry::hostArgv()`, a
 `host.httpRequest` the root broker runs in the host's netns); `system:image:prewarm` fills it and the
 weekly trim removes what no catalogue tag needs. That reader/writer split is
-asserted by `tests/unit/Unit/Deploy/Dind/DindImageStoreTest.php::
+asserted by `tests/unit/Integration/Deploy/Dind/DindImageStoreTest.php::
 test_the_registry_accounts_reach_is_read_only_and_the_writer_is_not_theirs`,
 and the probe that decides whether either is up (`DindImageStore::REGISTRY_DOWN`)
 is the container's inspect on the host daemon's Engine API (`lines.isRunning`), not a request over the network.
@@ -972,6 +975,7 @@ Record the command that produced the verdict.
 cd core
 ./vendor/bin/phpunit --filter Platform
 ./vendor/bin/phpunit --testsuite Unit
+./vendor/bin/phpunit --testsuite Integration
 ```
 
 `ShippedManifestsTest` enforces unique priorities. A duplicate `priority` fails

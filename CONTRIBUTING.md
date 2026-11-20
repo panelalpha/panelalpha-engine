@@ -113,11 +113,12 @@ composer install
 
 ## Running the tests
 
-Every change should keep the unit suite green (aside from documented pre-existing failures):
+Every change should keep the unit and integration suites green (aside from documented pre-existing failures):
 
 ```bash
 cd core
 ./vendor/bin/phpunit --testsuite Unit
+./vendor/bin/phpunit --testsuite Integration
 ```
 
 The tests themselves are in [`tests/unit/`](tests/unit/README.md); `core/phpunit.xml` and `core/vendor` stay in `core/`.

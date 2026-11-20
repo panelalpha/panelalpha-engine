@@ -6,6 +6,7 @@ use App\System\Project\PhpHosting\WordPress\HostRewrite;
 use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\FakeWordPressSite;
 
 /** A host rewrite changes addresses on exactly that host and nothing that merely contains it. */
 class HostRewriteTest extends TestCase

@@ -1,0 +1,281 @@
+<?php
+
+namespace Tests\Integration\System\Project;
+
+use App\Models\User as ModelsUser;
+use App\System as EngineSystem;
+use App\System\Project\Git as ProjectGit;
+use App\System\Project\Git\CredentialFiles;
+use Illuminate\Support\Facades\Log;
+use Tests\Support\LocalRoot;
+use Tests\TestCase;
+
+/**
+ * A git command installs an askpass script carrying the project's token and a
+ * deploy key into the account home, and removes them in a finally. A worker
+ * that is SIGKILLed or a host reboot skips that, leaving both readable by the
+ * tenant. Every command sweeps what an earlier one left before it starts.
+ */
+class ProjectGitCredentialSweepTest extends TestCase
+{
+    private string $home;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->home = sys_get_temp_dir() . '/pa-git-sweep-' . bin2hex(random_bytes(8));
+        mkdir($this->home . '/project', 0700, true);
+    }
+
+    protected function tearDown(): void
+    {
+        foreach (glob($this->home . '/*') ?: [] as $file) {
+            @unlink($file);
+        }
+        @rmdir($this->home . '/project');
+        @rmdir($this->home);
+        parent::tearDown();
+    }
+
+    public function test_it_sweeps_the_askpass_and_deploy_key_a_lost_command_left(): void
+    {
+        $askpass = $this->home . '/' . CredentialFiles::ASKPASS_PREFIX . 'deadbeef';
+        $key = $this->home . '/' . CredentialFiles::SSH_PREFIX . 'key-cafef00d';
+        $knownHosts = $this->home . '/' . CredentialFiles::SSH_PREFIX . 'known-hosts-1234';
+        file_put_contents($askpass, "#!/bin/sh\necho ghp_secret\n");
+        file_put_contents($key, "-----BEGIN PRIVATE KEY-----\n");
+        file_put_contents($knownHosts, "github.com ssh-ed25519 AAAA\n");
+        foreach ([$askpass, $key, $knownHosts] as $file) {
+            touch($file, time() - CredentialFiles::STALE_SECONDS - 60);
+        }
+
+        $system = new SweepRecordingSystem();
+        (new SweepableGit($system, $this->home))->callExecute(['git', '-C', $this->home . '/project', 'status']);
+
+        $this->assertFileDoesNotExist($askpass);
+        $this->assertFileDoesNotExist($key);
+        $this->assertFileDoesNotExist($knownHosts);
+        $this->assertNotEmpty(
+            array_filter($system->commands, fn (array $c): bool => LocalRoot::isRequest($c) && LocalRoot::plain($c)[0] === 'rm'),
+            'the sweep removes leftovers as root, as the cleanup does: the home is root-owned'
+        );
+    }
+
+    /** A fresh credential file is a live command's, and stays. */
+    public function test_it_leaves_a_running_commands_credentials_alone(): void
+    {
+        $askpass = $this->home . '/' . CredentialFiles::ASKPASS_PREFIX . 'live';
+        file_put_contents($askpass, "#!/bin/sh\necho ghp_secret\n");
+
+        $system = new SweepRecordingSystem();
+        (new SweepableGit($system, $this->home))->callExecute(['git', '-C', $this->home . '/project', 'status']);
+
+        $this->assertFileExists($askpass);
+        @unlink($askpass);
+    }
+
+    /** An ordinary file, however it is named, is not a leftover credential. */
+    public function test_it_leaves_ordinary_files_alone(): void
+    {
+        $docs = $this->home . '/.gitconfig';
+        $project = $this->home . '/project/README.md';
+        file_put_contents($docs, '[user]\n');
+        file_put_contents($project, 'docs');
+
+        $system = new SweepRecordingSystem();
+        (new SweepableGit($system, $this->home))->callExecute(['git', '-C', $this->home . '/project', 'status']);
+
+        $this->assertFileExists($docs);
+        $this->assertFileExists($project);
+    }
+
+    /** A chown that fails after the install leaves neither the helper nor its local copy holding the token. */
+    public function test_a_failed_chown_removes_the_installed_askpass_and_its_local_copy(): void
+    {
+        $system = new AskPassFailingSystem('changeOwner');
+
+        $this->executeWithToken($system);
+
+        [$temp, $installed] = $system->installed();
+        $this->assertFileDoesNotExist($temp, 'the local copy of the token was left behind');
+        $this->assertFileDoesNotExist($installed, 'the installed helper was left in the account until the sweep');
+    }
+
+    public function test_a_failed_install_removes_the_local_copy(): void
+    {
+        $system = new AskPassFailingSystem('install');
+
+        $this->executeWithToken($system);
+
+        [$temp] = $system->installed();
+        $this->assertFileDoesNotExist($temp, 'the local copy of the token was left behind');
+    }
+
+    public function test_a_failed_sweep_does_not_fail_the_git_command(): void
+    {
+        Log::spy();
+
+        $output = (new SweepableGit(new AskPassFailingSystem('staleFilesStartingWith'), $this->home))
+            ->callExecute(['git', '-C', $this->home . '/project', 'status']);
+
+        $this->assertSame('', $output);
+        Log::shouldHaveReceived('warning')->once();
+    }
+
+    private function executeWithToken(AskPassFailingSystem $system): void
+    {
+        try {
+            (new SweepableGit($system, $this->home))->callExecute(['git', '-C', $this->home . '/project', 'status'], 'ghp_secret');
+            $this->fail('the failed install should have failed the command');
+        } catch (\App\System\Project\Git\Exception) {
+        }
+        $this->assertNotSame('', $system->installed()[0], 'the helper was never installed');
+    }
+
+    /** A work tree nested below the home gets its parent, not the home, as the credential directory. */
+    public function test_credentials_go_beside_the_work_tree(): void
+    {
+        $this->assertSame('/home/alice', CredentialFiles::directoryFor('/home/alice', '/home/alice/project'));
+        $this->assertSame('/home/alice/example.com', CredentialFiles::directoryFor('/home/alice', '/home/alice/example.com/public_html'));
+        $this->assertSame('/home/alice', CredentialFiles::directoryFor('/home/alice', null));
+    }
+}
+
+/** @internal Exercises the real WorkTree::execute() with the host faked. */
+final class SweepableGit extends ProjectGit
+{
+    public function __construct(
+        private EngineSystem $fakeSystem,
+        private string $fakeHome,
+    ) {
+    }
+
+    /**
+     * @param list<string> $argv
+     */
+    public function callExecute(array $argv, ?string $token = null): string
+    {
+        return $this->execute($argv, $token);
+    }
+
+    protected function user(): ModelsUser
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+
+        return $model;
+    }
+
+    protected function system(): EngineSystem
+    {
+        return $this->fakeSystem;
+    }
+
+    protected function homeDirPath(): string
+    {
+        return $this->fakeHome;
+    }
+
+    protected function runCommand(array $cmd, int $timeout): string
+    {
+        return '';
+    }
+}
+
+/** @internal */
+final class SweepRecordingSystem extends EngineSystem
+{
+    /** @var list<list<string>> */
+    public array $commands = [];
+
+    public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
+    {
+        $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
+        $this->commands[] = $argv;
+        $plain = LocalRoot::plain($argv);
+
+        if (($plain[0] ?? '') === 'find') {
+            return $this->find($plain);
+        }
+        if (($plain[0] ?? '') === 'rm') {
+            @unlink((string) end($plain));
+        }
+
+        return '';
+    }
+
+    /**
+     * @param  list<string>  $argv
+     */
+    private function find(array $argv): string
+    {
+        $root = rtrim((string) ($argv[1] ?? ''), '/');
+        $maxDepth = null;
+        $minutes = 0;
+        foreach ($argv as $i => $arg) {
+            if ($arg === '-maxdepth') {
+                $maxDepth = (int) ($argv[$i + 1] ?? 0);
+            }
+            if ($arg === '-mmin') {
+                $minutes = (int) ltrim((string) ($argv[$i + 1] ?? ''), '+');
+            }
+        }
+
+        if (! is_dir($root)) {
+            return '';
+        }
+
+        $output = '';
+        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS));
+        foreach ($files as $file) {
+            $relative = ltrim(substr($file->getPathname(), strlen($root)), '/');
+            if (! $file->isFile()
+                || ($maxDepth !== null && substr_count($relative, '/') >= $maxDepth)
+                || ($minutes > 0 && $file->getMTime() > time() - $minutes * 60)
+                || (! str_starts_with($file->getFilename(), CredentialFiles::ASKPASS_PREFIX) && ! str_starts_with($file->getFilename(), CredentialFiles::SSH_PREFIX))) {
+                continue;
+            }
+            $output .= $file->getPathname() . "\0";
+        }
+
+        return $output;
+    }
+}
+
+/** @internal Installs files for real, and fails the one step named. */
+final class AskPassFailingSystem extends EngineSystem
+{
+    /** @var list<string> */
+    private array $installArgv = [];
+
+    public function __construct(private string $failingStep)
+    {
+    }
+
+    public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
+    {
+        $request = is_array($cmd) ? array_values($cmd) : [$cmd];
+        $action = (string) LocalRoot::action($request);
+        $step = $action === '' ? '' : substr($action, (int) strrpos($action, '.') + 1);
+        $values = LocalRoot::values($request);
+        if ($step === 'install') {
+            $this->installArgv = $values;
+        }
+        if ($step === $this->failingStep) {
+            throw new \RuntimeException("{$step} failed");
+        }
+        match ($step) {
+            'install' => copy($values[1], $values[2]),
+            'removeIfExists' => @unlink((string) end($values)),
+            default => null,
+        };
+
+        return '';
+    }
+
+    /** @return array{0: string, 1: string} the local copy and where it was installed */
+    public function installed(): array
+    {
+        return [(string) ($this->installArgv[1] ?? ''), (string) ($this->installArgv[2] ?? '')];
+    }
+}

@@ -65,7 +65,7 @@ test.describe('path to spec mapping', () => {
       'README.md',
       `${PREFIX}scripts/run-tests.ts`,
       'docs/x/y.html',
-      'tests/unit/Unit/Testing/CoverageRecorderTest.php',
+      'tests/unit/Integration/Testing/CoverageRecorderTest.php',
     ]);
     expect(selection.mode).toBe('selected');
     expect(selection.specs).toEqual([]);
