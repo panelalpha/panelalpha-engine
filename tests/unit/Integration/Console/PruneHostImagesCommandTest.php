@@ -7,6 +7,7 @@ use App\Console\Kernel;
 use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\CacheManager\CacheRegistry;
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
+use App\Lib\Deploy\DeployLog\StepWatchdog;
 use App\Models\OperatorImage;
 use App\System;
 use Illuminate\Console\Scheduling\Schedule;
@@ -35,6 +36,9 @@ class PruneHostImagesCommandTest extends TestCase
 
     /** @var object{calls: list<list<string>>, images: array<string, int>, containers: list<string>} */
     private object $host;
+
+    /** @var list<string> what the cache registry was asked, by {@see recordRegistryRequests()} */
+    private array $registryRequests = [];
 
     protected function setUp(): void
     {
@@ -288,6 +292,275 @@ class PruneHostImagesCommandTest extends TestCase
         $this->assertTrue($event->withoutOverlapping);
     }
 
+    public function test_a_window_that_is_no_duration_is_refused(): void
+    {
+        $this->assertSame(1, Artisan::call('system:image:prune', ['--older-than' => 'soon']));
+        $this->assertStringContainsString('Not a duration: soon', Artisan::output());
+        $this->assertSame(1, Artisan::call('system:image:prune', ['--due-after' => 'later']));
+        $this->assertStringContainsString('Not a duration: later', Artisan::output());
+        $this->assertSame([], $this->removed());
+    }
+
+    public function test_images_off_prunes_only_the_build_cache(): void
+    {
+        $this->assertSame(0, Artisan::call('system:image:prune', ['--older-than' => 'off']));
+
+        $this->assertSame([[LocalRoot::CLIENT, 'docker.pruneBuildCacheUnusedFor', '--', '86400']], $this->host->calls);
+        $this->assertStringContainsString('Pruned host build cache unused for 1d', Artisan::output());
+    }
+
+    public function test_a_build_cache_prune_that_fails_is_reported_and_images_are_still_pruned(): void
+    {
+        $this->host->failing['docker.pruneBuildCacheUnusedFor'] = "no builder\n";
+
+        $this->assertSame(0, Artisan::call('system:image:prune'));
+
+        $this->assertStringContainsString('Could not prune the host build cache: no builder', Artisan::output());
+        $this->assertContains('golang:1.99-alpine', $this->removed());
+    }
+
+    public function test_images_that_cannot_be_listed_are_all_kept(): void
+    {
+        $this->host->failing['docker.imageNamesWithSizes'] = 'Cannot connect to the Docker daemon';
+
+        Artisan::call('system:image:prune', ['--due-after' => '20h']);
+
+        $this->assertStringContainsString('Could not list host images, keeping them all: Cannot connect to the Docker daemon', Artisan::output());
+        $this->assertSame([], $this->removed());
+        $this->assertNull(PruneHostImages::lastCompleted());
+    }
+
+    public function test_under_pressure_a_listing_that_fails_stops_after_the_first_pass(): void
+    {
+        $this->pressureHost(free: 0);
+        $this->host->failing['docker.containerImages'] = 'daemon gone';
+
+        Artisan::call('system:image:prune', ['--older-than' => '6h', '--until-free' => '15G', '--build-cache-older-than' => 'off']);
+
+        $output = Artisan::output();
+        $this->assertStringContainsString('Images unused for 6h:', $output);
+        $this->assertStringNotContainsString('Images unused for 3h:', $output);
+        $this->assertSame([], $this->removed());
+    }
+
+    public function test_under_pressure_a_disk_that_cannot_be_read_ends_the_passes(): void
+    {
+        $this->pressureHost(free: 0);
+        $this->host->df = 'df: /var/lib/docker: No such file or directory';
+
+        Artisan::call('system:image:prune', ['--older-than' => '6h', '--until-free' => '15G', '--build-cache-older-than' => 'off']);
+
+        $this->assertStringContainsString('Could not read free space on /var/lib/docker; no further pass.', Artisan::output());
+        $this->assertSame([$this->plain . '-x00000007'], $this->removed());
+    }
+
+    public function test_a_dry_run_under_pressure_stops_after_one_pass(): void
+    {
+        $this->pressureHost(free: 0);
+
+        Artisan::call('system:image:prune', ['--older-than' => '6h', '--until-free' => '50G', '--build-cache-older-than' => 'off', '--dry-run' => true]);
+
+        $output = Artisan::output();
+        $this->assertStringContainsString('would go on with a shorter window', $output);
+        $this->assertStringNotContainsString('Images unused for 3h:', $output);
+        $this->assertSame([], $this->removed());
+    }
+
+    public function test_operator_images_that_cannot_be_read_keep_every_host_image(): void
+    {
+        \Illuminate\Support\Facades\Schema::drop('operator_images');
+
+        Artisan::call('system:image:prune');
+
+        $this->assertStringContainsString('Could not read the operator images, keeping every host image.', Artisan::output());
+        $this->assertSame([], $this->removed());
+    }
+
+    public function test_tag_times_that_cannot_be_read_keep_the_images(): void
+    {
+        $this->host->failing['docker.imagesLastTagTime'] = 'inspect failed';
+        Artisan::call('system:image:prune');
+        $this->assertSame([], $this->removed());
+
+        unset($this->host->failing['docker.imagesLastTagTime']);
+        $this->host->answers['docker.imagesLastTagTime'] = '"2020-01-01T00:00:00Z"';
+        Artisan::call('system:image:prune');
+        $this->assertSame([], $this->removed());
+        $this->assertStringContainsString('No host base image is unused for longer than 3d.', Artisan::output());
+    }
+
+    public function test_an_image_the_daemon_refuses_to_remove_is_listed_as_failed(): void
+    {
+        $this->host->failing['docker.removeImages'] = "conflict: image is being used\n";
+
+        Artisan::call('system:image:prune');
+
+        $output = Artisan::output();
+        $this->assertStringContainsString('Could not remove golang:1.99-alpine: conflict: image is being used', $output);
+        $this->assertMatchesRegularExpression('/golang:1\.99-alpine\s+\|.*\| failed/', $output);
+    }
+
+    public function test_an_empty_deploy_log_names_nothing(): void
+    {
+        $this->deployLog('bob', '20260924-000000-dddddd', 'nothing', 60, latest: true);
+        file_put_contents($this->storage . '/logs/deploy/bob/20260924-000000-dddddd.log', '');
+
+        Artisan::call('system:image:prune');
+
+        $this->assertContains('golang:1.99-alpine', $this->removed());
+    }
+
+    public function test_a_deploy_that_starts_mid_run_stops_the_image_half(): void
+    {
+        $this->deployLog('carol', '20260924-000000-eeeeee', 'Cloning repository', 60, latest: true);
+        $lock = null;
+        $this->host->onExec = function (string $action) use (&$lock): void {
+            if ($action === 'docker.removeImages' && $lock === null) {
+                $lock = fopen($this->storage . '/logs/deploy/carol/.deploy.lock', 'c');
+                flock($lock, LOCK_EX | LOCK_NB);
+            }
+        };
+
+        try {
+            Artisan::call('system:image:prune', ['--due-after' => '20h']);
+        } finally {
+            if (is_resource($lock)) {
+                flock($lock, LOCK_UN);
+                fclose($lock);
+            }
+        }
+
+        $this->assertStringContainsString('Stopped: a deploy started for carol', Artisan::output());
+        $this->assertCount(1, $this->removed());
+        $this->assertNull(PruneHostImages::lastCompleted());
+    }
+
+    /** Read again before each removal: one named after the run began is kept, and a deploy's older logs are not read. */
+    public function test_under_pressure_an_image_a_deploy_in_flight_names_mid_run_is_kept(): void
+    {
+        $this->pressureHost(free: 0);
+        $this->deployLog('carol', '20260923-000000-dddddd', 'an older deploy', 7200);
+        $this->deployLog('carol', '20260924-000000-eeeeee', 'Cloning repository', 60, latest: true);
+        $log = $this->storage . '/logs/deploy/carol/20260924-000000-eeeeee.log';
+        $lock = fopen($this->storage . '/logs/deploy/carol/.deploy.lock', 'c');
+        $this->assertTrue(flock($lock, LOCK_EX | LOCK_NB));
+        $this->host->onExec = function (string $action) use ($log): void {
+            if ($action === 'docker.removeImages') {
+                foreach (['7', '4', '2', '1'] as $age) {
+                    file_put_contents($log, json_encode(['level' => 'info', 'message' => "Host build image: {$this->plain}-x0000000{$age}"]) . "\n", FILE_APPEND);
+                }
+            }
+        };
+
+        try {
+            Artisan::call('system:image:prune', ['--older-than' => '1h', '--until-free' => '50G', '--build-cache-older-than' => 'off']);
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+
+        $this->assertCount(1, $this->removed());
+    }
+
+    public function test_a_registry_that_cannot_be_listed_is_left_as_it_is(): void
+    {
+        $this->host->failing['docker.registryTagLinks'] = "no such container\n";
+
+        Artisan::call('system:image:prune');
+
+        $this->assertStringContainsString('Could not list the cache registry, keeping it as it is: no such container', Artisan::output());
+        $this->assertNotSame([], $this->removed());
+    }
+
+    public function test_a_dry_run_names_the_registry_tags_it_would_remove(): void
+    {
+        $this->host->registry = [$this->plain . '-x0123abcd' => ['a', time() - 10 * 86400], $this->plain . '-x89abcdef' => ['b', time() - 3600]];
+        $this->recordRegistryRequests(202);
+
+        Artisan::call('system:image:prune', ['--dry-run' => true]);
+
+        $this->assertStringContainsString('would remove from the cache registry: ' . $this->plain . '-x0123abcd', Artisan::output());
+        $this->assertSame([], $this->registryRequests);
+    }
+
+    public function test_a_deploy_that_starts_before_the_registry_half_leaves_the_registry_alone(): void
+    {
+        $this->host->registry = [$this->plain . '-x0123abcd' => ['a', time() - 10 * 86400], $this->plain . '-x89abcdef' => ['b', time() - 3600]];
+        $this->recordRegistryRequests(202);
+        $this->deployLog('carol', '20260924-000000-eeeeee', 'Cloning repository', 60, latest: true);
+        $lock = null;
+        $this->host->onExec = function (string $action) use (&$lock): void {
+            if ($action === 'docker.registryTagLinks' && $lock === null) {
+                $lock = fopen($this->storage . '/logs/deploy/carol/.deploy.lock', 'c');
+                flock($lock, LOCK_EX | LOCK_NB);
+            }
+        };
+
+        try {
+            Artisan::call('system:image:prune');
+        } finally {
+            if (is_resource($lock)) {
+                flock($lock, LOCK_UN);
+                fclose($lock);
+            }
+        }
+
+        $this->assertStringContainsString('Cache registry left as it is: a deploy started for carol', Artisan::output());
+        $this->assertSame([], $this->registryRequests);
+    }
+
+    public function test_a_tag_the_registry_refuses_to_delete_is_warned_about_and_nothing_is_collected(): void
+    {
+        $this->host->registry = [$this->plain . '-x0123abcd' => ['a', time() - 10 * 86400], $this->plain . '-x89abcdef' => ['b', time() - 3600]];
+        $this->recordRegistryRequests(500);
+
+        Artisan::call('system:image:prune');
+
+        $this->assertStringContainsString('Could not remove ' . $this->plain . '-x0123abcd from the cache registry', Artisan::output());
+        $this->assertSame([], array_filter($this->host->calls, static fn (array $argv): bool => LocalRoot::action($argv) === 'docker.registryGarbageCollect'));
+    }
+
+    public function test_a_garbage_collect_that_fails_is_reported(): void
+    {
+        $this->host->registry = [$this->plain . '-x0123abcd' => ['a', time() - 10 * 86400], $this->plain . '-x89abcdef' => ['b', time() - 3600]];
+        $this->recordRegistryRequests(202);
+        $this->host->failing['docker.registryGarbageCollect'] = "registry is read-only\n";
+
+        Artisan::call('system:image:prune');
+
+        $this->assertStringContainsString('Cache registry garbage-collect failed: registry is read-only', Artisan::output());
+    }
+
+    public function test_a_push_lock_that_cannot_be_opened_leaves_the_registry_alone(): void
+    {
+        $this->host->registry = [$this->plain . '-x0123abcd' => ['a', time() - 10 * 86400], $this->plain . '-x89abcdef' => ['b', time() - 3600]];
+        $this->recordRegistryRequests(202);
+        $path = $this->storage . '/no-such-dir/push.lock';
+        $previous = getenv('PA_PUSH_LOCK');
+        putenv('PA_PUSH_LOCK=' . $path);
+
+        try {
+            Artisan::call('system:image:prune');
+        } finally {
+            putenv($previous === false ? 'PA_PUSH_LOCK' : 'PA_PUSH_LOCK=' . $previous);
+        }
+
+        $this->assertStringContainsString("Could not lock {$path}; leaving the cache registry as it is.", Artisan::output());
+        $this->assertSame([], $this->registryRequests);
+    }
+
+    private function recordRegistryRequests(int $status): void
+    {
+        $this->app->instance(CacheRegistry::class, new CacheRegistry(
+            function (string $method, string $url) use ($status): array {
+                $this->registryRequests[] = "{$method} {$url}";
+
+                return ['status' => $method === 'DELETE' ? $status : 200, 'headers' => [], 'body' => '{"repositories": []}'];
+            },
+            'http://registry.test'
+        ));
+    }
+
     /**
      * @return list<string>
      */
@@ -354,6 +627,18 @@ class PruneHostImagesCommandTest extends TestCase
             /** Whether a removed image leaves the listing. */
             public bool $forget = false;
 
+            /** @var array<string, string> broker action => the error it fails with */
+            public array $failing = [];
+
+            /** @var array<string, string> broker action => what it prints instead */
+            public array $answers = [];
+
+            /** @var ?\Closure(string, list<string>): void called with each broker action and its values */
+            public ?\Closure $onExec = null;
+
+            /** What `df` prints instead of the 100G disk. */
+            public ?string $df = null;
+
             /**
              * @param array<string, int> $images
              * @param list<string> $containers
@@ -367,6 +652,15 @@ class PruneHostImagesCommandTest extends TestCase
                 $argv = array_values((array) $cmd);
                 $this->calls[] = $argv;
                 $action = LocalRoot::isRequest($argv) ? LocalRoot::action($argv) : null;
+                if ($this->onExec !== null) {
+                    ($this->onExec)((string) $action, LocalRoot::isRequest($argv) ? LocalRoot::values($argv) : []);
+                }
+                if (isset($this->failing[$action])) {
+                    throw new \RuntimeException($this->failing[$action]);
+                }
+                if (isset($this->answers[$action])) {
+                    return $this->answers[$action];
+                }
                 if (in_array($action, ['docker.removeImages', 'docker.forceRemoveImages'], true)) {
                     $this->free += 1073741824;
                     if ($this->forget) {
@@ -404,6 +698,9 @@ class PruneHostImagesCommandTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                if ($this->df !== null) {
+                    return $this->df;
+                }
                 $cmd = HostCommand::argv($cmd);
                 $path = is_array($cmd) ? (string) end($cmd) : '';
 
@@ -412,6 +709,11 @@ class PruneHostImagesCommandTest extends TestCase
             }
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                throw new \LogicException('unexpected process');
+            }
+
+            public function runProcessWithCallbacks(string|array $cmd, array $env = [], int $timeout = 600, ?callable $onStart = null, ?callable $onOutput = null, ?StepWatchdog $watchdog = null): Process
             {
                 throw new \LogicException('unexpected process');
             }
