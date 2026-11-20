@@ -165,10 +165,10 @@ class QueueWorkers
 
     private static function writeService(string $dir): void
     {
-        if (! is_dir($dir) && ! mkdir($dir, 0755, true) && ! is_dir($dir)) {
+        if (! is_dir($dir) && ! @mkdir($dir, 0755, true) && ! is_dir($dir)) {
             throw new RuntimeException("Could not create {$dir}.");
         }
-        if (file_put_contents($dir.'/run', self::runScript(), LOCK_EX) === false || ! chmod($dir.'/run', 0755)) {
+        if (@file_put_contents($dir.'/run', self::runScript(), LOCK_EX) === false || ! @chmod($dir.'/run', 0755)) {
             throw new RuntimeException("Could not write {$dir}/run.");
         }
     }
@@ -181,7 +181,7 @@ class QueueWorkers
     private static function retire(string $dir, string $scanDir): void
     {
         $retired = $scanDir.'/.'.basename($dir).'-'.bin2hex(random_bytes(4));
-        if (! rename($dir, $retired)) {
+        if (! @rename($dir, $retired)) {
             throw new RuntimeException("Could not retire {$dir}.");
         }
     }

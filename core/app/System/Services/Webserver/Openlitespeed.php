@@ -301,7 +301,7 @@ CONFIG;
             }
             $to++;
             if (! Str::contains(substr($config, $from, $to - $from), '{')) {
-                $from = $to;
+                $from = stripos($config, $blockName.' ', $to);
 
                 continue;
             }

@@ -148,12 +148,12 @@ TEXT;
     private function writeStamp(array $stamp): void
     {
         $dir = $this->dir();
-        if (! is_dir($dir) && ! mkdir($dir, 0775, true) && ! is_dir($dir)) {
+        if (! is_dir($dir) && ! @mkdir($dir, 0775, true) && ! is_dir($dir)) {
             throw new RuntimeException('Could not create geolocation directory.');
         }
         $tmp = $this->stampPath().'.tmp';
         $json = json_encode($stamp, JSON_THROW_ON_ERROR);
-        if (file_put_contents($tmp, $json) === false) {
+        if (@file_put_contents($tmp, $json) === false) {
             throw new RuntimeException('Could not write geolocation terms stamp.');
         }
         $this->replaceFile($tmp, $this->stampPath());
@@ -162,11 +162,11 @@ TEXT;
     private function replaceMmdb(string $bytes): void
     {
         $dir = $this->dir();
-        if (! is_dir($dir) && ! mkdir($dir, 0775, true) && ! is_dir($dir)) {
+        if (! is_dir($dir) && ! @mkdir($dir, 0775, true) && ! is_dir($dir)) {
             throw new RuntimeException('Could not create geolocation directory.');
         }
         $tmp = $this->mmdbPath().'.tmp';
-        if (file_put_contents($tmp, $bytes) === false) {
+        if (@file_put_contents($tmp, $bytes) === false) {
             throw new RuntimeException('Could not write geolocation database.');
         }
         $this->replaceFile($tmp, $this->mmdbPath());

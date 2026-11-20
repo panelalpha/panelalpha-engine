@@ -66,7 +66,7 @@ final class EngineTlsAdvisory
     /** A hostname is assumed reachable; a literal IP only outside the private and reserved ranges. */
     private static function hasPublicAddress(string $url): bool
     {
-        $host = (string) (parse_url($url, PHP_URL_HOST) ?: '');
+        $host = trim((string) (parse_url($url, PHP_URL_HOST) ?: ''), '[]');
         if ($host === '') {
             return false;
         }

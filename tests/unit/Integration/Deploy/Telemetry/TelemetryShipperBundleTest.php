@@ -153,6 +153,25 @@ class TelemetryShipperBundleTest extends TestCase
         $this->assertFalse($this->bundleExists());
     }
 
+    public function test_a_bundle_gone_before_its_upload_is_not_counted_as_sent(): void
+    {
+        Http::fake(function (Request $request) {
+            if (str_ends_with($request->url(), '/source')) {
+                $this->uploads[] = ['url' => $request->url(), 'method' => $request->method(), 'body' => $request->body(), 'headers' => $request->headers()];
+
+                return Http::response('', 201);
+            }
+            @unlink((string) Telemetry::spool()->bundlePathFor(self::ID));
+
+            return Http::response(['accepted' => [self::ID], 'request_source' => [self::ID]], 200);
+        });
+
+        $result = (new TelemetryShipper)->ship();
+
+        $this->assertCounts($result, ['sent' => 1, 'kept' => 0, 'bundles_sent' => 0, 'bundles_failed' => 0, 'pending' => 0]);
+        $this->assertSame([], $this->uploads);
+    }
+
     public function test_a_refused_upload_is_final_and_the_report_is_done(): void
     {
         $this->ingest(403);

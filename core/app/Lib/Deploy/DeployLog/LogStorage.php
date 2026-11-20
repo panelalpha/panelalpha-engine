@@ -53,6 +53,7 @@ final class LogStorage
 
         self::fixOwnership(dirname($path));
         if (! @rename($temporary, $path)) {
+            @unlink($temporary);
             throw new RuntimeException("Could not write deploy latest pointer: {$path}");
         }
     }

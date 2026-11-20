@@ -57,6 +57,16 @@ class EngineTlsAdvisoryTest extends TestCase
         $this->assertStringContainsString('no public address', $warning);
     }
 
+    public function test_a_private_ipv6_address_warns_that_a_git_host_cannot_reach_it(): void
+    {
+        config(['app.url' => 'https://[fd00::1]']);
+
+        $warning = EngineTlsAdvisory::forProvider()['warning'];
+
+        $this->assertNotNull($warning);
+        $this->assertStringContainsString('no public address', $warning);
+    }
+
     public function test_a_hostname_is_assumed_reachable_and_carries_no_warning(): void
     {
         config(['app.url' => 'https://engine.example.test']);

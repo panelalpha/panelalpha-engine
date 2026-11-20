@@ -176,6 +176,52 @@ class DbIpTest extends TestCase
         $this->assertNull($dbip->databasePath());
     }
 
+    public function test_a_geolocation_directory_that_cannot_be_created_for_the_stamp_is_named(): void
+    {
+        file_put_contents($this->root.'/blocker', 'a file where the data root should be');
+
+        $this->expectExceptionObject(new RuntimeException('Could not create geolocation directory.'));
+
+        (new DbIp($this->root.'/blocker'))->acceptTerms();
+    }
+
+    public function test_a_stamp_that_cannot_be_written_is_named(): void
+    {
+        mkdir($this->root.'/geolocation/dbip-city-lite.stamp.tmp', 0775, true);
+
+        $this->expectExceptionObject(new RuntimeException('Could not write geolocation terms stamp.'));
+
+        $this->driver()->acceptTerms();
+    }
+
+    public function test_a_geolocation_directory_that_cannot_be_created_for_the_database_is_named(): void
+    {
+        $dbip = $this->driver();
+        $dbip->acceptTerms();
+        Http::fake(function () {
+            $this->removeTree($this->root.'/geolocation');
+            file_put_contents($this->root.'/geolocation', 'a file where the directory should be');
+
+            return Http::response($this->gzip('mmdb'), 200);
+        });
+
+        $this->expectExceptionObject(new RuntimeException('Could not create geolocation directory.'));
+
+        $dbip->updateDatabase();
+    }
+
+    public function test_a_database_that_cannot_be_written_is_named(): void
+    {
+        Http::fake(['*' => Http::response($this->gzip('mmdb'), 200)]);
+        $dbip = $this->driver();
+        $dbip->acceptTerms();
+        mkdir($this->mmdbPath().'.tmp');
+
+        $this->expectExceptionObject(new RuntimeException('Could not write geolocation database.'));
+
+        $dbip->updateDatabase();
+    }
+
     private function driver(): DbIp
     {
         return new DbIp($this->root);

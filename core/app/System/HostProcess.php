@@ -82,13 +82,13 @@ final class HostProcess
         $process = self::make($cmd);
         $process->setTimeout($timeout);
 
-        $process->start($watchdog?->watch($onOutput), $env);
+        $process->start($watchdog?->watch($onOutput) ?? $onOutput, $env);
 
         if ($onStart !== null) {
             $onStart($process);
         }
 
-        $watchdog !== null ? $watchdog->wait($process) : $process->wait($onOutput);
+        $watchdog !== null ? $watchdog->wait($process) : $process->wait();
 
         return $process;
     }

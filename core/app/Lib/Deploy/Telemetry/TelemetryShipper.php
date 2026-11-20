@@ -369,7 +369,7 @@ class TelemetryShipper
      */
     private function deliverBundle(array $item, array $wanted, array &$result): bool
     {
-        if ($item['bundle'] === null || ! in_array($item['id'], $wanted, true)) {
+        if ($item['bundle'] === null || ! is_file($item['bundle']) || ! in_array($item['id'], $wanted, true)) {
             return true;
         }
 
@@ -403,14 +403,10 @@ class TelemetryShipper
 
     /**
      * Upload one source bundle raw as application/zip to `{endpoint}/{reportId}/source`: one part, the id already in
-     * the path. True when nothing is left to send, a missing file included, so the report is not held for it.
+     * the path. True when nothing is left to send, so the report is not held for it.
      */
     private function uploadBundle(string $reportId, string $bundlePath): bool
     {
-        if (! is_file($bundlePath)) {
-            return true;
-        }
-
         $endpoint = rtrim(Telemetry::endpoint(), '/')
             .'/'.rawurlencode($reportId).'/source';
 

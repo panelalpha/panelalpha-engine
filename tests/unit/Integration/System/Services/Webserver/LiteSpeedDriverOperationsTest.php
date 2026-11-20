@@ -111,6 +111,16 @@ class LiteSpeedDriverOperationsTest extends TestCase
         $this->assertSame("module mod_security }\n", $this->host->files[self::OLS_CONFIG]);
     }
 
+    public function test_a_skipped_openlitespeed_block_name_leaves_the_next_block_alone(): void
+    {
+        Setting::setRuntimeSettings(['default_ipv4' => TestNetwork::DOCUMENTATION_2, 'modsec' => json_encode(['mode' => 'off', 'enabled_rulesets' => []])]);
+        $this->host->files[self::OLS_CONFIG] = "# module mod_security note }\nmodule cgi {\n}\n";
+
+        (new Openlitespeed($this->host))->toggleModsecurity();
+
+        $this->assertSame("# module mod_security note }\nmodule cgi {\n}\n", $this->host->files[self::OLS_CONFIG]);
+    }
+
     public function test_an_openlitespeed_block_without_its_closing_brace_is_refused(): void
     {
         Setting::setRuntimeSettings(['default_ipv4' => TestNetwork::DOCUMENTATION_2, 'modsec' => json_encode(['mode' => 'off', 'enabled_rulesets' => []])]);

@@ -191,6 +191,26 @@ class AwstatsIngestTest extends TestCase
         $this->assertMatchesRegularExpression('/^awstats-data\r?$/m', $gitignore);
     }
 
+    public function test_a_config_directory_that_cannot_be_created_is_named(): void
+    {
+        file_put_contents($this->root . '/blocker', 'a file where a directory should be');
+        $configDir = $this->root . '/blocker/config';
+
+        $this->expectExceptionObject(new \RuntimeException(sprintf('Directory "%s" was not created', $configDir)));
+
+        (new Awstats($this->root . '/data', $configDir))->configureDomain('example.com', [], $this->root . '/logs');
+    }
+
+    public function test_a_data_directory_that_cannot_be_created_is_named(): void
+    {
+        file_put_contents($this->root . '/blocker', 'a file where a directory should be');
+        $dataDir = $this->root . '/blocker/data';
+
+        $this->expectExceptionObject(new \RuntimeException(sprintf('Directory "%s" was not created', $dataDir)));
+
+        (new Awstats($dataDir, $this->root . '/config'))->configureDomain('example.com', [], $this->root . '/logs');
+    }
+
     private function awstats(?\Closure $inspect = null): Awstats
     {
         $capture = function (array $argv) use ($inspect): int {

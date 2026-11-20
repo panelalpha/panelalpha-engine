@@ -97,6 +97,35 @@ class QueueWorkersTest extends TestCase
         $this->assertCount(2, glob($this->scanDir . '/.queue-3-*', GLOB_ONLYDIR) ?: [], 'both retirements kept');
     }
 
+    public function test_a_service_directory_that_cannot_be_created_is_named(): void
+    {
+        file_put_contents($this->scanDir . '/blocker', 'a file where the scan directory should be');
+        $scanDir = $this->scanDir . '/blocker';
+
+        $this->expectExceptionObject(new \RuntimeException("Could not create {$scanDir}/queue-1."));
+
+        QueueWorkers::writeServices(1, $scanDir);
+    }
+
+    public function test_a_run_script_that_cannot_be_written_is_named(): void
+    {
+        mkdir($this->scanDir . '/queue-1/run', 0755, true);
+
+        $this->expectExceptionObject(new \RuntimeException("Could not write {$this->scanDir}/queue-1/run."));
+
+        QueueWorkers::writeServices(1, $this->scanDir);
+    }
+
+    public function test_a_worker_that_cannot_be_retired_is_named(): void
+    {
+        $dir = $this->scanDir . '/queue-2' . str_repeat('x', 248);
+        mkdir($dir);
+
+        $this->expectExceptionObject(new \RuntimeException("Could not retire {$dir}."));
+
+        QueueWorkers::writeServices(1, $this->scanDir);
+    }
+
     public function test_the_static_services_are_left_alone(): void
     {
         mkdir($this->scanDir . '/nginx');

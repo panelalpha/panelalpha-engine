@@ -100,6 +100,20 @@ class LogStorageRetryTest extends TestCase
         $this->assertSame(['files.changeOwnerRecursively -- www-data:www-data '.$this->dir.'/logs'], $this->requests());
     }
 
+    public function test_a_pointer_that_cannot_replace_its_target_leaves_no_temporary_file_behind(): void
+    {
+        $path = $this->dir.'/logs/latest.json';
+        mkdir($path.'/occupied', 0777, true);
+
+        try {
+            LogStorage::replace($path, '{}');
+            $this->fail('Replacing a non-empty directory must not pass');
+        } catch (RuntimeException) {
+        }
+
+        $this->assertSame(['latest.json'], array_values(array_diff(scandir($this->dir.'/logs') ?: [], ['.', '..'])));
+    }
+
     public function test_a_directory_that_cannot_be_created_twice_names_itself(): void
     {
         file_put_contents($this->dir.'/blocker', 'a file where a directory should be');

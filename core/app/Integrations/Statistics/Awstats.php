@@ -700,10 +700,10 @@ class Awstats implements Statistics
 
     private function ensureDirectories(): void
     {
-        if (! is_dir($this->configDir) && ! mkdir($concurrentDirectory = $this->configDir, 0775, true) && ! is_dir($concurrentDirectory)) {
+        if (! is_dir($this->configDir) && ! @mkdir($concurrentDirectory = $this->configDir, 0775, true) && ! is_dir($concurrentDirectory)) {
             throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
         }
-        if (! is_dir($this->dataDir) && ! mkdir($concurrentDirectory = $this->dataDir, 0775, true) && ! is_dir($concurrentDirectory)) {
+        if (! is_dir($this->dataDir) && ! @mkdir($concurrentDirectory = $this->dataDir, 0775, true) && ! is_dir($concurrentDirectory)) {
             throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
         }
     }

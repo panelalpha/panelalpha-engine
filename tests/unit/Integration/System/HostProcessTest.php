@@ -248,6 +248,35 @@ class HostProcessTest extends TestCase
             $this->assertSame('nope', trim($e->getMessage()));
         }
     }
+
+    public function test_a_streamed_command_without_a_watchdog_hands_over_all_its_output(): void
+    {
+        $system = new System();
+        $runs = 50;
+        $delivered = 0;
+
+        for ($run = 0; $run < $runs; $run++) {
+            $streamed = '';
+            $system->runProcessWithCallbacks(
+                ['printf', 'streamed'],
+                onStart: self::untilExited(...),
+                onOutput: function (string $type, string $data) use (&$streamed): void {
+                    $streamed .= $data;
+                },
+            );
+            $delivered += $streamed === 'streamed' ? 1 : 0;
+        }
+
+        $this->assertSame($runs, $delivered);
+    }
+
+    /** The command has written everything and exited before anyone waits for it. */
+    private static function untilExited(Process $process): void
+    {
+        while ($process->isRunning()) {
+            usleep(1000);
+        }
+    }
 }
 
 /** @internal */
