@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  xyOps, a job scheduler, workflow engine and server monitoring system (Node.js,
+  storage on local disk). The repository's own Dockerfile is how upstream
+  ships it and the engine builds it as is, on port 5522 with data/ on a named
+  volume. Its first start creates the stock admin with the password admin,
+  which nobody deploying it is told, and there is no sign-up. So the engine
+  generates the password (`credentials:` below, returned by GET
+  /projects/{name}/app-credentials) and files/panelalpha-xyops-start.sh,
+  while storage is new or that admin still has the stock password (read with
+  upstream's storage library before the server starts), sets
+  XYOPS_recover_admin, upstream's own way to write an admin account at
+  start: xyOps writes users/admin again with the generated password right
+  after it creates the initial records. A password changed in xyOps is never
+  touched. The username is always admin, the account the setup creates and
+  the users list shows. The compose file is the dockerfile strategy's plus
+  the login and that wrapper.
+credentials:
+  login_path: /
+  fields:
+    XYOPS_ADMIN_USERNAME: {kind: username, value: admin}
+    XYOPS_ADMIN_PASSWORD: {kind: password}

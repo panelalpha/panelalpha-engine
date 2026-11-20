@@ -1,0 +1,23 @@
+# Compose-replace: builds the repository's Dockerfile as the dockerfile
+# strategy does (port 5522, data/ on the same named volume), with the login
+# the engine generates.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "5522:5522"
+    # Gives the stock admin the engine's password while it still has the
+    # default one, then runs the image's CMD, bin/container-start.sh.
+    entrypoint: ["/bin/bash", "/panelalpha-xyops-start.sh"]
+    env_file:
+      # XYOPS_ADMIN_USERNAME / XYOPS_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
+    volumes:
+      # The Dockerfile's VOLUME, under the name the dockerfile strategy gives it.
+      - data-opt-xyops-data:/opt/xyops/data
+      - ./panelalpha-xyops-start.sh:/panelalpha-xyops-start.sh:ro
+      - ./panelalpha-xyops-admin.js:/panelalpha-xyops-admin.js:ro
+
+volumes:
+  data-opt-xyops-data: {}
