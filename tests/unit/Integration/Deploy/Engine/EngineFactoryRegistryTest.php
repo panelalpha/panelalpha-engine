@@ -11,6 +11,12 @@ use Tests\TestCase;
 /** How the factory registers, memoises and refuses engines, word for word. */
 class EngineFactoryRegistryTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+        EngineFactory::reset();
+    }
+
     protected function tearDown(): void
     {
         EngineFactory::reset();
