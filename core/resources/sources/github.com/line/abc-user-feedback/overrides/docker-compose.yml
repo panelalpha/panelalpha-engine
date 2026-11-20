@@ -1,0 +1,128 @@
+# Replaces the repository's compose files. Its root has none (the repository is
+# a pnpm monorepo the engine would otherwise build as a Next.js app, the web
+# app alone), and docker/docker-compose.yml is a laptop file: the web app is
+# told the API is at http://localhost:4000, every port is published, and the
+# secrets are published defaults. This is the same stack from upstream's
+# published images (web, api, mysql:8.0) behind one address:
+#
+# - proxy (nginx, the only published port) sends /api/, /docs and
+#   /admin-docs to the API and everything else to the web app;
+# - the web app's NEXT_PUBLIC_API_BASE_URL is the site's own address, which
+#   the image's entrypoint writes into its built JavaScript at start;
+# - setup makes the tenant and its super user from the engine's login before
+#   the proxy starts, so nobody can take the setup page first.
+#
+# No smtp4dev: nobody could read its mail, and the API only mails sign-up
+# and invitation codes. No OpenSearch: off upstream too (MySQL search).
+services:
+  mysql:
+    image: mysql:8.0
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --collation-server=utf8mb4_bin
+      # A preview-sized server: about 200 MB instead of 400+.
+      - --performance-schema=OFF
+      - --innodb-buffer-pool-size=64M
+      - --max-connections=50
+    env_file:
+      # MYSQL_PASSWORD, generated once by hooks/prepare.sh.
+      - ../.panelalpha/abc-user-feedback/db.env
+    environment:
+      MYSQL_DATABASE: userfeedback
+      MYSQL_USER: userfeedback
+      # Nothing connects as root.
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+      TZ: UTC
+    volumes:
+      - mysql:/var/lib/mysql
+    healthcheck:
+      # Answers only once the real server listens on TCP (the first-start
+      # initialisation runs without networking).
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    restart: unless-stopped
+    mem_limit: 512m
+
+  api:
+    image: line/abc-user-feedback-api:8.2644.112
+    env_file:
+      # JWT_SECRET and MYSQL_PRIMARY_URL, from hooks/prepare.sh.
+      - ../.panelalpha/abc-user-feedback/api.env
+    environment:
+      ADMIN_WEB_URL: ${PA_PUBLIC_URL}
+      BASE_URL: ${PA_PUBLIC_URL}
+      # Required by the API's config. Nothing listens there: a code the API
+      # would mail fails at once instead of vanishing into an unread inbox.
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: "25"
+      SMTP_SENDER: noreply@example.com
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:4000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    restart: unless-stopped
+    mem_limit: 640m
+
+  web:
+    image: line/abc-user-feedback-web:8.2644.112
+    environment:
+      # The image's entrypoint writes this into the built JavaScript in place
+      # of a placeholder, so the browser calls the API at the site's own
+      # address, where the proxy sends /api/ to the API.
+      NEXT_PUBLIC_API_BASE_URL: ${PA_PUBLIC_URL}
+      # Next.js listens on $HOSTNAME, which Docker sets to the container id.
+      HOSTNAME: 0.0.0.0
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    restart: unless-stopped
+    mem_limit: 512m
+
+  # One-shot: the first super user, from the engine's login; see
+  # files/panelalpha/abc-user-feedback/setup-tenant.mjs.
+  setup:
+    image: line/abc-user-feedback-api:8.2644.112
+    env_file:
+      # ABC_ADMIN_EMAIL / ABC_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
+    volumes:
+      - ./panelalpha/abc-user-feedback:/panelalpha:ro
+    entrypoint: ["node", "/panelalpha/setup-tenant.mjs"]
+    command: []
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: "no"
+    mem_limit: 128m
+
+  proxy:
+    image: nginx:1.29-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./panelalpha/abc-user-feedback/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    # `docker compose up -d` blocks on these, so the deploy finishes, and the
+    # site answers, only once the super user exists and both apps are up.
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    mem_limit: 64m
+
+volumes:
+  mysql: {}

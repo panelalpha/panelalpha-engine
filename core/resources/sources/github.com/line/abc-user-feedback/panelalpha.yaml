@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ABC User Feedback (LINE), a feedback collection and issue tracking tool: a
+  Next.js admin web app, a NestJS API and MySQL 8, in a pnpm monorepo. Without
+  this recipe the engine built the repository as a Next.js app: only apps/web
+  ran, nothing ran the API or a database, and the browser called the API at
+  http://localhost:4000 (NEXT_PUBLIC_API_BASE_URL from apps/web/.env.example),
+  so the sign-in page could never sign anyone in. The repository's own
+  docker/docker-compose.yml has the whole stack from upstream's published
+  images, but for a laptop: the web app on :3000 calls the API on :4000, and
+  JWT_SECRET (`jwtsecretjwtsecretjwtsecret`, which signs every admin token) and
+  the MySQL password are published defaults.
+
+  So overrides/docker-compose.yml runs the published web and api images and
+  mysql:8.0 behind one address: an nginx proxy (the only published port) sends
+  /api/, /docs and /admin-docs to the API and the rest to the web app, and the
+  web app's NEXT_PUBLIC_API_BASE_URL is the site's own address (the image's
+  entrypoint writes it into the built JavaScript at start). hooks/prepare.sh
+  generates JWT_SECRET and the MySQL password once per account under
+  ~/.panelalpha/abc-user-feedback.
+
+  A new install has no tenant, and its setup page (POST /api/admin/tenants,
+  no login) makes the tenant and its super user for whoever opens the address
+  first. Here the engine generates that login (`credentials:` below, returned
+  by GET /projects/{name}/app-credentials) and a one-shot `setup` service
+  makes it through that same endpoint before the proxy starts, only while no
+  tenant exists. Signing up anyone else needs a code by email, and there is
+  no mail server: the API is given a dead SMTP address, so those requests
+  fail at once instead of waiting for mail nobody can read.
+credentials:
+  # / redirects here; so does every page while signed out.
+  login_path: /auth/sign-in
+  fields:
+    ABC_ADMIN_EMAIL: {kind: email}
+    ABC_ADMIN_PASSWORD: {kind: password}
