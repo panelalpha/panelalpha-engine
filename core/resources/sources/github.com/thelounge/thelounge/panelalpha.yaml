@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  The Lounge, a web IRC client (Node.js, Vue): the express platform builds it
+  as is (yarn install, `yarn build`) and runs it on its own port 9000. It is
+  private by default: the sign-in page is the only way in and users are made
+  only with the server's `thelounge add` command, so a new deploy came up on
+  a sign-in form nobody holds an account for. The engine generates a login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
+  files/panelalpha-thelounge-start.sh adds it with upstream's own `thelounge
+  add` while there is no user at all, then starts the server as the
+  repository's start script does (`node index start`); a password changed in
+  The Lounge is never touched. THELOUNGE_HOME (users, settings, chat logs)
+  is ~/.panelalpha/thelounge, bind-mounted at /pa-data/thelounge, so users
+  survive redeploys; before, they lived in the container and a redeploy lost
+  them.
+extends: express
+commands:
+  - id: npm-install
+    stage: build
+    role: dependencies
+    # {{js.install}} is not resolved in a recipe; the repo ships a Yarn 1 yarn.lock.
+    run: 'yarn install --frozen-lockfile'
+  # Not `serve`: under that id the node platform may swap in package.json's own start.
+  - id: thelounge-serve
+    stage: start
+    serve: true
+    run: 'sh /app/panelalpha-thelounge-start.sh'
+credentials:
+  login_path: /
+  fields:
+    THELOUNGE_USERNAME: {kind: username}
+    THELOUNGE_PASSWORD: {kind: password}

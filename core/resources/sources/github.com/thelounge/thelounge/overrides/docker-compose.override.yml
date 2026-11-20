@@ -1,0 +1,12 @@
+# THELOUNGE_HOME (users, settings, chat logs) survives redeploys in the
+# account's ~/.panelalpha/thelounge, which hooks/prepare.sh creates. The
+# login the engine generates reaches the start script as THELOUNGE_USERNAME /
+# THELOUNGE_PASSWORD.
+services:
+  app:
+    environment:
+      THELOUNGE_HOME: /pa-data/thelounge
+    env_file:
+      - ../.panelalpha/app-credentials.env
+    volumes:
+      - ../.panelalpha/thelounge:/pa-data/thelounge
