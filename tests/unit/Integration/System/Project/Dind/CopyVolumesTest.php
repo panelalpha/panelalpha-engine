@@ -281,6 +281,32 @@ class CopyVolumesTest extends TestCase
         $this->assertSame(['files.isDirectory '.self::STAGING], array_values(array_unique($this->asked)));
     }
 
+    public function test_a_staged_volume_with_no_incoming_data_and_the_daemon_s_metadata_are_not_swapped(): void
+    {
+        $this->made(self::STAGING.'/project_db');
+        $this->files[self::STAGING.'/metadata.db'] = 'bolt';
+
+        $this->account('bob')->swapIncomingVolumes();
+
+        $this->assertContains('files.isFile '.self::INCOMING, $this->asked);
+        $this->assertNotContains('files.isFile '.self::STAGING.'/metadata.db/_data.incoming', $this->asked);
+        $this->assertSame([], $this->runs());
+        $this->assertSame('bob db', $this->volumes['bob']['project_db']);
+    }
+
+    public function test_a_staging_directory_that_cannot_be_listed_swaps_nothing(): void
+    {
+        $this->made(self::STAGING.'/project_db');
+        $this->files[self::INCOMING] = 'alice db';
+        $this->fails['files.listNames'] = 'Permission denied';
+
+        $this->account('bob')->swapIncomingVolumes();
+
+        $this->assertSame([], $this->runs());
+        $this->assertSame('bob db', $this->volumes['bob']['project_db']);
+        $this->assertArrayHasKey(self::INCOMING, $this->files);
+    }
+
     private function stagedPush(): void
     {
         $this->account('bob')->copyVolumeDataToIncoming($this->account('alice'));

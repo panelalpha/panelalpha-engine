@@ -318,6 +318,18 @@ class UfwFirewallTest extends TestCase
         $this->assertNotNull($status['refused_rules'][0]['id']);
     }
 
+    public function test_refused_rules_are_still_listed_when_the_rule_store_cannot_be_read(): void
+    {
+        $host = $this->failing([
+            'bash /opt/panelalpha/shared-hosting/scripts/firewall.sh --refused' => FakeProcess::ok("/etc/ufw/user.rules line 2\tunknown option\n"),
+            'cat /etc/ufw/user.rules' => FakeProcess::failed('Permission denied'),
+        ]);
+
+        $status = $this->firewall($host)->status()->toArray();
+
+        $this->assertSame([['id' => null, 'rule' => '/etc/ufw/user.rules line 2', 'error' => 'unknown option']], $status['refused_rules']);
+    }
+
     public function test_status_without_the_refused_check_still_answers(): void
     {
         $host = $this->failing(['bash /opt/panelalpha/shared-hosting/scripts/firewall.sh --refused' => FakeProcess::failed('no such file', 127)]);

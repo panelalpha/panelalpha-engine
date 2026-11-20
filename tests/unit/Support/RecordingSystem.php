@@ -2,6 +2,7 @@
 
 namespace Tests\Support;
 
+use App\Lib\Deploy\DeployLog\StepWatchdog;
 use App\System;
 use Symfony\Component\Process\Process;
 
@@ -30,6 +31,17 @@ class RecordingSystem extends System
         return $this->exitCode === 0
             ? FakeProcess::ok($this->output)
             : FakeProcess::failed($this->output);
+    }
+
+    public function runProcessWithCallbacks(
+        string|array $cmd,
+        array $env = [],
+        int $timeout = 600,
+        ?callable $onStart = null,
+        ?callable $onOutput = null,
+        ?StepWatchdog $watchdog = null
+    ): Process {
+        return $this->runProcess($cmd, $env, $timeout);
     }
 
     /** The shell script of the first recorded `bash -c` call. */

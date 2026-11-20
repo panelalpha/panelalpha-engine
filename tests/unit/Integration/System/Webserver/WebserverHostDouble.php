@@ -2,6 +2,7 @@
 
 namespace Tests\Integration\System\Webserver;
 
+use App\Lib\Deploy\DeployLog\StepWatchdog;
 use App\System;
 use App\System\Filesystem;
 use Symfony\Component\Process\Process;
@@ -56,6 +57,17 @@ final class WebserverHostDouble extends System
         }
 
         return FakeProcess::ok();
+    }
+
+    public function runProcessWithCallbacks(
+        string|array $cmd,
+        array $env = [],
+        int $timeout = 600,
+        ?callable $onStart = null,
+        ?callable $onOutput = null,
+        ?StepWatchdog $watchdog = null
+    ): Process {
+        return $this->runProcess($cmd, $env, $timeout);
     }
 
     private function move(string $from, string $to): void

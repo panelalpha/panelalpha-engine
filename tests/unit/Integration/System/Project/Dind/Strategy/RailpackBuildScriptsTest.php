@@ -84,6 +84,17 @@ class RailpackBuildScriptsTest extends TestCase
         $this->assertSame(Privileged::files()->removeIfExists('/home/alice/railpack-build-tmp.sh', '/home/alice/railpack-plan-tmp.json'), end($this->events)['cmd']);
     }
 
+    public function test_a_scratch_dir_that_cannot_be_made_builds_from_the_home(): void
+    {
+        $this->scratchExists = false;
+        $this->failOn = 'make-home-entry';
+
+        $this->assertTrue($this->railpack()->buildImage('/home/alice/project', '1000:1000', 'panelalpha-alice-app:latest'));
+
+        $this->assertSame(['which', 'make-home-entry', 'write', 'prepare', 'build-guard', 'build', 'build-guard-release', 'rm'], array_column($this->events, 'step'));
+        $this->assertSame('/home/alice/railpack-build-tmp.sh', $this->events[2]['path']);
+    }
+
     /** @return list<array<string, mixed>> */
     private function expectedSuccess(): array
     {

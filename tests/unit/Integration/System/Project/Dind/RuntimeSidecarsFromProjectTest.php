@@ -275,6 +275,19 @@ class RuntimeSidecarsFromProjectTest extends TestCase
      * The production file says what runs beside the app; the workstation file
      * added caddy, a second database and a debug server.
      */
+    public function test_a_harvested_build_image_and_app_mounts_reach_the_decision(): void
+    {
+        $decision = (new RuntimeSidecars($this->stubbedDind($this->stubbedSystem([]))))->mergeRuntimeSidecars(
+            ['env' => ['A' => '1']],
+            ['services' => [], 'volumes' => [], 'env' => [], 'build_image' => 'node:22-bookworm', 'app_mounts' => ['./uploads:/app/uploads']]
+        );
+
+        $this->assertSame('node:22-bookworm', $decision['build_image']);
+        $this->assertSame(['./uploads:/app/uploads'], $decision['app_mounts']);
+        $this->assertSame(['A' => '1'], $decision['env']);
+        $this->assertArrayNotHasKey('sidecars', $decision);
+    }
+
     public function test_a_production_compose_beats_the_development_one(): void
     {
         $result = $this->sidecarsFromFiles([

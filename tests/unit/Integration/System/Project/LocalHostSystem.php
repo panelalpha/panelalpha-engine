@@ -2,6 +2,7 @@
 
 namespace Tests\Integration\System\Project;
 
+use App\Lib\Deploy\DeployLog\StepWatchdog;
 use App\System;
 use Symfony\Component\Process\Process;
 use Tests\Support\LocalRoot;
@@ -36,6 +37,17 @@ final class LocalHostSystem extends System
         $this->apply($this->requested($cmd));
 
         return '';
+    }
+
+    public function runProcessWithCallbacks(
+        string|array $cmd,
+        array $env = [],
+        int $timeout = 600,
+        ?callable $onStart = null,
+        ?callable $onOutput = null,
+        ?StepWatchdog $watchdog = null
+    ): Process {
+        return $this->runProcess($cmd, $env, $timeout);
     }
 
     public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process

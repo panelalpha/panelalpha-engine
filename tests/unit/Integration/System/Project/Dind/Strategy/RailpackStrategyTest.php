@@ -32,6 +32,8 @@ class RailpackStrategyTest extends TestCase
 
     private bool $built = true;
 
+    private bool $imagesFail = false;
+
     /** @var list<array<string, mixed>>|null null when the stack cannot be listed */
     private ?array $running = [];
 
@@ -61,6 +63,19 @@ class RailpackStrategyTest extends TestCase
         $service = $this->appService();
         $this->assertSame('panelalpha-acme-app:latest', $service['image']);
         $this->assertSame(['3000:3000'], $service['ports']);
+        $this->assertSame([], $this->snapshot);
+    }
+
+    /** An image the daemon cannot describe is taken to start something, on the default port. */
+    public function test_an_image_that_cannot_be_inspected_runs_on_the_default_port(): void
+    {
+        $this->imagesFail = true;
+
+        $this->apply();
+
+        $service = $this->appService();
+        $this->assertSame('panelalpha-acme-app:latest', $service['image']);
+        $this->assertSame(['80:80'], $service['ports']);
         $this->assertSame([], $this->snapshot);
     }
 
@@ -221,6 +236,9 @@ class RailpackStrategyTest extends TestCase
         }
         if (LocalRoot::action($command) !== 'account-docker.images') {
             return '';
+        }
+        if ($this->imagesFail) {
+            throw new \RuntimeException('Cannot connect to the Docker daemon');
         }
 
         return (string) json_encode([[

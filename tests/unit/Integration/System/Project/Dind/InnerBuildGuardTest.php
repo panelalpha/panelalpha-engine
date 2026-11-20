@@ -10,6 +10,7 @@ use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\InnerBuildGuard;
 use App\System\Project\Dind\ShellOperations;
+use Illuminate\Support\Facades\Log;
 use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
@@ -26,6 +27,8 @@ class InnerBuildGuardTest extends TestCase
     private array $requests = [];
 
     private ?\Throwable $failApply = null;
+
+    private ?\Throwable $failRelease = null;
 
     public function test_the_build_runs_between_apply_and_release(): void
     {
@@ -99,6 +102,18 @@ class InnerBuildGuardTest extends TestCase
         $this->assertCount(1, $this->commands);
     }
 
+    /** A guard that cannot be stopped is logged; the build's own result stands. */
+    public function test_a_guard_that_cannot_be_released_is_logged_and_the_build_result_stands(): void
+    {
+        $this->failRelease = new \RuntimeException('No such container: alice');
+        Log::spy();
+
+        $this->assertSame('built', (new InnerBuildGuard($this->project('8192m', 1024)))->during(static fn (): string => 'built'));
+
+        $this->assertCount(2, $this->commands);
+        Log::shouldHaveReceived('warning')->with('Could not stop the image build guard for alice: No such container: alice')->once();
+    }
+
     public function test_the_deploy_log_line_names_the_figure(): void
     {
         $this->assertStringStartsWith('Image build memory: 1895 MB', InnerBuildGuard::announcement(1895));
@@ -121,6 +136,9 @@ class InnerBuildGuardTest extends TestCase
             $this->commands[] = LocalRoot::plain(array_values((array) $cmd));
             if ($this->failApply !== null && in_array('build-guard', (array) $cmd, true)) {
                 throw $this->failApply;
+            }
+            if ($this->failRelease !== null && in_array('build-guard-release', (array) $cmd, true)) {
+                throw $this->failRelease;
             }
 
             return '';

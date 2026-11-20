@@ -39,6 +39,12 @@ class VolumeArchiveVolumesTest extends TestCase
         $this->assertSame([['name' => 'dbdata', 'docker_name' => 'dbdata']], $volumes);
     }
 
+    public function test_a_file_whose_services_are_not_a_map_has_no_volumes(): void
+    {
+        $this->assertSame([], VolumeArchive::volumesFromCompose(['services' => 'app', 'volumes' => ['dbdata' => null]]));
+        $this->assertSame([], VolumeArchive::volumesFromCompose(['services' => [], 'volumes' => 'dbdata']));
+    }
+
     public function test_bind_mounts_are_dropped(): void
     {
         $volumes = VolumeArchive::volumesFromCompose([
