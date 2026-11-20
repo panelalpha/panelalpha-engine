@@ -16,6 +16,23 @@ description: >-
   hooks/prepare.sh into ~/.panelalpha/dawarich/. The database, Redis, imports,
   storage and public assets are on named volumes. Per-service memory limits
   keep the stack under the account limit (~600 MB in use idle). The first
-  visit opens Dawarich's sign-in page; upstream's db:seed creates its
-  documented admin demo@dawarich.app / safepassword, left as upstream ships it.
-  Everything else is upstream's default.
+  visit opens Dawarich's sign-in page.
+
+  LOGIN. Self-hosted Dawarich has no sign-up (ALLOW_EMAIL_PASSWORD_REGISTRATION
+  is false), and upstream's db:seed creates its documented admin
+  demo@dawarich.app / safepassword, which anyone with the URL could use and
+  nobody deploying it is told. So the engine generates a login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials)
+  and the web service reads it from app-credentials.env. web-entrypoint.sh
+  migrates and seeds, then runs the service's command under bundle exec:
+  files/panelalpha/dawarich-login.sh runs files/panelalpha/dawarich-login.rb
+  with `bin/rails runner` (Dawarich's own User model), which gives an admin
+  that still has the seed's password the engine's email and password, then
+  execs the Rails server. demo@dawarich.app / safepassword no longer signs
+  in, and a password changed in Dawarich is never touched. Everything else
+  is upstream's default.
+credentials:
+  login_path: /users/sign_in
+  fields:
+    DAWARICH_ADMIN_EMAIL: {kind: email}
+    DAWARICH_ADMIN_PASSWORD: {kind: password}

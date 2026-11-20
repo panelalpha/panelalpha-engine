@@ -53,9 +53,14 @@ services:
     image: freikin/dawarich:1.15.2
     restart: unless-stopped
     entrypoint: web-entrypoint.sh
-    command: ["bin/rails", "server", "-p", "3000", "-b", "::"]
+    # web-entrypoint.sh migrates and seeds, then runs this under bundle exec:
+    # panelalpha/dawarich-login.sh sets the engine's login on the seeded admin
+    # while it still has the seed's password, then runs the Rails server.
+    command: ["sh", "/panelalpha/dawarich-login.sh", "bin/rails", "server", "-p", "3000", "-b", "::"]
     env_file:
       - ../.panelalpha/dawarich/app.env
+      # DAWARICH_ADMIN_EMAIL / DAWARICH_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
     environment:
       <<: *dawarich-env
       WEB_CONCURRENCY: "1"
@@ -63,6 +68,7 @@ services:
       - public:/var/app/public
       - watched:/var/app/tmp/imports/watched
       - storage:/var/app/storage
+      - ./panelalpha:/panelalpha:ro
     ports:
       - "3000:3000"
     healthcheck:
