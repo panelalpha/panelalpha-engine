@@ -13,8 +13,18 @@ services:
       GLPI_DB_NAME: glpi
       GLPI_DB_USER: glpi
       GLPI_DB_PASSWORD: ${GLPI_DB_PASSWORD:?GLPI_DB_PASSWORD is required}
+    env_file:
+      # GLPI_ADMIN_USER / GLPI_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
+    # The image's entrypoint installs or updates the schema and then runs this
+    # command: it sets the engine's login on the built-in glpi account and
+    # disables tech, normal and post-only while they have their default
+    # passwords, then execs the image's own command.
+    command: ["/bin/bash", "/panelalpha/glpi-login.sh", "/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
     volumes:
       - glpi-data:/var/glpi
+      - ./panelalpha/glpi-login.sh:/panelalpha/glpi-login.sh:ro
+      - ./panelalpha/glpi-default-logins.php:/panelalpha/glpi-default-logins.php:ro
     depends_on:
       db:
         condition: service_healthy

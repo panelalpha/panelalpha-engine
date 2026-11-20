@@ -10,3 +10,23 @@ description: >-
   generated per account by the engine. GLPI's config, files and marketplace
   live on a named volume. A health-check gate makes the deploy wait until the
   install has finished and Apache answers.
+
+  LOGIN. A new GLPI database has four built-in accounts whose passwords are
+  published (glpi/glpi Super-Admin, tech/tech, normal/normal,
+  post-only/postonly), which anyone with the URL could use and nobody
+  deploying it is told. So the engine generates a login (`credentials:` below,
+  returned by GET /projects/{name}/app-credentials) and the app service reads
+  it from app-credentials.env. Its command, files/panelalpha/glpi-login.sh,
+  runs after the image's entrypoint has installed or updated the schema and
+  then execs the image's own supervisord: while glpi still has its default
+  password, GLPI's own `bin/console user:reset_password` sets the engine's
+  password and the account takes the engine's username; tech, normal and
+  post-only are disabled with `bin/console user:disable` while they still
+  have theirs (the check is GLPI's User::checkDefaultPasswords). None of the
+  default logins signs in any more, and an account whose password was changed
+  in GLPI is never touched.
+credentials:
+  login_path: /
+  fields:
+    GLPI_ADMIN_USER: {kind: username}
+    GLPI_ADMIN_PASSWORD: {kind: password}
