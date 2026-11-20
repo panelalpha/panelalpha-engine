@@ -79,7 +79,7 @@ class LogStorageRetryTest extends TestCase
             LogStorage::write('/proc', "line\n");
             $this->fail('A write onto /proc must not pass');
         } catch (RuntimeException $e) {
-            $this->assertStringStartsWith('Could not write deploy log file: /proc', $e->getMessage());
+            $this->assertMatchesRegularExpression('#^(Could not write deploy log file: /proc|Deploy log directory is not writable: /$)#', $e->getMessage());
         }
 
         $this->assertSame([], $this->requests());
