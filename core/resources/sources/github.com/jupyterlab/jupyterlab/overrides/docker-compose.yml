@@ -6,9 +6,11 @@ services:
     restart: unless-stopped
     ports:
       - "8888:8888"
-    environment:
-      # Optional; empty means JupyterLab generates a token and logs it.
-      JUPYTER_TOKEN: ${JUPYTER_TOKEN:-}
+    env_file:
+      # JUPYTER_TOKEN, the token the engine generates (the project's own
+      # JUPYTER_TOKEN env var wins). Without it JupyterLab makes a new random
+      # token on every start and prints it only to the log.
+      - ../.panelalpha/app-credentials.env
     volumes:
       # Notebooks, ~/.local installs and settings survive a redeploy.
       - jupyter-home:/home/jovyan

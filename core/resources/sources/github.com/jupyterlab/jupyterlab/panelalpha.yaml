@@ -6,5 +6,15 @@ description: >-
   listens. This recipe runs the official Jupyter Docker Stacks image of the
   current release (quay.io/jupyter/minimal-notebook:lab-4.6.4) on port 8888
   with the notebook user's home on a named volume. Login is JupyterLab's own
-  token page: set JUPYTER_TOKEN to choose the token, otherwise the server
-  generates one and prints it in the app log.
+  token page. Left alone, the server makes a new random token on every start
+  and prints it only to the app log, which nobody deploying it can read. So the
+  engine generates the token (`credentials:` below, returned by GET
+  /projects/{name}/app-credentials; the project's own JUPYTER_TOKEN env var
+  wins) and the server reads it from app-credentials.env as JUPYTER_TOKEN, its
+  own variable: the same token on every start, and no other token signs in. A
+  password set on the login page is JupyterLab's own (hashed into
+  ~/.jupyter on the volume) and is kept; the token keeps working beside it.
+credentials:
+  login_path: /login
+  fields:
+    JUPYTER_TOKEN: {kind: password}
