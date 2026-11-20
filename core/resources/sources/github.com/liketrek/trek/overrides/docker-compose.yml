@@ -10,10 +10,13 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp:noexec,nosuid,size=128m
-    # The project's env vars (ENCRYPTION_KEY, ALLOWED_ORIGINS, OIDC_*, ...).
     env_file:
+      # The project's env vars (ENCRYPTION_KEY, ALLOWED_ORIGINS, OIDC_*, ...).
       - path: .env
         required: false
+      # ADMIN_EMAIL / ADMIN_PASSWORD, the login the engine generates: TREK's
+      # first-run seed makes that admin while the users table is empty.
+      - ../.panelalpha/app-credentials.env
     environment:
       NODE_ENV: production
       PORT: "3000"

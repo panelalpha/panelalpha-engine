@@ -14,6 +14,20 @@ description: >-
   check, leaves the capability pair out so Docker's defaults apply, and keeps
   /app/data (SQLite database, the auto-generated encryption key) and
   /app/uploads on named volumes. Every other setting (ENCRYPTION_KEY,
-  ALLOWED_ORIGINS, APP_URL, OIDC_*, ADMIN_EMAIL/ADMIN_PASSWORD, ...) comes from
-  the project's env vars; nothing is set by default, so first-run behaviour is
-  upstream's.
+  ALLOWED_ORIGINS, APP_URL, OIDC_*, ...) comes from the project's env vars;
+  nothing is set by default.
+
+  On an empty database TREK seeds an admin; without ADMIN_EMAIL and
+  ADMIN_PASSWORD that is admin@trek.local with a random password printed
+  only to the container log, so a plain deploy came up on a login form nobody
+  deploying it could get past. So the engine generates that login
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials)
+  and the app reads it from app-credentials.env: TREK's own seed creates the
+  admin from it only while the users table is empty, so a password changed in
+  TREK is never overwritten. As upstream does for that seed, TREK asks for a
+  new password after the first sign-in.
+credentials:
+  login_path: /login
+  fields:
+    ADMIN_EMAIL: {kind: email}
+    ADMIN_PASSWORD: {kind: password}
