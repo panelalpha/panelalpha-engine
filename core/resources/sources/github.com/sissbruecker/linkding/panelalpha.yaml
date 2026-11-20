@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  linkding, a bookmark manager (Django, SQLite under /etc/linkding/data) on
+  port 9090. The repository's docker-compose.yml runs the published
+  sissbruecker/linkding image with its data on a ./data bind mount and its
+  settings from .env (.env.sample). linkding has no sign-up page and no
+  default user: its first user comes from LD_SUPERUSER_NAME /
+  LD_SUPERUSER_PASSWORD or a `manage.py createsuperuser` in the container, so
+  a plain deploy came up on a login form nobody holds an account for.
+
+  So the engine generates that login (`credentials:` below, returned by GET
+  /projects/{name}/app-credentials) and the service reads it from
+  app-credentials.env: linkding's own create_initial_superuser makes the user
+  on boot only while no user of that name exists, so a password changed in
+  linkding is never overwritten. Two other changes are needed for that login
+  to work and last. The data moves to a named volume, because ./data sits in
+  ~/project, which every redeploy wipes (the bookmarks and a changed password
+  went with it). And LD_CSRF_TRUSTED_ORIGINS defaults to the public address:
+  linkding sets no proxy SSL header, so Django compares the browser's https
+  Origin with the plain http request and refuses the login form with a 403.
+  The image, the port and every LD_* setting from .env stay upstream's.
+credentials:
+  login_path: /login/
+  fields:
+    LD_SUPERUSER_NAME: {kind: username}
+    LD_SUPERUSER_PASSWORD: {kind: password}

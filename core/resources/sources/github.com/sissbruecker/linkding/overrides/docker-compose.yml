@@ -1,0 +1,26 @@
+# Compose-replace: upstream's docker-compose.yml with its ./data bind mount (inside
+# ~/project, which every redeploy wipes) on a named volume, the engine's login, and
+# the public address as a trusted CSRF origin.
+services:
+  linkding:
+    image: sissbruecker/linkding:latest
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    env_file:
+      # The project's env vars (.env.sample's LD_* settings).
+      - path: .env
+        required: false
+      # LD_SUPERUSER_NAME / LD_SUPERUSER_PASSWORD, the login the engine generates:
+      # create_initial_superuser makes that user on boot unless it exists.
+      - ../.panelalpha/app-credentials.env
+    environment:
+      # Django checks a form's Origin against the request, which reaches linkding
+      # over plain http behind the webserver: without this the login is a 403.
+      LD_CSRF_TRUSTED_ORIGINS: ${LD_CSRF_TRUSTED_ORIGINS:-${PA_PUBLIC_URL}}
+    volumes:
+      # SQLite database, secret key, favicons, previews, assets.
+      - data:/etc/linkding/data
+
+volumes:
+  data: {}
