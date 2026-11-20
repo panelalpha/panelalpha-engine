@@ -6,6 +6,7 @@ use App\Lib\Deploy\Health\CheckRunner;
 use App\Lib\Deploy\Health\ProbedResponse;
 use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\HealthProbeLandingFixtures;
 use Tests\Support\TestNetwork;
 
 /**
@@ -15,20 +16,7 @@ use Tests\Support\TestNetwork;
  */
 class HealthProbeLandingTest extends TestCase
 {
-    /** @var list<array{0: resource, 1: string}> */
-    private array $servers = [];
-
-    protected function tearDown(): void
-    {
-        foreach ($this->servers as [$process, $dir]) {
-            proc_terminate($process);
-            proc_close($process);
-            array_map('unlink', glob($dir . '/*') ?: []);
-            rmdir($dir);
-        }
-        $this->servers = [];
-        parent::tearDown();
-    }
+    use HealthProbeLandingFixtures;
 
     private function serve(string $router, array $files = []): int
     {
@@ -158,13 +146,5 @@ class HealthProbeLandingTest extends TestCase
         // An outside visitor, never loopback: apps treat a local client as trusted.
         $this->assertNotFalse(filter_var($result['body'], FILTER_VALIDATE_IP));
         $this->assertStringStartsNotWith('127.', $result['body']);
-    }
-
-    /** A probe line from before the path field still parses, as the root. */
-    public function test_a_line_without_the_path_field_reads_as_the_root(): void
-    {
-        $line = "8000\thttp\t200 0.01\t\t" . base64_encode('hi');
-
-        $this->assertSame('/', AppHealth::parseProbeOutput($line, [8000])[0]['path']);
     }
 }

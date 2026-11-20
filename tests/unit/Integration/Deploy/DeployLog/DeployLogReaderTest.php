@@ -4,6 +4,7 @@ namespace Tests\Integration\Deploy\DeployLog;
 
 use App\Lib\Deploy\DeployLog\DeployLogReader;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\DeployLogReaderFixtures;
 
 /**
  * Parsed views over one deploy's JSON-lines log.
@@ -16,21 +17,7 @@ use PHPUnit\Framework\TestCase;
  */
 class DeployLogReaderTest extends TestCase
 {
-    private string $path = '';
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-        $this->path = sys_get_temp_dir() . '/pa-log-' . bin2hex(random_bytes(8)) . '.log';
-    }
-
-    protected function tearDown(): void
-    {
-        if (is_file($this->path)) {
-            unlink($this->path);
-        }
-        parent::tearDown();
-    }
+    use DeployLogReaderFixtures;
 
     private function write(string ...$lines): DeployLogReader
     {
@@ -190,14 +177,5 @@ class DeployLogReaderTest extends TestCase
         $this->assertSame(0, $line['ts']);
         $this->assertNull($line['stage']);
         $this->assertNotSame('', $line['level']);
-    }
-
-    public function test_a_log_that_is_not_there_reads_as_empty(): void
-    {
-        $reader = new DeployLogReader($this->path);
-
-        $this->assertSame([], $reader->entries());
-        $this->assertSame([], $reader->tail(10));
-        $this->assertSame(['lines' => [], 'next_offset' => 0, 'more' => false], $reader->page());
     }
 }

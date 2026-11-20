@@ -15,18 +15,6 @@ use PHPUnit\Framework\TestCase;
  */
 class ShellQuoteTest extends TestCase
 {
-    public function test_an_ordinary_value_is_wrapped(): void
-    {
-        $this->assertSame("'npm run build'", ShellQuote::of('npm run build'));
-    }
-
-    public function test_a_value_containing_a_quote_cannot_escape_it(): void
-    {
-        // The standard sh idiom: close, escaped quote, reopen. The result is
-        // still one argument.
-        $this->assertSame("'it'\\''s'", ShellQuote::of("it's"));
-    }
-
     public function test_an_injection_attempt_stays_one_argument(): void
     {
         $quoted = ShellQuote::of("'; rm -rf /; echo '");
@@ -40,11 +28,6 @@ class ShellQuoteTest extends TestCase
         foreach (['$HOME', '`id`', '$(id)', 'a && b', 'a | b', 'a > b', '*'] as $value) {
             $this->assertSame($value, $this->unquote(ShellQuote::of($value)), $value);
         }
-    }
-
-    public function test_an_empty_value_is_still_an_argument(): void
-    {
-        $this->assertSame("''", ShellQuote::of(''));
     }
 
     /** What sh itself would hand the command, so the assertions are about behaviour. */

@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Integration\System\Privileged\Scripts;
+namespace Tests\Unit\System\Privileged\Scripts;
 
 use App\System\Privileged\InvalidArgument;
 use App\System\Privileged\RootScripts;

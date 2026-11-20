@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Integration\System\Privileged;
+namespace Tests\Unit\System\Privileged;
 
 use App\Lib\Deploy\Dind\AccountImage;
 use App\Lib\Deploy\Dind\DindImageStore;
@@ -13,6 +13,7 @@ use App\System\Privileged\RootScripts;
 use App\System\Privileged\Scripts\ImagePipelines;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\ScriptsLinesBrokerCases;
 use Tests\Support\TestNetwork;
 
 final class ScriptsLinesBrokerTest extends TestCase

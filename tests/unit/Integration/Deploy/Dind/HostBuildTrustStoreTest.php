@@ -3,9 +3,9 @@
 namespace Tests\Integration\Deploy\Dind;
 
 use App\Lib\Deploy\Dind\DindHostBuilder;
-use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Platform\Runtime\Images;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\HostBuildTrustStoreFixtures;
 use Tests\Support\LocalRoot;
 
 /**
@@ -33,98 +33,7 @@ use Tests\Support\LocalRoot;
  */
 class HostBuildTrustStoreTest extends TestCase
 {
-    private const HOST_BUNDLE = '/etc/ssl/certs/ca-certificates.crt';
-
-    private const CONTAINER_BUNDLE = '/etc/ssl/certs/ca-certificates.crt';
-
-    private function account(): EngineAccount
-    {
-        return new EngineAccount('koel', '/home/koel', '1001:1002');
-    }
-
-    /** @return array<string, mixed> */
-    private function build(?string $caBundle): array
-    {
-        return LocalRoot::build((new DindHostBuilder(null, $caBundle))->nodeBuildArgv(
-            $this->account(),
-            Images::NODE_IMAGE,
-            'pnpm install --frozen-lockfile',
-            'pnpm build'
-        ));
-    }
-
-    public function test_the_bundle_is_mounted_read_only(): void
-    {
-        $this->assertContains(
-            self::HOST_BUNDLE.':'.self::CONTAINER_BUNDLE.':ro',
-            $this->build(self::HOST_BUNDLE)['mounts'],
-            'the build needs the host bundle, and has no business writing to it'
-        );
-    }
-
-    /**
-     * The mount on its own does nothing: OpenSSL's default CAfile in that
-     * image is `/usr/lib/ssl/cert.pem`, which is absent, and its default
-     * CApath wants `c_rehash` symlinks the bundle does not carry. The
-     * variable is also what openssl-probe reads, which is how
-     * rustls-native-certs -- and so Vite+ -- finds its roots.
-     */
-    public function test_ssl_cert_file_names_the_mounted_path(): void
-    {
-        $this->assertSame(self::CONTAINER_BUNDLE, $this->build(self::HOST_BUNDLE)['environment']['SSL_CERT_FILE'] ?? null);
-    }
-
-    /**
-     * Declared in one place so they cannot drift apart. A variable pointing
-     * at a path nothing mounted is the same failure with a longer diagnosis.
-     */
-    public function test_the_variable_points_at_a_path_that_is_actually_mounted(): void
-    {
-        $build = $this->build(self::HOST_BUNDLE);
-
-        $declared = $build['environment']['SSL_CERT_FILE'] ?? null;
-        $mounted = [];
-        foreach ($build['mounts'] as $mount) {
-            $parts = explode(':', $mount);
-            if (isset($parts[1])) {
-                $mounted[] = $parts[1];
-            }
-        }
-
-        $this->assertNotNull($declared, 'SSL_CERT_FILE must be declared');
-        $this->assertContains($declared, $mounted);
-    }
-
-    /**
-     * A host with no bundle contributes neither half, rather than mounting
-     * something that is not there -- `docker run -v` on a missing path
-     * creates a *directory*, and a directory where OpenSSL wants a file is a
-     * worse failure than the one being fixed.
-     */
-    public function test_a_host_without_a_bundle_changes_nothing(): void
-    {
-        $build = $this->build('');
-
-        $this->assertArrayNotHasKey('SSL_CERT_FILE', $build['environment']);
-        $this->assertNotContains(self::CONTAINER_BUNDLE, $build['mounts']);
-        // And the build itself is still built.
-        $this->assertStringContainsString('pnpm build', $build['script']);
-    }
-
-    /** A recipe that sets its own still wins: caller env is applied last. */
-    public function test_a_recipe_may_override_it(): void
-    {
-        $build = LocalRoot::build((new DindHostBuilder(null, self::HOST_BUNDLE))->nodeBuildArgv(
-            $this->account(),
-            Images::NODE_IMAGE,
-            'pnpm install',
-            'pnpm build',
-            ['SSL_CERT_FILE' => '/app/certs/custom.pem']
-        ));
-
-        $this->assertSame('/app/certs/custom.pem', $build['environment']['SSL_CERT_FILE'] ?? null);
-        $this->assertContains(self::HOST_BUNDLE.':'.self::CONTAINER_BUNDLE.':ro', $build['mounts']);
-    }
+    use HostBuildTrustStoreFixtures;
 
     /** The sandboxing this sits inside is not loosened to make room for it. */
     public function test_the_sandbox_is_intact(): void

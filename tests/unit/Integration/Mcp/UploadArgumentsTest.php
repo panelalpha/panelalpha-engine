@@ -2,11 +2,11 @@
 
 namespace Tests\Integration\Mcp;
 
-use App\Lib\Http\OutboundUrl;
 use App\Mcp\Tools\Api\UploadArguments;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\TestNetwork;
+use Tests\Support\UploadArgumentsFixtures;
 
 /**
  * A tool call is JSON, so a multipart file field has to arrive as something
@@ -15,36 +15,7 @@ use Tests\Support\TestNetwork;
  */
 class UploadArgumentsTest extends TestCase
 {
-    /** @var array<int, string> */
-    private array $cleanup = [];
-
-    /** The URL's address is checked first; example.com answers a fixed public address, not the test host's DNS. */
-    protected function setUp(): void
-    {
-        parent::setUp();
-        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'example.com' ? [TestNetwork::routable(34)] : []);
-    }
-
-    protected function tearDown(): void
-    {
-        OutboundUrl::setResolverForTests(null);
-        foreach ($this->cleanup as $path) {
-            @unlink($path);
-        }
-        parent::tearDown();
-    }
-
-    public function test_the_four_virtual_arguments_stand_in_for_one_binary_field(): void
-    {
-        $this->assertSame(
-            ['file_name', 'file_contents', 'file_encoding', 'file_url'],
-            UploadArguments::virtualNames('file')
-        );
-        $this->assertSame(
-            ['file_name', 'file_contents', 'file_encoding', 'file_url'],
-            array_map(fn (array $d): string => $d[0], UploadArguments::describe('file'))
-        );
-    }
+    use UploadArgumentsFixtures;
 
     public function test_base64_contents_become_a_file_and_leave_only_the_endpoint_fields(): void
     {
@@ -103,24 +74,6 @@ class UploadArgumentsTest extends TestCase
         $this->cleanup[] = $files['file']->getPathname();
 
         $this->assertSame('site.zip', $files['file']->getClientOriginalName());
-    }
-
-    public function test_contents_and_url_are_exactly_one(): void
-    {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('exactly one of file_contents or file_url');
-
-        UploadArguments::resolve(['file_name' => 'a.zip'], ['file']);
-    }
-
-    public function test_both_contents_and_url_is_refused_too(): void
-    {
-        $this->expectException(InvalidArgumentException::class);
-
-        UploadArguments::resolve(
-            ['file_name' => 'a.zip', 'file_contents' => 'YQ==', 'file_url' => 'https://example.com/a.zip'],
-            ['file']
-        );
     }
 
     public function test_invalid_base64_is_named_as_such(): void

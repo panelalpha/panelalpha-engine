@@ -3,11 +3,11 @@
 namespace Tests\Integration\Deploy\Platform;
 
 use App\Lib\Deploy\Compose\DeployCompose;
-use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\SourceRecipes;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\NtfySourceRecipeFixtures;
 
 /**
  * ntfy ships three Dockerfiles and detection built the wrong one.
@@ -30,20 +30,7 @@ use Symfony\Component\Yaml\Yaml;
  */
 class NtfySourceRecipeTest extends TestCase
 {
-    private const URL = 'https://github.com/binwiederhier/ntfy';
-
-    public function test_the_repository_url_resolves_to_the_ntfy_recipe(): void
-    {
-        $recipe = SourceRecipes::for(self::URL); // @phpstan-ignore-line — resolves through the shipped tree
-
-        $this->assertNotNull($recipe, 'no recipe found for ' . self::URL);
-        $this->assertSame('dockerfile', $recipe->strategy);
-        $this->assertSame('dockerfile', $recipe->runtime);
-        // 80 is what both Dockerfiles EXPOSE — the binary's `serve` default is
-        // `:80`. The hosting proxy owns 80 on the host, so the compose file
-        // publishes 8080:80.
-        $this->assertSame(80, $recipe->port);
-    }
+    use NtfySourceRecipeFixtures;
 
     /**
      * The whole reason the recipe exists: build the source file, not the
@@ -87,46 +74,6 @@ class NtfySourceRecipeTest extends TestCase
         // Not the `build: .` shorthand: a named Dockerfile forces the map.
         $this->assertSame('.', $service['build']['context']);
         $this->assertSame('Dockerfile-build', $service['build']['dockerfile']);
-    }
-
-    /**
-     * A deploy records the recipe's id and resolves the manifest back through
-     * the registry on every later read; the id this recipe inherits — the
-     * generic dockerfile platform, as endurain and pyfedi also use — has to
-     * keep answering.
-     */
-    public function test_the_registry_resolves_the_inherited_id(): void
-    {
-        $recipe = SourceRecipes::for(self::URL);
-        $this->assertNotNull($recipe);
-        $this->assertSame('dockerfile', $recipe->id);
-        $this->assertNotNull(PlatformRegistry::find($recipe->id));
-    }
-
-    /** No `detect`: the path chose this recipe, and nothing should re-decide. */
-    public function test_it_is_found_by_path_alone(): void
-    {
-        $recipe = SourceRecipes::for(self::URL);
-
-        $this->assertNotNull($recipe);
-        $this->assertSame([], $recipe->detect);
-    }
-
-    /**
-     * The image ENTRYPOINT is a bare `ntfy`, and the binary has subcommands:
-     * with no arguments it prints help and exits 0. The repository's own
-     * docker-compose.yml passes `command: serve`; this is the same line as an
-     * override layer, because the generated compose is the dockerfile
-     * strategy's and only needs one field added to it.
-     */
-    public function test_the_override_tells_the_binary_to_serve(): void
-    {
-        $config = $this->appConfig();
-        $this->assertNotNull($config);
-        $this->assertSame(\App\Lib\Deploy\Platform\AppConfig\AppConfig::COMPOSE_OVERRIDE, $config->composeMode());
-
-        $compose = Yaml::parse((string) $config->compose());
-        $this->assertSame(['serve'], $compose['services']['app']['command']);
     }
 
     /**
@@ -180,15 +127,6 @@ class NtfySourceRecipeTest extends TestCase
                 "{$dir}/ is copied after the build layer"
             );
         }
-    }
-
-    private function appConfig(): ?\App\Lib\Deploy\Platform\AppConfig\AppConfig
-    {
-        return \App\Lib\Deploy\Platform\AppConfig\AppConfigDirectory::read(
-            new \App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource(),
-            SourceRecipes::defaultDirectory() . '/github.com/binwiederhier/ntfy',
-            true
-        );
     }
 
     /** Somewhere to describe a manifest against, with no Dockerfile inside. */

@@ -4,24 +4,15 @@ namespace Tests\Integration\System;
 
 use App\System;
 use App\System\Services\Webserver;
-use App\System\Services\Webserver\NginxProxy;
 use App\System\Services\Webserver\WebserverInterface;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 use Tests\Support\LocalRoot;
+use Tests\Support\WebserverFixtures;
 
 class WebserverTest extends TestCase
 {
-    private static ?string $engineDir = null;
-
-    protected function tearDown(): void
-    {
-        if (self::$engineDir !== null) {
-            rmdir(self::$engineDir);
-            self::$engineDir = null;
-        }
-        parent::tearDown();
-    }
+    use WebserverFixtures;
 
     /** The broker checks the engine directory exists before it names a script in it. */
     public static function engineDir(): string
@@ -46,19 +37,6 @@ class WebserverTest extends TestCase
         } finally {
             putenv('PA_ROOT_LOCAL_ROOTS');
         }
-    }
-
-    public function test_nginx_proxy_vhost_path_is_hardcoded_not_current_driver(): void
-    {
-        $system = new System();
-        $driver = new NginxProxy($system);
-
-        $this->assertSame(
-            '/opt/panelalpha/shared-hosting/webserver-config/nginx-proxy/vhosts',
-            $driver->domainsConfigsDirPath()
-        );
-        $this->assertFalse($driver->domainConfigExists('no-such-domain.example'));
-        $this->assertFalse($system->webserver()->domainExists('no-such-domain.example'));
     }
 
     public function test_run_change_webserver_script_without_serial(): void

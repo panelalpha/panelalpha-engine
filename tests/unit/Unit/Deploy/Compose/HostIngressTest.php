@@ -1,0 +1,170 @@
+<?php
+
+namespace Tests\Unit\Deploy\Compose;
+
+use App\Lib\Deploy\Compose\ComposeHarden;
+use PHPUnit\Framework\TestCase;
+use Tests\Support\HostIngressFixtures;
+
+/**
+ * A compose file written for a host that already runs Traefik: an external
+ * network compose cannot find in an account, and a proxy whose :80 port
+ * detection would otherwise pick.
+ */
+final class HostIngressTest extends TestCase
+{
+    use HostIngressFixtures;
+
+    public function test_external_networks_are_removed_from_the_top_level(): void
+    {
+        $compose = ComposeHarden::withoutHostIngress(self::traefikStack())['compose'];
+
+        $this->assertSame(['backend' => ['driver' => 'bridge']], $compose['networks']);
+    }
+
+    public function test_external_networks_are_removed_from_list_and_map_forms(): void
+    {
+        $services = ComposeHarden::withoutHostIngress(self::traefikStack())['compose']['services'];
+
+        $this->assertSame(['backend'], $services['web']['networks']);
+        $this->assertSame(['backend' => ['aliases' => ['jobs']]], $services['worker']['networks']);
+        // Nothing left: the key goes, so it joins the default network.
+        $this->assertArrayNotHasKey('networks', $services['edge']);
+    }
+
+    public function test_a_file_with_no_external_network_is_untouched(): void
+    {
+        $compose = [
+            'services' => ['web' => ['image' => 'acme/web', 'networks' => ['backend']]],
+            'networks' => ['backend' => ['external' => false]],
+        ];
+
+        $result = ComposeHarden::withoutHostIngress($compose);
+
+        $this->assertSame($compose, $result['compose']);
+        $this->assertSame([], $result['dropped']);
+    }
+
+    public function test_the_proxy_service_and_references_to_it_are_dropped(): void
+    {
+        $result = ComposeHarden::withoutHostIngress(self::traefikStack());
+        $services = $result['compose']['services'];
+
+        $this->assertArrayNotHasKey('traefik', $services);
+        $this->assertSame(['db'], $services['web']['depends_on']);
+        $this->assertArrayNotHasKey('depends_on', $services['worker']);
+        $this->assertCount(3, $result['dropped']);
+    }
+
+    public function test_a_list_form_routing_label_becomes_expose(): void
+    {
+        $compose = ['services' => [
+            'traefik' => ['image' => 'traefik:v3', 'ports' => ['80:80']],
+            'web' => ['build' => '.', 'labels' => [
+                'traefik.enable=true',
+                'traefik.http.services.web.loadbalancer.server.port=3000',
+                'traefik.http.services.alt.loadbalancer.server.port=${PORT}',
+            ]],
+        ]];
+
+        $web = ComposeHarden::withoutHostIngress($compose)['compose']['services']['web'];
+
+        $this->assertSame(['3000'], $web['expose']);
+        $this->assertContains('traefik.enable=true', $web['labels']);
+    }
+
+    public function test_a_routed_port_already_published_is_not_duplicated(): void
+    {
+        $compose = ['services' => [
+            'traefik' => ['image' => 'traefik:v3'],
+            'web' => ['build' => '.', 'ports' => ['8080:3000'], 'labels' => [
+                'traefik.http.services.web.loadbalancer.server.port=3000',
+            ]],
+        ]];
+
+        $this->assertArrayNotHasKey('expose', ComposeHarden::withoutHostIngress($compose)['compose']['services']['web']);
+    }
+
+    public function test_routing_labels_are_left_alone_when_no_proxy_is_dropped(): void
+    {
+        $compose = ['services' => [
+            'web' => ['build' => '.', 'labels' => ['traefik.http.services.web.loadbalancer.server.port=3000']],
+        ]];
+
+        $this->assertSame($compose, ComposeHarden::withoutHostIngress($compose)['compose']);
+    }
+
+    public function test_other_proxy_images_are_recognised(): void
+    {
+        foreach ([
+            'jwilder/nginx-proxy:alpine',
+            'nginxproxy/nginx-proxy',
+            'lucaslorentz/caddy-docker-proxy:ci-alpine',
+            'docker.io/library/traefik:v2.11@sha256:abc',
+        ] as $image) {
+            $compose = ['services' => ['proxy' => ['image' => $image], 'web' => ['image' => 'acme/web']]];
+
+            $this->assertArrayNotHasKey('proxy', ComposeHarden::withoutHostIngress($compose)['compose']['services'], $image);
+        }
+    }
+
+    /**
+     * not-th.re: Traefik as the stack's own path router, from a file provider
+     * with no Docker socket, and a gate that only reuses the image. Dropping
+     * them left nothing serving behind a successful deploy.
+     */
+    public function test_a_traefik_that_only_routes_the_stacks_own_paths_is_kept(): void
+    {
+        $compose = ['services' => [
+            'proxy' => [
+                'image' => 'docker.io/library/traefik:v3.7.13',
+                'command' => ['--providers.file.directory=/etc/traefik/dynamic', '--entrypoints.web.address=:80'],
+                'ports' => ['8080:80'],
+                'volumes' => ['./traefik:/etc/traefik/dynamic:ro'],
+            ],
+            'ready' => ['image' => 'traefik:v3.7.13', 'entrypoint' => ['/bin/sh', '-c', 'exit 0']],
+            'gate' => ['image' => 'traefik:v3', 'command' => 'sh -c "exit 0"'],
+            'api' => ['image' => 'acme/api'],
+            'ui' => ['image' => 'acme/ui'],
+        ]];
+
+        $result = ComposeHarden::withoutHostIngress($compose);
+
+        $this->assertSame($compose, $result['compose']);
+        $this->assertSame([], $result['dropped']);
+    }
+
+    public function test_a_traefik_that_discovers_containers_is_dropped_and_lost_path_routing_is_named(): void
+    {
+        foreach ([
+            ['command' => ['--providers.docker=true', '--providers.file.directory=/x']],
+            ['command' => '--providers.file.filename=/x.yml', 'volumes' => ['/var/run/docker.sock:/var/run/docker.sock:ro']],
+            ['environment' => ['TRAEFIK_PROVIDERS_DOCKER' => 'true']],
+            ['command' => 'traefik --providers.swarm'],
+        ] as $config) {
+            $compose = ['services' => [
+                'traefik' => ['image' => 'traefik:v3'] + $config,
+                'api' => ['image' => 'acme/api', 'labels' => ['traefik.http.routers.api.rule=PathPrefix(`/api`)']],
+                'ui' => ['image' => 'acme/ui', 'labels' => ['traefik.http.routers.ui.rule' => 'Host(`x`)']],
+            ]];
+
+            $result = ComposeHarden::withoutHostIngress($compose);
+
+            $this->assertArrayNotHasKey('traefik', $result['compose']['services'], json_encode($config));
+            $this->assertStringContainsString('routed request paths between services (api)', $result['dropped'][1]);
+        }
+    }
+
+    public function test_an_ordinary_nginx_or_a_lone_proxy_is_kept(): void
+    {
+        $compose = ['services' => [
+            'nginx' => ['image' => 'nginx:alpine'],
+            'proxy' => ['image' => 'acme/nginx-proxy'],
+            'whoami' => ['image' => 'traefik/whoami'],
+        ]];
+        $this->assertSame($compose, ComposeHarden::withoutHostIngress($compose)['compose']);
+
+        $alone = ['services' => ['traefik' => ['image' => 'traefik:v3']]];
+        $this->assertSame($alone, ComposeHarden::withoutHostIngress($alone)['compose']);
+    }
+}

@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Integration\System\Privileged;
+namespace Tests\Support;
 
 use App\Lib\Deploy\CacheManager\BuildCacheBuilder;
 use App\Lib\Deploy\CacheManager\CacheRegistry;
@@ -11,7 +11,6 @@ use App\Lib\Deploy\Dind\TenantNetwork;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\ProjectCache;
 use App\System\Privileged;
-use Tests\Support\TestNetwork;
 
 /** Broker requests for the cases in host-cases.json, which the broker's own tests plan. */
 final class HostBrokerCases

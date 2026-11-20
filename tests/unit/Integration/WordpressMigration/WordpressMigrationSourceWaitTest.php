@@ -2,8 +2,6 @@
 
 namespace Tests\Integration\WordpressMigration;
 
-use App\Models\WordpressMigration;
-use App\Support\JobBudget;
 use App\System\Project\PhpHosting\WordPress\Migration\CurlSourceHttpClient;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceRequestAborted;
 use PHPUnit\Framework\TestCase;
@@ -67,13 +65,6 @@ class WordpressMigrationSourceWaitTest extends TestCase
         } catch (SourceRequestAborted) {
             $this->assertLessThan(self::SLOW_SECONDS, microtime(true) - $started);
         }
-    }
-
-    public function test_a_source_call_may_outlast_the_stale_window_but_not_the_job(): void
-    {
-        $this->assertSame(15, WordpressMigration::STALE_MINUTES);
-        $this->assertGreaterThan(WordpressMigration::STALE_MINUTES * 60, CurlSourceHttpClient::REQUEST_TIMEOUT_SECONDS);
-        $this->assertLessThan(JobBudget::SECONDS, CurlSourceHttpClient::REQUEST_TIMEOUT_SECONDS);
     }
 
     private function clientOnSlowServer(?string &$url): CurlSourceHttpClient

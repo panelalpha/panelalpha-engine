@@ -5,6 +5,7 @@ namespace Tests\Integration\Ssl;
 use App\Lib\Ssl\TlsHandshake;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\TestNetwork;
+use Tests\Support\TlsHandshakeFixtures;
 
 /**
  * A real handshake against `openssl s_server`, which serves one certificate by
@@ -12,25 +13,9 @@ use Tests\Support\TestNetwork;
  */
 class TlsHandshakeTest extends TestCase
 {
+    use TlsHandshakeFixtures;
+
     private const NAMED = 'shop.example.com';
-
-    /** @var resource|null */
-    private $server = null;
-
-    private string $dir = '';
-
-    protected function tearDown(): void
-    {
-        if (is_resource($this->server)) {
-            proc_terminate($this->server);
-            proc_close($this->server);
-        }
-        if ($this->dir !== '') {
-            array_map('unlink', glob($this->dir.'/*') ?: []);
-            @rmdir($this->dir);
-        }
-        parent::tearDown();
-    }
 
     public function test_the_name_is_sent_as_sni_and_decides_the_certificate(): void
     {
@@ -51,13 +36,6 @@ class TlsHandshakeTest extends TestCase
 
         $this->assertNull($result['leaf']);
         $this->assertNotSame('', (string) $result['error']);
-    }
-
-    public function test_an_ipv6_literal_is_bracketed(): void
-    {
-        $this->assertSame('[2001:db8::1]', TlsHandshake::endpoint('2001:db8::1'));
-        $this->assertSame('[2001:db8::1]', TlsHandshake::endpoint('[2001:db8::1]'));
-        $this->assertSame(TestNetwork::public(45), TlsHandshake::endpoint(TestNetwork::public(45)));
     }
 
     private function startServer(): int

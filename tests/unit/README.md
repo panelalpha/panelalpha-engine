@@ -18,12 +18,12 @@ A test is in `Unit/` only when it tests code and nothing else: it extends `PHPUn
 
 The Unit suite takes seconds, and it is safe to run in parallel because nothing in it shares state. The Integration suite takes about an hour one test at a time and about ten minutes with ParaTest on 8 workers. Each ParaTest worker gets its own `sessions/<name>-worker<N>/` cache and its own storage tree under the system temp directory, so workers share no files; a test that writes elsewhere must use a path of its own (a temporary directory), never a fixed one.
 
-The Unit suite must pass in a sandbox that enforces the rule: a read-only tree, no network, and the functions that write files or start processes disabled, so a write that the code under test swallows still fails. A test that passes outside it and fails inside belongs in `Integration/`. Run it from `core/`; PHPUnit cannot create its cache directory inside the sandbox, so make it first:
+The Unit suite must pass in a sandbox that enforces the rule: a read-only tree, no network, and the functions that write files, start processes, open sockets or look up names disabled, so a write that the code under test swallows still fails. A test that passes outside it and fails inside belongs in `Integration/`. Run it from `core/`; PHPUnit cannot create its cache directory inside the sandbox, so make it first:
 
 ```bash
 mkdir -p .phpunit.cache
 docker run --rm --read-only --network none -v "$PWD/..:/app:ro" -w /app/core composer:2 \
-  php -d disable_functions=proc_open,popen,exec,shell_exec,system,passthru,pcntl_exec,fsockopen,stream_socket_client,curl_exec,curl_multi_exec,mail,file_put_contents,mkdir,rmdir,unlink,rename,copy,touch,tempnam,tmpfile,symlink,chmod,chown \
+  php -d disable_functions=proc_open,popen,exec,shell_exec,system,passthru,pcntl_exec,pcntl_fork,fsockopen,pfsockopen,stream_socket_client,stream_socket_server,socket_create,socket_connect,curl_init,curl_exec,curl_multi_exec,mail,dns_get_record,gethostbyname,gethostbynamel,getmxrr,file_put_contents,mkdir,rmdir,unlink,rename,copy,touch,tempnam,tmpfile,symlink,link,chmod,chown,chgrp,lchown,lchgrp \
   vendor/bin/phpunit --testsuite Unit --do-not-cache-result
 ```
 

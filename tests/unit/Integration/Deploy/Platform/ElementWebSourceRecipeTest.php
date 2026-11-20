@@ -3,11 +3,11 @@
 namespace Tests\Integration\Deploy\Platform;
 
 use App\Lib\Deploy\Compose\DeployCompose;
-use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\SourceRecipes;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\ElementWebSourceRecipeFixtures;
 
 /**
  * Element Web is an nx + pnpm monorepo whose application ships its own
@@ -31,20 +31,7 @@ use Symfony\Component\Yaml\Yaml;
  */
 class ElementWebSourceRecipeTest extends TestCase
 {
-    private const URL = 'https://github.com/element-hq/element-web';
-
-    public function test_the_repository_url_resolves_to_the_element_web_recipe(): void
-    {
-        $recipe = SourceRecipes::for(self::URL);
-
-        $this->assertNotNull($recipe, 'no recipe found for ' . self::URL);
-        $this->assertSame('element-web', $recipe->id);
-        $this->assertSame('dockerfile', $recipe->strategy);
-        $this->assertSame('dockerfile', $recipe->runtime);
-        // The port the Dockerfile gives nginx (ELEMENT_WEB_PORT); it has no
-        // EXPOSE of its own, so nothing else could have found it.
-        $this->assertSame(80, $recipe->port);
-    }
+    use ElementWebSourceRecipeFixtures;
 
     /**
      * The Dockerfile lives beside the application, not at the repository
@@ -86,18 +73,6 @@ class ElementWebSourceRecipeTest extends TestCase
     }
 
     /**
-     * The path chose this recipe, so nothing should re-decide: an empty
-     * `detect` is what keeps it out of the priority walk.
-     */
-    public function test_it_is_found_by_path_alone(): void
-    {
-        $recipe = SourceRecipes::for(self::URL);
-
-        $this->assertNotNull($recipe);
-        $this->assertSame([], $recipe->detect);
-    }
-
-    /**
      * The URL outranks the files. At the repository root there is no build or
      * start script for detection to latch onto — which is why this recipe
      * exists — so the same checkout is nameless by files and Element Web by
@@ -119,15 +94,6 @@ class ElementWebSourceRecipeTest extends TestCase
         $this->assertSame('element-web', $bySource['platform']);
         $this->assertSame('dockerfile', $bySource['strategy']);
         $this->assertSame('github.com/element-hq/element-web', $bySource['source_recipe']);
-    }
-
-    /**
-     * A deploy records the recipe id and resolves the manifest back through
-     * the registry on every later read; the id has to keep answering.
-     */
-    public function test_the_registry_resolves_the_recipe_by_its_id(): void
-    {
-        $this->assertNotNull(PlatformRegistry::find('element-web'));
     }
 
     /** Somewhere to describe a manifest against, with no Dockerfile inside. */

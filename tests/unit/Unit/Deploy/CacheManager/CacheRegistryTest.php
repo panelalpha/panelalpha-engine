@@ -1,0 +1,179 @@
+<?php
+
+namespace Tests\Unit\Deploy\CacheManager;
+
+use App\Lib\Deploy\CacheManager\CacheRegistry;
+use App\Lib\Deploy\Dind\DindImageStore;
+use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
+
+/**
+ * What prewarm keeps in panelalpha-cache-registry, and what it removes.
+ */
+class CacheRegistryTest extends TestCase
+{
+    private const BASE = 'http://registry.test';
+
+    /**
+     * @param array<string, array{status: int, headers?: array<string, string>, body?: string}> $routes "METHOD url"
+     * @param list<string> $sent
+     */
+    private function registry(array $routes, array &$sent = []): CacheRegistry
+    {
+        return new CacheRegistry(
+            static function (string $method, string $url, array $headers) use ($routes, &$sent): ?array {
+                $sent[] = "{$method} {$url}";
+                $route = $routes["{$method} {$url}"] ?? null;
+
+                return $route === null ? null : $route + ['headers' => [], 'body' => ''];
+            },
+            self::BASE
+        );
+    }
+
+    public function test_it_lists_every_repository_and_tag(): void
+    {
+        $refs = $this->registry([
+            'GET ' . self::BASE . '/v2/_catalog?n=1000' => ['status' => 200, 'body' => '{"repositories":["node","panelalpha/php","ghcr.io/railwayapp/railpack-builder"]}'],
+            'GET ' . self::BASE . '/v2/node/tags/list' => ['status' => 200, 'body' => '{"name":"node","tags":["22-bookworm-slim","20"]}'],
+            // A repository whose last tag was deleted lists null, not [].
+            'GET ' . self::BASE . '/v2/panelalpha/php/tags/list' => ['status' => 200, 'body' => '{"name":"panelalpha/php","tags":null}'],
+            'GET ' . self::BASE . '/v2/ghcr.io/railwayapp/railpack-builder/tags/list' => ['status' => 200, 'body' => '{"tags":["mise-1"]}'],
+        ])->refs();
+
+        $this->assertSame(['node:22-bookworm-slim', 'node:20', 'ghcr.io/railwayapp/railpack-builder:mise-1'], $refs);
+    }
+
+    public function test_the_catalogue_is_followed_page_by_page(): void
+    {
+        // Registry 3.x answers 400 to n above 1000 and links the next page.
+        $refs = $this->registry([
+            'GET ' . self::BASE . '/v2/_catalog?n=1000' => [
+                'status' => 200,
+                'headers' => ['link' => '</v2/_catalog?last=a&n=1000>; rel="next"'],
+                'body' => '{"repositories":["a"]}',
+            ],
+            'GET ' . self::BASE . '/v2/_catalog?last=a&n=1000' => ['status' => 200, 'body' => '{"repositories":["b"]}'],
+            'GET ' . self::BASE . '/v2/a/tags/list' => ['status' => 200, 'body' => '{"tags":["1"]}'],
+            'GET ' . self::BASE . '/v2/b/tags/list' => ['status' => 200, 'body' => '{"tags":["2"]}'],
+        ])->refs();
+
+        $this->assertSame(['a:1', 'b:2'], $refs);
+    }
+
+    public function test_an_unreadable_registry_is_null_not_empty(): void
+    {
+        // Empty would read as "holds nothing", and nothing would be removed
+        // either way, but the caller has to be able to say it could not look.
+        $this->assertNull($this->registry([])->refs());
+    }
+
+    public function test_a_repository_left_with_no_tags_is_reported_empty(): void
+    {
+        $empty = $this->registry([
+            'GET ' . self::BASE . '/v2/_catalog?n=1000' => ['status' => 200, 'body' => '{"repositories":["node","panelalpha/php","gone"]}'],
+            'GET ' . self::BASE . '/v2/node/tags/list' => ['status' => 200, 'body' => '{"tags":["20"]}'],
+            'GET ' . self::BASE . '/v2/panelalpha/php/tags/list' => ['status' => 200, 'body' => '{"name":"panelalpha/php","tags":null}'],
+            'GET ' . self::BASE . '/v2/gone/tags/list' => ['status' => 200, 'body' => '{"tags":[]}'],
+        ])->emptyRepositories();
+
+        $this->assertSame(['panelalpha/php', 'gone'], $empty);
+    }
+
+    public function test_digest_and_delete_address_the_manifest(): void
+    {
+        $sent = [];
+        $registry = $this->registry([
+            'HEAD ' . self::BASE . '/v2/panelalpha/php/manifests/8.2-pa1' => ['status' => 200, 'headers' => ['docker-content-digest' => 'sha256:abc']],
+            'DELETE ' . self::BASE . '/v2/panelalpha/php/manifests/sha256:abc' => ['status' => 202],
+        ], $sent);
+
+        $this->assertSame('sha256:abc', $registry->digest('panelalpha/php:8.2-pa1'));
+        $this->assertTrue($registry->delete('panelalpha/php:8.2-pa1', 'sha256:abc'));
+        $this->assertNull($registry->digest('panelalpha/php:gone'));
+    }
+
+    /** The accounts' instance answers 405 to a DELETE; tags are removed on the writer. */
+    public function test_by_default_it_talks_to_the_writer(): void
+    {
+        $sent = [];
+        $registry = new CacheRegistry(static function (string $method, string $url) use (&$sent): ?array {
+            $sent[] = "{$method} {$url}";
+
+            return null;
+        });
+
+        $registry->delete('node:20', 'sha256:abc');
+
+        $this->assertSame(['DELETE http://' . DindImageStore::HOST_CACHE_REGISTRY . '/v2/node/manifests/sha256:abc'], $sent);
+    }
+
+    public function test_curl_output_is_read_as_status_headers_and_body(): void
+    {
+        $raw = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nLink: </v2/_catalog?last=b&n=1000>; rel=\"next\"\r\n"
+            . "Docker-Content-Digest: sha256:abc\r\n\r\n{\"repositories\":[\"a\"]}";
+
+        $this->assertSame([
+            'status' => 200,
+            'headers' => [
+                'content-type' => 'application/json',
+                'link' => '</v2/_catalog?last=b&n=1000>; rel="next"',
+                'docker-content-digest' => 'sha256:abc',
+            ],
+            'body' => '{"repositories":["a"]}',
+        ], CacheRegistry::parseResponse($raw));
+        $this->assertSame(202, CacheRegistry::parseResponse("HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n")['status']);
+        $this->assertNull(CacheRegistry::parseResponse(''));
+    }
+
+    public function test_the_tag_listing_reads_digest_and_push_time_per_tag(): void
+    {
+        $root = '/var/lib/registry/docker/registry/v2/repositories';
+        $a = 'sha256:' . str_repeat('a', 64);
+        $b = 'sha256:' . str_repeat('b', 64);
+
+        $tags = CacheRegistry::parseTagListing(
+            "1793504070 {$b} {$root}/ghcr.io/railwayapp/railpack-builder/_manifests/tags/mise-2026.10.14/current/link\n"
+            . "1793528154 {$a} {$root}/panelalpha/php/_manifests/tags/8.2-apache-bookworm-pa20261007/current/link\n"
+            . "stat: can't stat '/x': No such file or directory\n"
+            . "1793528154 sha256:short {$root}/panelalpha/php/_manifests/tags/broken/current/link\n"
+        );
+
+        $this->assertSame([
+            'ghcr.io/railwayapp/railpack-builder:mise-2026.10.14' => ['digest' => $b, 'pushed' => 1793504070],
+            'panelalpha/php:8.2-apache-bookworm-pa20261007' => ['digest' => $a, 'pushed' => 1793528154],
+        ], $tags);
+
+        $argv = CacheRegistry::tagListingArgv();
+        $this->assertTrue(LocalRoot::isRequest($argv));
+        $this->assertSame('docker.registryTagLinks', LocalRoot::action($argv));
+        $this->assertSame([DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER, $root], LocalRoot::values($argv));
+    }
+
+    public function test_only_what_the_catalogue_does_not_keep_is_unwanted(): void
+    {
+        $unwanted = CacheRegistry::unwanted(
+            [
+                'node:22-bookworm-slim' => 'sha256:n22',
+                'node:20' => 'sha256:n20',
+                'panelalpha/php:8.2-pa-old' => 'sha256:old',
+                'panelalpha/php:8.2-pa-new' => 'sha256:new',
+            ],
+            ['node:22-bookworm-slim', 'panelalpha/php:8.2-pa-new']
+        );
+
+        $this->assertSame(['node:20', 'panelalpha/php:8.2-pa-old'], $unwanted);
+    }
+
+    public function test_a_tag_sharing_a_kept_digest_is_never_removed(): void
+    {
+        // Deleting is by digest, so removing `node:22` would take the kept
+        // `node:22-bookworm-slim` with it when both name one image.
+        $unwanted = CacheRegistry::unwanted(
+            ['node:22' => 'sha256:same', 'node:22-bookworm-slim' => 'sha256:same', 'gone:1' => null],
+            ['node:22-bookworm-slim']
+        );
+
+        $this->assertSame([], $unwanted);
+    }
+}

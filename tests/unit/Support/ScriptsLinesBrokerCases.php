@@ -1,12 +1,11 @@
 <?php
 
-namespace Tests\Integration\System\Privileged;
+namespace Tests\Support;
 
 use App\Lib\Deploy\CacheManager\PublishedBaseImage;
 use App\Lib\Deploy\Dind\AccountImage;
 use App\Lib\Deploy\Dind\DindAccountCleanup;
 use App\System\Privileged;
-use Tests\Support\TestNetwork;
 
 /** Broker requests for the cases in scripts-cases.json, which the broker's own tests plan. */
 final class ScriptsLinesBrokerCases

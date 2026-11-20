@@ -7,12 +7,13 @@ use App\System;
 use App\System\AccountContainers;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\AccountContainersUnreadableAnswersFixtures;
 use Tests\Support\FakeProcess;
 
 /** Listings Docker could not give, or gave in a shape the engine does not ask for. */
 class AccountContainersUnreadableAnswersTest extends TestCase
 {
-    private const USERS = '/opt/panelalpha/shared-hosting/users';
+    use AccountContainersUnreadableAnswersFixtures;
 
     public function test_no_labelled_container_means_no_inspect_and_no_running_account(): void
     {
@@ -42,17 +43,6 @@ class AccountContainersUnreadableAnswersTest extends TestCase
             ['bob' => ['runtime' => 'sysbox-runc', 'startedAt' => '2026-10-10T15:00:00Z']],
             (new AccountContainers($system))->running()
         );
-    }
-
-    public function test_a_ps_line_with_missing_fields_is_no_orphan(): void
-    {
-        $orphans = AccountContainers::orphansIn(
-            "half\trunning\nswkorphan\texited\t" . self::USERS . "/swkorphan\n",
-            self::USERS,
-            [],
-        );
-
-        $this->assertSame(['swkorphan'], array_column($orphans, 'name'));
     }
 
     /**

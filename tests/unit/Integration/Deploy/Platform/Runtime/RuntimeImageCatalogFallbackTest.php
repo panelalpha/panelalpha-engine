@@ -7,6 +7,7 @@ use App\Lib\Deploy\CacheManager\PhpBaseImage;
 use App\Lib\Deploy\Platform\Runtime\PhpRuntime;
 use App\Lib\Deploy\Platform\Runtime\RuntimeImageCatalog;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RuntimeImageCatalogFallbackFixtures;
 
 /**
  * What a bad config does.
@@ -31,19 +32,7 @@ use PHPUnit\Framework\TestCase;
  */
 class RuntimeImageCatalogFallbackTest extends TestCase
 {
-    /** @var list<string> */
-    private array $written = [];
-
-    protected function tearDown(): void
-    {
-        RuntimeImageCatalog::useConfig(null);
-        foreach ($this->written as $path) {
-            @unlink($path);
-        }
-        $this->written = [];
-
-        parent::tearDown();
-    }
+    use RuntimeImageCatalogFallbackFixtures;
 
     private function config(string $yaml): void
     {
@@ -51,33 +40,6 @@ class RuntimeImageCatalogFallbackTest extends TestCase
         file_put_contents($path, $yaml);
         $this->written[] = $path;
         RuntimeImageCatalog::useConfig($path);
-    }
-
-    /**
-     * Resolution survives a bad config; the built image does not exist under
-     * one. Both halves are asserted together because leaving only the first
-     * true is the dangerous state: an image built under a name this file no
-     * longer describes is fetched from a registry that never published it.
-     */
-    private function assertPhpStillDeploysWithoutABase(string $why): void
-    {
-        $this->assertSame(PhpRuntime::MINORS, PhpRuntime::minors(), $why);
-        $this->assertSame(PhpRuntime::DEFAULT_MINOR, PhpRuntime::defaultMinor(), $why);
-        $this->assertSame(
-            'php:8.3-' . PhpRuntime::IMAGE_VARIANT,
-            PhpRuntime::imageTag('8.3'),
-            $why
-        );
-        $this->assertNull(PhpBaseImage::repository(), $why);
-        $this->assertNull(PhpBaseImage::stubName(), $why);
-        $this->assertNull(PhpBaseImage::tag('php:8.3-apache-bookworm'), $why);
-    }
-
-    public function test_a_missing_file_falls_back(): void
-    {
-        RuntimeImageCatalog::useConfig('/nonexistent/images.yaml');
-
-        $this->assertPhpStillDeploysWithoutABase('a host with no config file still deploys, without a shared base');
     }
 
     public function test_an_empty_file_falls_back(): void

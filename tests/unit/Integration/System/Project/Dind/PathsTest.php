@@ -13,37 +13,11 @@ use App\System\Project\Dind\Paths;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 use Tests\Support\LocalRoot;
+use Tests\Support\PathsFixtures;
 
 class PathsTest extends TestCase
 {
-    private string $tmpRoot;
-
-    private string $homeRoot;
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-        $this->tmpRoot = sys_get_temp_dir().'/pa-paths-'.bin2hex(random_bytes(4));
-        $this->homeRoot = $this->tmpRoot.'/home';
-    }
-
-    protected function tearDown(): void
-    {
-        $this->removeTree($this->tmpRoot);
-        parent::tearDown();
-    }
-
-    /**
-     * Every other reader of "which filenames count as the inner compose
-     * file" goes through this list, in docker compose's own search order.
-     */
-    public function test_compose_file_candidates_are_the_docker_compose_v2_search_order(): void
-    {
-        $this->assertSame(
-            ['compose.yaml', 'compose.yml', 'docker-compose.yml', 'docker-compose.yaml'],
-            Paths::composeFileCandidates()
-        );
-    }
+    use PathsFixtures;
 
     public function test_a_file_carrying_the_generated_label_is_the_engines_own(): void
     {
@@ -70,11 +44,6 @@ class PathsTest extends TestCase
         } finally {
             unlink($path);
         }
-    }
-
-    public function test_a_missing_file_is_not_the_engines_own(): void
-    {
-        $this->assertFalse(Paths::isEngineComposeFile('/nonexistent/'.uniqid('', true).'/docker-compose.yml'));
     }
 
     /**
@@ -439,20 +408,5 @@ class PathsTest extends TestCase
                 return '';
             }
         };
-    }
-
-    private function removeTree(string $path): void
-    {
-        if (! is_dir($path)) {
-            return;
-        }
-        foreach (scandir($path) ?: [] as $item) {
-            if ($item === '.' || $item === '..') {
-                continue;
-            }
-            $full = $path.'/'.$item;
-            is_dir($full) ? $this->removeTree($full) : unlink($full);
-        }
-        rmdir($path);
     }
 }

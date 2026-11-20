@@ -2,44 +2,18 @@
 
 namespace Tests\Integration\Deploy\Platform\Runtime;
 
-use App\Lib\Deploy\Platform\Runtime\Ruby\RailsProxy;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RailsSecret;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RubyApp;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RubyDockerfile;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RubyServer;
 use App\Lib\Deploy\Platform\Runtime\Ruby\SystemPackages;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RubyDockerfileFixtures;
 use Tests\Support\TestNetwork;
 
 class RubyDockerfileTest extends TestCase
 {
-    public function test_rails_host_initializer_allows_only_public_host(): void
-    {
-        $ruby = RailsProxy::hostAuthorizationInitializer('https://app.example.test/path');
-
-        $this->assertStringContainsString("hosts << 'app.example.test'", $ruby);
-        // An empty config.hosts means "any Host" in production; appending to it
-        // would narrow the app to a single name.
-        $this->assertStringContainsString('unless hosts.empty?', $ruby);
-        $this->assertStringNotContainsString('config.hosts.clear', $ruby);
-        $this->assertStringNotContainsString('/.+/', $ruby);
-    }
-
-    public function test_rails_behind_the_proxy_does_not_pin_hsts_on_a_self_signed_cert(): void
-    {
-        $this->assertSame(
-            ['RAILS_FORCE_SSL' => 'false', 'RAILS_ASSUME_SSL' => 'true'],
-            RailsProxy::sslEnvironment('https://app.example.test')
-        );
-        $this->assertSame(
-            ['RAILS_FORCE_SSL' => 'false', 'RAILS_ASSUME_SSL' => 'false'],
-            RailsProxy::sslEnvironment('http://app.example.test')
-        );
-        $this->assertSame(
-            ['RAILS_FORCE_SSL' => 'false', 'RAILS_ASSUME_SSL' => 'false'],
-            RailsProxy::sslEnvironment(null)
-        );
-    }
+    use RubyDockerfileFixtures;
 
     public function test_generates_vite_build_without_bin_vite_or_rails_precompile(): void
     {
@@ -455,36 +429,5 @@ class RubyDockerfileTest extends TestCase
         $this->cleanup[] = $dir;
 
         return $dir;
-    }
-
-    /** @var list<string> */
-    private array $cleanup = [];
-
-    protected function tearDown(): void
-    {
-        foreach ($this->cleanup as $dir) {
-            $this->deleteTree($dir);
-        }
-        $this->cleanup = [];
-        parent::tearDown();
-    }
-
-    private function deleteTree(string $dir): void
-    {
-        if (!is_dir($dir)) {
-            return;
-        }
-        foreach (scandir($dir) ?: [] as $entry) {
-            if ($entry === '.' || $entry === '..') {
-                continue;
-            }
-            $path = $dir . '/' . $entry;
-            if (is_dir($path)) {
-                $this->deleteTree($path);
-            } else {
-                @unlink($path);
-            }
-        }
-        @rmdir($dir);
     }
 }

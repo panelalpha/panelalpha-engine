@@ -59,15 +59,6 @@ class HostScriptReportTest extends TestCase
         $this->assertSame(self::LINE, $report->reportFor($operator)['warning'] ?? null);
     }
 
-    public function test_the_engine_reads_the_files_the_broker_writes(): void
-    {
-        $tenantNetwork = (string) file_get_contents(dirname(__DIR__, 4).'/dockerfiles/root-broker/rootbroker/tenantports.py');
-        $entrypoint = (string) file_get_contents(dirname(__DIR__, 4).'/dockerfiles/entrypoint-root-broker.sh');
-
-        $this->assertStringContainsString("\nFAILED = '".HostScriptReport::TENANT_NETWORK_FIREWALL."'\n", $tenantNetwork);
-        $this->assertStringContainsString("\nfirewall_failed=".HostScriptReport::HOST_FIREWALL."\n", $entrypoint);
-    }
-
     private function system(Process $answer): System
     {
         return new class($answer) extends System

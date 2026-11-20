@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Integration\System\Project\Backup;
+namespace Tests\Unit\System\Project\Backup;
 
 use App\Support\JobBudget;
 use App\Support\JobDeadline;

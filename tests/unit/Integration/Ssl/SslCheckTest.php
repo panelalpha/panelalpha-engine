@@ -2,11 +2,10 @@
 
 namespace Tests\Integration\Ssl;
 
-use App\Lib\Http\OutboundUrl;
 use App\Lib\Ssl\CertificateStatus;
 use App\Lib\Ssl\SslCheck;
-use App\Lib\Ssl\TlsHandshake;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SslCheckFixtures;
 use Tests\Support\TestNetwork;
 
 /**
@@ -15,23 +14,7 @@ use Tests\Support\TestNetwork;
  */
 class SslCheckTest extends TestCase
 {
-    private const DOMAIN = 'shop.example.com';
-
-    /** @var list<array{address: string, name: string}> */
-    private array $dialled = [];
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-        OutboundUrl::setPolicyForTests(false, []);
-    }
-
-    protected function tearDown(): void
-    {
-        OutboundUrl::setResolverForTests(null);
-        OutboundUrl::setPolicyForTests(null, null);
-        parent::tearDown();
-    }
+    use SslCheckFixtures;
 
     public function test_a_name_with_no_records_does_not_resolve_and_the_engine_side_is_still_checked(): void
     {
@@ -94,15 +77,6 @@ class SslCheckTest extends TestCase
         $this->assertSame(CertificateStatus::SELF_SIGNED, $result['engine']['certificate']['status']);
     }
 
-    public function test_a_private_address_that_is_not_ours_is_never_contacted(): void
-    {
-        $result = $this->check([TestNetwork::METADATA], [], null);
-
-        $this->assertSame(SslCheck::REFUSED_ADDRESS, $result['status']);
-        $this->assertTrue($result['public']['refused']);
-        $this->assertNotContains(TestNetwork::METADATA, array_column($this->dialled, 'address'));
-    }
-
     public function test_a_private_address_that_is_ours_is_contacted(): void
     {
         $cert = TestCertificates::selfSigned([self::DOMAIN]);
@@ -110,16 +84,6 @@ class SslCheckTest extends TestCase
 
         $this->assertSame(CertificateStatus::SELF_SIGNED, $result['status']);
         $this->assertTrue($result['dns']['points_here']);
-    }
-
-    public function test_nothing_answering_is_unreachable_with_the_reason(): void
-    {
-        $result = $this->check([TestNetwork::public(45)], [], null);
-
-        $this->assertSame(SslCheck::UNREACHABLE, $result['status']);
-        $this->assertFalse($result['public']['answered']);
-        $this->assertSame('Connection refused', $result['public']['error']);
-        $this->assertNull($result['engine']['serves_installed']);
     }
 
     public function test_an_expired_certificate_is_expired(): void
@@ -152,15 +116,6 @@ class SslCheckTest extends TestCase
         $this->assertSame('Pretend Issuing CA', $certificate['chain'][0]['subject']['common_name']);
     }
 
-    public function test_no_certificate_means_no_expiry_or_signer(): void
-    {
-        $result = $this->check([], [], null);
-
-        $this->assertNull($result['expires_at']);
-        $this->assertNull($result['signer']);
-        $this->assertNull($result['issuer']);
-    }
-
     public function test_intermediates_the_server_sends_reach_the_chain_check(): void
     {
         $authority = TestCertificates::authority();
@@ -171,56 +126,5 @@ class SslCheckTest extends TestCase
 
         $this->assertFalse($result['public']['certificate']['chain_trusted'], 'the throwaway root is in no store');
         $this->assertFalse($result['public']['certificate']['self_signed']);
-    }
-
-    /**
-     * @param  list<string>  $resolved
-     * @param  array<string, string>  $presented  address => leaf PEM; an address not listed refuses the connection
-     * @param  ?list<string>  $expected
-     * @return array<string, mixed>
-     */
-    private function check(array $resolved, array $presented, ?string $installed, ?array $expected = null, ?int $now = null): array
-    {
-        $this->resolveTo($resolved);
-
-        return (new SslCheck($this->handshake($presented), $now))
-            ->check(self::DOMAIN, $expected ?? [TestNetwork::public(45)], TestNetwork::private(5), $installed);
-    }
-
-    /**
-     * @param  list<string>  $addresses
-     */
-    private function resolveTo(array $addresses): void
-    {
-        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === self::DOMAIN ? $addresses : []);
-    }
-
-    /**
-     * @param  array<string, string>  $presented
-     * @param  list<string>  $intermediates
-     */
-    private function handshake(array $presented, array $intermediates = []): TlsHandshake
-    {
-        $dialled = &$this->dialled;
-
-        return new class($presented, $intermediates, $dialled) extends TlsHandshake
-        {
-            /**
-             * @param  array<string, string>  $presented
-             * @param  list<string>  $intermediates
-             * @param  list<array{address: string, name: string}>  $dialled
-             */
-            public function __construct(private array $presented, private array $intermediates, private array &$dialled) {}
-
-            public function presented(string $address, string $serverName, int $port = 443): array
-            {
-                $this->dialled[] = ['address' => $address, 'name' => $serverName];
-                $leaf = $this->presented[$address] ?? null;
-
-                return $leaf === null
-                    ? ['leaf' => null, 'intermediates' => [], 'error' => 'Connection refused']
-                    : ['leaf' => $leaf, 'intermediates' => $this->intermediates, 'error' => null];
-            }
-        };
     }
 }

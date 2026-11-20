@@ -4,9 +4,8 @@ namespace Tests\Integration\Deploy\Inspect;
 
 use App\Lib\Deploy\Inspect\InspectException;
 use App\Lib\Deploy\Inspect\SourceResolver;
-use App\Lib\Http\OutboundUrl;
 use PHPUnit\Framework\TestCase;
-use Tests\Support\TestNetwork;
+use Tests\Support\SourceResolverEgressFixtures;
 
 /**
  * The inspect clone runs in core, so the host it resolves once must be the host
@@ -15,20 +14,7 @@ use Tests\Support\TestNetwork;
  */
 class SourceResolverEgressTest extends TestCase
 {
-    protected function tearDown(): void
-    {
-        OutboundUrl::setResolverForTests(null);
-        parent::tearDown();
-    }
-
-    public function test_the_clone_is_pinned_to_the_checked_address(): void
-    {
-        OutboundUrl::setResolverForTests(static fn (string $host): array => [TestNetwork::routable(34)]);
-
-        $command = $this->cloneCommand('https://files.example.com/o/r.git');
-
-        $this->assertContains('http.curloptResolve=files.example.com:443:' . TestNetwork::routable(34), $command);
-    }
+    use SourceResolverEgressFixtures;
 
     public function test_a_redirecting_remote_is_refused_with_the_final_url(): void
     {
@@ -71,14 +57,6 @@ class SourceResolverEgressTest extends TestCase
             $this->assertNotSame('redirect_not_followed', $e->toProblem()['code'] ?? null);
             $this->assertStringStartsWith('Could not clone the repository', $e->getMessage());
         }
-    }
-
-    /** @return list<string> */
-    private function cloneCommand(string $repoUrl): array
-    {
-        $method = new \ReflectionMethod(SourceResolver::class, 'cloneCommand');
-
-        return (array) $method->invoke(null, $repoUrl, null, '/tmp/target');
     }
 
     /** @param list<string> $command */
