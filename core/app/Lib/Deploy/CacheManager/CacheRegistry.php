@@ -60,7 +60,7 @@ final class CacheRegistry
 
         $refs = [];
         foreach ($repositories as $repository) {
-            foreach ($this->tagsOf($repository) as $tag) {
+            foreach ($this->tagsOf($repository) ?? [] as $tag) {
                 $refs[] = "{$repository}:{$tag}";
             }
         }
@@ -90,17 +90,26 @@ final class CacheRegistry
         return $repositories;
     }
 
-    /** @return list<string> */
-    private function tagsOf(string $repository): array
+    /**
+     * A repository's tags, `[]` for a 200 answering `tags: null` or `[]`; null when the list cannot be read.
+     *
+     * @return list<string>|null
+     */
+    private function tagsOf(string $repository): ?array
     {
-        $tags = $this->json('GET', "/v2/{$repository}/tags/list")['tags'] ?? null;
+        $answer = $this->json('GET', "/v2/{$repository}/tags/list");
+        if ($answer === null || ! array_key_exists('tags', $answer)) {
+            return null;
+        }
+        $tags = $answer['tags'] ?? [];
 
-        return array_values(array_filter(is_array($tags) ? $tags : [], 'is_string'));
+        return is_array($tags) ? array_values(array_filter($tags, 'is_string')) : null;
     }
 
     /**
      * A repository the catalog still lists after its last tag and manifest are gone: the registry keeps the directory,
-     * so `/v2/_catalog` reads the name with `tags: null`. Empty when the catalog cannot be read.
+     * so `/v2/_catalog` reads the name with `tags: null`. Empty when the catalog cannot be read, and a repository
+     * whose tag list cannot be read is never one.
      *
      * @return list<string>
      */

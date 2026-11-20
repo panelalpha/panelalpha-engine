@@ -442,9 +442,7 @@ final class PlatformManifest
         }
         foreach (explode('/', $value) as $segment) {
             if ($segment === '' || $segment === '.' || $segment === '..') {
-                throw new ManifestException(
-                    "app_root must be a relative path inside the repository, got '{$raw}'"
-                );
+                throw $reader->fail("app_root must be a relative path inside the repository, got '{$raw}'");
             }
         }
 
@@ -470,9 +468,7 @@ final class PlatformManifest
         }
         foreach (explode('/', $value) as $segment) {
             if ($segment === '' || $segment === '.' || $segment === '..') {
-                throw new ManifestException(
-                    "docroot must be a relative path inside the application, got '{$raw}'"
-                );
+                throw $reader->fail("docroot must be a relative path inside the application, got '{$raw}'");
             }
         }
 

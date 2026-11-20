@@ -15,6 +15,13 @@ class JavaRuntimeToolchainTest extends TestCase
         $this->assertSame(JavaRuntime::MAVEN, JavaRuntime::toolchain('ant', 17));
     }
 
+    public function test_a_gradle_toolchain_the_catalogue_does_not_list_gets_the_gradle_image(): void
+    {
+        $this->assertNotContains('11-gradle', JavaRuntime::toolchains());
+
+        $this->assertSame(JavaRuntime::GRADLE_IMAGE, JavaRuntime::imageTag('11-gradle'));
+    }
+
     public function test_the_supported_versions_are_the_toolchains(): void
     {
         $versions = (new JavaRuntime)->supportedVersions();

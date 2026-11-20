@@ -10,7 +10,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Refusals of `check`, `app_root`, `build_args`, `commands_from`, `commands` and `env`, word for word, and an app root that is the repository.
+ * Refusals of `check`, `app_root`, `docroot`, `build_args`, `commands_from`, `commands` and `env`, word for word, and an app root that is the repository.
  */
 class PlatformManifestValueRefusalsTest extends TestCase
 {
@@ -73,10 +73,33 @@ class PlatformManifestValueRefusalsTest extends TestCase
     #[DataProvider('appRootsOutside')]
     public function test_an_app_root_that_is_not_a_plain_relative_path_is_refused(string $appRoot): void
     {
-        $this->expectException(ManifestException::class);
-        $this->expectExceptionMessage("app_root must be a relative path inside the repository, got '{$appRoot}'");
+        try {
+            $this->manifest(['app_root' => $appRoot]);
+            $this->fail('expected a ManifestException');
+        } catch (ManifestException $e) {
+            $this->assertSame("probe: app_root must be a relative path inside the repository, got '{$appRoot}'", $e->getMessage());
+        }
+    }
 
-        $this->manifest(['app_root' => $appRoot]);
+    /** @return array<string, array{string}> */
+    public static function docrootsOutside(): array
+    {
+        return [
+            'climbing out' => ['web/../..'],
+            'a dot segment' => ['web/./api'],
+            'an empty segment' => ['web//api'],
+        ];
+    }
+
+    #[DataProvider('docrootsOutside')]
+    public function test_a_docroot_that_is_not_a_plain_relative_path_is_refused(string $docroot): void
+    {
+        try {
+            $this->manifest(['docroot' => $docroot]);
+            $this->fail('expected a ManifestException');
+        } catch (ManifestException $e) {
+            $this->assertSame("probe: docroot must be a relative path inside the application, got '{$docroot}'", $e->getMessage());
+        }
     }
 
     public function test_an_app_root_of_the_repository_itself_is_empty(): void

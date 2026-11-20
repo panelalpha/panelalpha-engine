@@ -50,4 +50,19 @@ class CacheRegistryAnswersTest extends TestCase
         $this->assertNull($registry->refs());
         $this->assertSame([], $registry->emptyRepositories());
     }
+
+    public function test_a_repository_whose_tags_could_not_be_read_is_not_empty(): void
+    {
+        $registry = $this->registry([
+            'GET '.self::BASE.'/v2/_catalog?n=1000' => ['status' => 200, 'body' => '{"repositories":["failing","silent","missing","garbled","keyless","untagged","cleared"]}'],
+            'GET '.self::BASE.'/v2/failing/tags/list' => ['status' => 500, 'body' => '{"tags":null}'],
+            'GET '.self::BASE.'/v2/missing/tags/list' => ['status' => 404, 'body' => '{"errors":[{"code":"NAME_UNKNOWN"}]}'],
+            'GET '.self::BASE.'/v2/garbled/tags/list' => ['status' => 200, 'body' => '<html>'],
+            'GET '.self::BASE.'/v2/keyless/tags/list' => ['status' => 200, 'body' => '{"name":"keyless"}'],
+            'GET '.self::BASE.'/v2/untagged/tags/list' => ['status' => 200, 'body' => '{"name":"untagged","tags":null}'],
+            'GET '.self::BASE.'/v2/cleared/tags/list' => ['status' => 200, 'body' => '{"name":"cleared","tags":[]}'],
+        ]);
+
+        $this->assertSame(['untagged', 'cleared'], $registry->emptyRepositories());
+    }
 }

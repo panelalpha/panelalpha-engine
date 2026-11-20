@@ -149,7 +149,16 @@ final class PhpRuntime implements Runtime
             }
         }
 
-        return new Requirement('php', "{$major}.{$minor}", implode(', ', $constraints), 'composer.json require.php');
+        return new Requirement('php', "{$major}.{$minor}", implode(', ', $constraints), self::floorSource($composerJson, $composerLock));
+    }
+
+    /** Where a floor above the catalogue came from: a root `require.php` stating no version (`@dev`) leaves it to the lock. */
+    private static function floorSource(?string $composerJson, ?string $composerLock): string
+    {
+        $rootPhp = self::decodeObject($composerJson)['require']['php'] ?? null;
+        $rootStatesFloor = is_string($rootPhp) && self::constraintMinimumPhp($rootPhp) !== null;
+
+        return self::sourceFor($rootStatesFloor ? $composerJson : null, $composerLock);
     }
 
     /**
@@ -597,22 +606,13 @@ final class PhpRuntime implements Runtime
         return "{$major}.{$minor}.{$patch}";
     }
 
+    /** The lowest release above `>x.y[.z]`, the next patch: `>9.1` admits 9.1.1. */
     private static function bumpPhpVersion(string $version): string
     {
         $parts = explode('.', $version);
         $major = (int) ($parts[0] ?? 8);
         $minor = (int) ($parts[1] ?? 0);
-        $patch = (int) ($parts[2] ?? 0);
-        if ($patch > 0) {
-            $patch++;
-        } elseif ($minor > 0) {
-            $minor++;
-            $patch = 0;
-        } else {
-            $major++;
-            $minor = 0;
-            $patch = 0;
-        }
+        $patch = (int) ($parts[2] ?? 0) + 1;
 
         return "{$major}.{$minor}.{$patch}";
     }

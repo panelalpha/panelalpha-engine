@@ -73,15 +73,24 @@ final class JavaRuntime implements Runtime
         return RuntimeImageCatalog::defaultVersion('java') ?? self::MAVEN;
     }
 
-    /** Builder image for a toolchain: catalogue first, else the constants. */
+    /**
+     * Builder image for a toolchain: catalogue first, else the constants. The catalogue's top-level `from` is
+     * Maven's, so a Gradle toolchain it does not list gets the Gradle constant.
+     */
     public static function imageTag(string $toolchain): string
     {
-        $spec = RuntimeImageCatalog::spec('java', $toolchain);
+        $spec = self::isUncataloguedGradle($toolchain) ? null : RuntimeImageCatalog::spec('java', $toolchain);
         if ($spec !== null) {
             return $spec->from;
         }
 
         return str_ends_with($toolchain, '-gradle') ? self::GRADLE_IMAGE : self::MAVEN_IMAGE;
+    }
+
+    private static function isUncataloguedGradle(string $toolchain): bool
+    {
+        return str_ends_with($toolchain, '-gradle')
+            && ! in_array($toolchain, RuntimeImageCatalog::versions('java'), true);
     }
 
     public function id(): string
