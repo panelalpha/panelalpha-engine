@@ -1,0 +1,19 @@
+# Layers over the repo's docker-compose.yml (upstream's demo stack: the
+# published unleash-server image and postgres:15).
+services:
+  web:
+    env_file:
+      # UNLEASH_DEFAULT_ADMIN_USERNAME / UNLEASH_DEFAULT_ADMIN_PASSWORD, the
+      # login the engine generates. Unleash creates that admin only while it
+      # has no user at all; without them it is admin / unleash4all.
+      - ../.panelalpha/app-credentials.env
+
+  db:
+    volumes:
+      # The repo's db has no volume, so its data (users included) lived in an
+      # anonymous one that a redeploy leaves behind: a password changed in
+      # Unleash would come back as the generated one with everything else gone.
+      - db-data:/var/lib/postgresql/data
+
+volumes:
+  db-data: {}

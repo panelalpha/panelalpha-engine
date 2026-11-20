@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Unleash, the feature-flag server (Node, port 4242) on PostgreSQL. The
+  repository's docker-compose.yml is upstream's demo stack (the published
+  unleashorg/unleash-server image and postgres:15) and deploys as is.
+
+  A new database gets Unleash's built-in admin with the password
+  `unleash4all`, which nobody deploying it is told and anyone with the address
+  could use; the login page's "Sign up" goes to getunleash.io. So the engine
+  generates a login (`credentials:` below, returned by GET
+  /projects/{name}/app-credentials) and overrides/docker-compose.override.yml
+  gives it to the server as UNLEASH_DEFAULT_ADMIN_USERNAME /
+  UNLEASH_DEFAULT_ADMIN_PASSWORD, upstream's own variables for that first
+  admin: Unleash creates it only while it has no user, so a password changed
+  in Unleash is never overwritten. The override also puts the database on a
+  named volume (the repo's has none), so users and flags survive a redeploy.
+credentials:
+  login_path: /login
+  fields:
+    UNLEASH_DEFAULT_ADMIN_USERNAME: {kind: username}
+    UNLEASH_DEFAULT_ADMIN_PASSWORD: {kind: password}
