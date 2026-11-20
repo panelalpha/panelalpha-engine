@@ -1,17 +1,26 @@
 # Compose-replace: the repo has no database.yml, so a source build installs no
-# DB adapter. Runs the official image of the current release on SQLite.
+# DB adapter. Runs the official image of the current release on SQLite, with
+# the login the engine generates.
 services:
   app:
     image: redmine:7.0.1
     restart: unless-stopped
+    # The image's entrypoint configures the database and runs db:migrate for a
+    # `bundle exec` command, then runs the wrapper, which sets the engine's
+    # login on the built-in admin while it still has the password admin and
+    # execs `rails server -b 0.0.0.0` (the image's CMD).
+    command: ["bundle", "exec", "/bin/bash", "/panelalpha-redmine-start.sh"]
     env_file:
       # A missing file aborts `up` rather than starting with a throwaway secret.
       - ../.panelalpha/redmine/secret.env
+      # REDMINE_ADMIN_USERNAME / REDMINE_ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
     volumes:
       # SQLite database (the image's default when no DB variables are set).
       - db:/usr/src/redmine/sqlite
       # Attachments.
       - files:/usr/src/redmine/files
+      - ./panelalpha-redmine-start.sh:/panelalpha-redmine-start.sh:ro
     ports:
       - "3000:3000"
     healthcheck:
