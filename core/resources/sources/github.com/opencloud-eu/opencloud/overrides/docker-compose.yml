@@ -9,7 +9,14 @@ services:
     restart: unless-stopped
     user: "1000:1000"
     entrypoint: ["/bin/sh"]
-    command: ["-c", "opencloud init || true; opencloud server"]
+    # init's config holds the engine's admin password, not a random one of
+    # its own; it fails harmlessly once the config exists.
+    command: ["-c", "opencloud init --admin-password \"$$IDM_ADMIN_PASSWORD\" || true; opencloud server"]
+    env_file:
+      # IDM_ADMIN_PASSWORD (and OPENCLOUD_ADMIN_USERNAME, always admin), the
+      # login the engine generates. IDM gives it to the admin only when it
+      # creates its database, on the first start.
+      - ../.panelalpha/app-credentials.env
     environment:
       OC_URL: ${PA_PUBLIC_URL}
       # TLS ends at the engine's proxy.
