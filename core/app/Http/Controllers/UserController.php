@@ -1198,7 +1198,7 @@ class UserController extends Controller
         $user->status = 'suspended';
         $user->save();
 
-        $system = new System;
+        $system = app(System::class);
         $this->rotatePhpMyAdminSsoPassword($system, $user);
         $reloaded = $system->rebuildDomains();
 
@@ -1274,11 +1274,16 @@ class UserController extends Controller
         return new UserResource($user);
     }
 
+    protected function projectDeleter(): ProjectDeleter
+    {
+        return new ProjectDeleter;
+    }
+
     /** A refused delete is a refusal, not a failure: answered as it stands and not logged. Any other failure is logged and rethrown. */
     private function deleteProject(User $user): void
     {
         try {
-            (new ProjectDeleter)->delete($user);
+            $this->projectDeleter()->delete($user);
         } catch (ProjectBusyException|ProblemException $e) {
             throw $e;
         } catch (\Exception $e) {

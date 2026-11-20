@@ -156,7 +156,7 @@ class ConfigureCommand extends Command
      * prompt's default, so a piped run would answer every question itself and
      * write the result. Refusing is the better outcome.
      */
-    private function canAsk(): bool
+    protected function canAsk(): bool
     {
         return $this->input->isInteractive()
             && defined('STDIN')

@@ -6,6 +6,7 @@ use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ProjectOptions;
 use App\Console\Commands\Concerns\SelectsProjects;
 use App\Models\User;
+use App\System\Project;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -37,7 +38,7 @@ class CleanupDisconnectedDomains extends Command
         foreach ($users as $user) {
             $this->info("Project `{$user->username}`:");
 
-            $userProject = $user->project();
+            $userProject = $this->project($user);
             $webDomains = $userProject->listDomains();
             $dbDomains = $user->domains;
             $dbDomainsList = $dbDomains->pluck('domain');
@@ -75,5 +76,10 @@ class CleanupDisconnectedDomains extends Command
         }
 
         return 0;
+    }
+
+    protected function project(User $user): Project
+    {
+        return $user->project();
     }
 }

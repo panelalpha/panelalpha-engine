@@ -49,7 +49,7 @@ class PrivilegesController extends Controller
             abort(404, 'Not found');
         }
 
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
         $privs = $mysql->privileges()->showPrivileges($dbuser->user);
         $data = $privs[$db->database] ?? '';
 
@@ -104,7 +104,7 @@ class PrivilegesController extends Controller
          */
         $params = $request->validated();
 
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
         $mysql->privileges()->updatePrivileges($dbuser->user, $db->database, $params['privileges']);
         $dbuser->touch();
 
@@ -150,7 +150,7 @@ class PrivilegesController extends Controller
             abort(404, 'Not found');
         }
 
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
         $mysql->privileges()->revokeIfExists($dbuser->user, $db->database);
         $dbuser->touch();
 

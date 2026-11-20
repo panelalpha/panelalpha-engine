@@ -9,6 +9,8 @@ use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\Models\User;
 use App\System;
+use App\System\Project;
+use App\System\Project\Domain as ProjectDomain;
 use App\System\Services\Webserver\ProxyRuleUpstream;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
@@ -324,9 +326,9 @@ class DomainsCreate extends Command
     /** Set the domain up on the host and in the project's services, then proxy it when an upstream was given. */
     private function provision(User $user, Domain $domain, ?string $upstreamHost, ?int $upstreamPort): void
     {
-        $domain->projectDomain()->create();
-        $user->project()->syncPhpHandlersScripts();
-        $user->project()->syncServices();
+        $this->projectDomain($domain)->create();
+        $this->project($user)->syncPhpHandlersScripts();
+        $this->project($user)->syncServices();
 
         if ($upstreamHost !== null && $upstreamPort !== null) {
             $this->proxyTo($user, $domain, $upstreamHost, $upstreamPort);
@@ -364,8 +366,8 @@ class DomainsCreate extends Command
         foreach ([80, 443] as $listenPort) {
             $this->writeProxyRule($user, $domain->domain, $listenPort, $upstreamHost, $upstreamPort);
         }
-        $domain->projectDomain()->rebuild();
-        (new System)->webserver()->scheduleWebserverReloadInBackground();
+        $this->projectDomain($domain)->rebuild();
+        app(System::class)->webserver()->scheduleWebserverReloadInBackground();
     }
 
     private function writeProxyRule(User $user, string $domainName, int $listenPort, string $upstreamHost, int $upstreamPort): void
@@ -391,5 +393,15 @@ class DomainsCreate extends Command
                 ],
             ]
         );
+    }
+
+    protected function projectDomain(Domain $domain): ProjectDomain
+    {
+        return $domain->projectDomain();
+    }
+
+    protected function project(User $user): Project
+    {
+        return $user->project();
     }
 }

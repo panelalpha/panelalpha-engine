@@ -74,7 +74,7 @@ class MysqlSsoToken extends Model
         $username = 'sso_'.$this->user->username;
         $password = Str::random(27);
 
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
 
         /** @var MysqlSsoUser */
         $ssoUser = MysqlSsoUser::firstOrNew([

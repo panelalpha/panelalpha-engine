@@ -7,7 +7,9 @@ use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Models\Domain;
 use App\Models\ProxyRule;
+use App\Models\User;
 use App\System;
+use App\System\Project\Domain as ProjectDomain;
 use Illuminate\Console\Command;
 use Symfony\Component\Console\Helper\Table;
 
@@ -128,7 +130,7 @@ class DomainsUnsetProxy extends Command
 
         if ($hasTunnels) {
             try {
-                TunnelManager::syncFromProxyRules($user, $domain);
+                $this->syncTunnelIngress($user, $domain);
             } catch (CloudflareException $e) {
                 $this->error($e->getMessage());
 
@@ -140,8 +142,8 @@ class DomainsUnsetProxy extends Command
             }
         }
 
-        $domain->projectDomain()->rebuild();
-        (new System)->webserver()->scheduleWebserverReloadInBackground();
+        $this->projectDomain($domain)->rebuild();
+        app(System::class)->webserver()->scheduleWebserverReloadInBackground();
 
         $this->info($hasTunnels
             ? 'Proxy rules removed; tunnel ingress synced; domain vhost rebuilt.'
@@ -175,5 +177,15 @@ class DomainsUnsetProxy extends Command
         sort($ports);
 
         return $ports;
+    }
+
+    protected function projectDomain(Domain $domain): ProjectDomain
+    {
+        return $domain->projectDomain();
+    }
+
+    protected function syncTunnelIngress(User $user, Domain $domain): void
+    {
+        TunnelManager::syncFromProxyRules($user, $domain);
     }
 }

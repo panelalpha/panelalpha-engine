@@ -49,7 +49,7 @@ class DatabaseController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
 
         $databases = [];
         foreach ($user->getMysqlDatabases() as $db) {
@@ -164,7 +164,7 @@ class DatabaseController extends Controller
             ]);
         }
 
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
         $mysql->databases()->createDatabase($dbname);
 
         /** @var MysqlDatabase */
@@ -211,7 +211,7 @@ class DatabaseController extends Controller
             ], 404));
         }
 
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
         $mysql->databases()->deleteDatabase($db->database);
         foreach ($user->mysqlUsers as $dbuser) {
             $mysql->privileges()->revokeIfExists($dbuser->user, $db->database);

@@ -3,7 +3,6 @@
 namespace App\Console\Commands\DockerHub;
 
 use App\Support\DockerHubLogin;
-use App\System;
 use Illuminate\Console\Command;
 
 /** Take registry-proxy back to anonymous Docker Hub pulls. */
@@ -15,7 +14,7 @@ class DockerHubLogoutCommand extends Command
 
     public function handle(): int
     {
-        $login = new DockerHubLogin(new System);
+        $login = app(DockerHubLogin::class);
         try {
             $login->clear();
         } catch (\Exception $e) {

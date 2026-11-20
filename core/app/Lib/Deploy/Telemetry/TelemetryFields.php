@@ -179,7 +179,7 @@ final class TelemetryFields
      */
     private function gitRunner(): callable
     {
-        $system = new System;
+        $system = app(System::class);
         $ids = self::safely(fn (): ?array => $this->user?->linuxIds(), null);
 
         return static function (array $argv) use ($system, $ids): ?string {
@@ -214,7 +214,7 @@ final class TelemetryFields
 
     public function projectDir(): string
     {
-        return (new System)->projectHomeDirPath($this->username).self::PROJECT_DIR;
+        return app(System::class)->projectHomeDirPath($this->username).self::PROJECT_DIR;
     }
 
     /**

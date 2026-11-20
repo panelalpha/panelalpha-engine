@@ -4,6 +4,7 @@ namespace App\Console\Commands\Users;
 
 use App\Models\User;
 use App\System\Privileged;
+use App\System\Project;
 use Illuminate\Console\Command;
 
 class Attach extends Command
@@ -27,7 +28,7 @@ class Attach extends Command
             return 1;
         }
 
-        $projectDir = $user->project()->projectDirPath();
+        $projectDir = $this->project($user)->projectDirPath();
         $composeFile = "{$projectDir}/docker-compose.yml";
 
         if (! file_exists($composeFile)) {
@@ -65,6 +66,17 @@ class Attach extends Command
 
         $this->line("Attaching to <info>{$serviceName}</info> for project <info>{$username}</info> (workdir: {$workDir})...");
 
+        return $this->runOnTerminal($cmd);
+    }
+
+    protected function project(User $user): Project
+    {
+        return $user->project();
+    }
+
+    /** @param  list<string>  $cmd */
+    protected function runOnTerminal(array $cmd): int
+    {
         $process = proc_open($cmd, [STDIN, STDOUT, STDERR], $pipes);
 
         if (! is_resource($process)) {

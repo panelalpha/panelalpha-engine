@@ -4,8 +4,10 @@ namespace App\Console\Commands\Ssl;
 
 use App\Lib\Ssl\CertificateStatus;
 use App\Lib\Ssl\EngineCertificate;
+use App\Lib\Ssl\Issuer;
 use App\Lib\Ssl\ProjectCertificate;
 use App\Models\Domain;
+use App\System\Project\Domain as ProjectDomain;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
@@ -44,7 +46,7 @@ class ProjectCertRenew extends Command
     {
         $threshold = (int) ($this->option('days') ?: self::RENEW_BELOW_DAYS);
         $only = $this->option('domain');
-        $issuer = ProjectCertificate::issuer((bool) $this->option('staging'));
+        $issuer = $this->issuer((bool) $this->option('staging'));
 
         $query = Domain::query();
         if (is_string($only) && $only !== '') {
@@ -58,13 +60,13 @@ class ProjectCertRenew extends Command
         // anything else writes during the HTTP-01 check, recording details.ssl fails.
         foreach ($query->lazyById() as $model) {
             $name = $model->domain;
-            $fromEngine = (new EngineCertificate)->covering($name) !== null;
+            $fromEngine = $this->engineCovers($name);
 
             if (! $fromEngine && $issuer->ineligibleReason($name) !== null) {
                 continue;
             }
 
-            $connection = $model->projectDomain();
+            $connection = $this->projectDomain($model);
             if (! $connection->hasSslCertificate()) {
                 continue;
             }
@@ -121,5 +123,20 @@ class ProjectCertRenew extends Command
         }
 
         return $status['days_remaining'] !== null && $status['days_remaining'] < $threshold;
+    }
+
+    protected function issuer(bool $staging): Issuer
+    {
+        return ProjectCertificate::issuer($staging);
+    }
+
+    protected function engineCovers(string $name): bool
+    {
+        return (new EngineCertificate)->covering($name) !== null;
+    }
+
+    protected function projectDomain(Domain $model): ProjectDomain
+    {
+        return $model->projectDomain();
     }
 }

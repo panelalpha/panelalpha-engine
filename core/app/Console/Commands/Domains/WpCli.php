@@ -45,7 +45,7 @@ class WpCli extends Command
             $wpCliArgs[] = $arg;
         }
 
-        $result = WordPressWpCli::for($user, $this->documentRootPath($user, $domain, $hasPathInArgs))->run($wpCliArgs);
+        $result = $this->wpCli($user, $this->documentRootPath($user, $domain, $hasPathInArgs))->run($wpCliArgs);
 
         $this->line('stdout:');
         $this->info(trim($result['stdout']));
@@ -59,8 +59,13 @@ class WpCli extends Command
     /** A container project's install is found in its containers, not under a domain's document root. */
     private function documentRootPath(User $user, Domain $domain, bool $hasPathInArgs): ?string
     {
-        $cli = WordPressWpCli::for($user);
+        $cli = $this->wpCli($user);
 
         return $hasPathInArgs || $cli->runsInContainer() ? null : $cli->resolveDomainPath($domain);
+    }
+
+    protected function wpCli(User $user, ?string $path = null): WordPressWpCli
+    {
+        return WordPressWpCli::for($user, $path);
     }
 }

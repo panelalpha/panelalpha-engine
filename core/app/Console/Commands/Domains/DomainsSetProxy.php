@@ -8,7 +8,9 @@ use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Helpers\UpstreamSpec;
 use App\Models\Domain;
 use App\Models\ProxyRule;
+use App\Models\User;
 use App\System;
+use App\System\Project\Domain as ProjectDomain;
 use App\System\Services\Webserver\ProxyRuleServerName;
 use App\System\Services\Webserver\ProxyRuleUpstream;
 use Illuminate\Console\Command;
@@ -83,8 +85,8 @@ class DomainsSetProxy extends Command
         $this->writeRules($domain, $listenPorts, $upstreamHost, $upstreamPort);
         $tunnelError = $hasTunnels ? $this->syncTunnels($domain) : null;
 
-        $domain->projectDomain()->rebuild();
-        (new System)->webserver()->scheduleWebserverReloadInBackground();
+        $this->projectDomain($domain)->rebuild();
+        app(System::class)->webserver()->scheduleWebserverReloadInBackground();
 
         return $this->reportApplied($tunnelError, $hasTunnels);
     }
@@ -228,7 +230,7 @@ class DomainsSetProxy extends Command
     private function syncTunnels(Domain $domain): ?string
     {
         try {
-            TunnelManager::syncFromProxyRules($domain->user, $domain);
+            $this->syncTunnelIngress($domain->user, $domain);
         } catch (CloudflareException $e) {
             return $e->getMessage();
         } catch (\Throwable $e) {
@@ -279,5 +281,15 @@ class DomainsSetProxy extends Command
         sort($ports);
 
         return $ports;
+    }
+
+    protected function projectDomain(Domain $domain): ProjectDomain
+    {
+        return $domain->projectDomain();
+    }
+
+    protected function syncTunnelIngress(User $user, Domain $domain): void
+    {
+        TunnelManager::syncFromProxyRules($user, $domain);
     }
 }

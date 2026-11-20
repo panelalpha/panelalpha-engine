@@ -21,7 +21,7 @@ class PhpController extends Controller
     )]
     public function listAvailableVersions(): JsonResponse
     {
-        $system = new System;
+        $system = app(System::class);
 
         return new JsonResponse([
             'data' => $system->php()->listAvailablePhpVersions(),

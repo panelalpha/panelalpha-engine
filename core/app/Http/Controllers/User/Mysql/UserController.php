@@ -41,7 +41,7 @@ class UserController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
         $mysqlUsers = [];
         foreach ($user->mysqlUsers as $mysqlUser) {
             $privs = $mysql->privileges()->showPrivileges($mysqlUser->user);
@@ -116,7 +116,7 @@ class UserController extends Controller
 
         $this->refuseUnusableName($user, $dbuser);
 
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
         $mysql->users()->createUser($dbuser, $params['password']);
 
         /** @var MysqlUser */
@@ -156,7 +156,7 @@ class UserController extends Controller
 
         $dbuser = $this->mysqlUserOr404($user, $dbuser);
 
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
         $mysql->users()->deleteUser($dbuser->user);
         $dbuser->delete();
 
@@ -203,7 +203,7 @@ class UserController extends Controller
 
         $this->refuseUnusableName($user, $newName, $dbuser->user);
 
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
         $mysql->users()->renameUser($dbuser->user, $newName);
         $dbuser->update([
             'user' => $newName,
@@ -248,7 +248,7 @@ class UserController extends Controller
          */
         $params = $request->validated();
 
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
         $mysql->users()->changeUserPassword($dbuser->user, $params['password']);
         $dbuser->touch();
         $this->keepAppDatabasePassword($user, $dbuser, $params['password']);

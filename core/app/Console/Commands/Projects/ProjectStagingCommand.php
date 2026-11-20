@@ -8,6 +8,7 @@ use App\Lib\Helper;
 use App\Lib\Project\ProjectNameRefusal;
 use App\Models\User;
 use App\System;
+use App\System\Project;
 use App\System\Projects;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -34,7 +35,7 @@ class ProjectStagingCommand extends Command
         $dest = null;
 
         try {
-            $system = new System;
+            $system = app(System::class);
 
             $newUsername = $this->stagingUsername($source, $system);
             if ($newUsername === null) {
@@ -123,7 +124,7 @@ class ProjectStagingCommand extends Command
             'email' => $source->email,
         ]);
 
-        return $probe->project()->hostingExists();
+        return $this->project($probe)->hostingExists();
     }
 
     private static function lowercaseOption(mixed $value): ?string
@@ -153,12 +154,17 @@ class ProjectStagingCommand extends Command
         }
 
         try {
-            $existing->project()->destroy();
+            $this->project($existing)->destroy();
         } catch (\Throwable $cleanup) {
             Log::error('project:staging cleanup failed', [
                 'dest' => $dest->username,
                 'exception' => $cleanup,
             ]);
         }
+    }
+
+    protected function project(User $user): Project
+    {
+        return $user->project();
     }
 }

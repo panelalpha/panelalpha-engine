@@ -61,7 +61,7 @@ class Coverage extends Command
             return 1;
         }
 
-        if (! extension_loaded('xdebug')) {
+        if (! $this->xdebugLoaded()) {
             $this->error('xdebug extension is not loaded');
 
             return 1;
@@ -75,7 +75,7 @@ class Coverage extends Command
 
         $dir = config('testing.coverage_dir')."/{$tokenId}";
 
-        $system = new System;
+        $system = app(System::class);
 
         if ($this->option('start-recording')) {
             $system->exec(Privileged::files()->makeDirectories($dir.'/dumps'));
@@ -144,6 +144,11 @@ class Coverage extends Command
         }
 
         (new HtmlReport)->process($coverage, $dir.'/html-report');
+    }
+
+    protected function xdebugLoaded(): bool
+    {
+        return extension_loaded('xdebug');
     }
 
     /**

@@ -8,6 +8,8 @@ use App\Lib\Domains\HttpsPortsChange;
 use App\Models\Domain;
 use App\Models\Tunnel;
 use App\Models\User;
+use App\System\Project;
+use App\System\Project\Domain as ProjectDomain;
 use Illuminate\Console\Command;
 use Symfony\Component\Console\Helper\Table;
 
@@ -105,13 +107,13 @@ class DomainsDelete extends Command
 
         try {
             $closesPorts = HttpsPorts::hasExtra($domain);
-            $domain->projectDomain()->delete();
+            $this->projectDomain($domain)->delete();
             $domain->delete();
             if ($closesPorts) {
                 app(HttpsPortsChange::class)->listenersChanged();
             }
-            $user->project()->syncPhpHandlersScripts();
-            $user->project()->syncServices();
+            $this->project($user)->syncPhpHandlersScripts();
+            $this->project($user)->syncServices();
         } catch (\Throwable $e) {
             $this->error('Domain delete failed: '.$e->getMessage());
 
@@ -129,5 +131,15 @@ class DomainsDelete extends Command
         $directories = array_map(static fn (string $dir): string => '~'.$dir, $domain->directoriesKeptOnDelete());
 
         return 'Its files are kept in '.implode(' and ', $directories).'.';
+    }
+
+    protected function projectDomain(Domain $domain): ProjectDomain
+    {
+        return $domain->projectDomain();
+    }
+
+    protected function project(User $user): Project
+    {
+        return $user->project();
     }
 }

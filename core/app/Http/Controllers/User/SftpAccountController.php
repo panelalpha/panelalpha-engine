@@ -183,7 +183,7 @@ class SftpAccountController extends Controller
 
         $sftpAccount->update($newParams);
 
-        (new System)->sftp()->rebuildSftpAccounts();
+        app(System::class)->sftp()->rebuildSftpAccounts();
 
         return new SftpAccountResource($sftpAccount);
     }

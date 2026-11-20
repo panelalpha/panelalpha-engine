@@ -30,7 +30,7 @@ class CleanupDisconnectedDomains extends Command
             //     'openlitespeed',
             // ];
 
-            $system = new System;
+            $system = app(System::class);
             $webserver = $system->webserver();
             $webDomains = $webserver->listDomains();
             /** @var Collection<int, Domain> */

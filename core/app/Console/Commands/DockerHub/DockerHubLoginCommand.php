@@ -3,7 +3,6 @@
 namespace App\Console\Commands\DockerHub;
 
 use App\Support\DockerHubLogin;
-use App\System;
 use Illuminate\Console\Command;
 
 use function Laravel\Prompts\confirm;
@@ -34,7 +33,7 @@ class DockerHubLoginCommand extends Command
             $username = trim(text('Docker Hub username', validate: fn (string $v) => DockerHubLogin::badUsername(trim($v))));
         }
         $token = $this->option('token-stdin')
-            ? trim((string) stream_get_contents(STDIN))
+            ? trim($this->tokenFromStdin())
             : ($interactive ? trim(password(
                 'Access token',
                 hint: 'Docker Hub → Account settings → Personal access tokens. Scope: Public Repo Read-only.',
@@ -49,7 +48,7 @@ class DockerHubLoginCommand extends Command
             return self::FAILURE;
         }
 
-        $login = new DockerHubLogin(new System);
+        $login = app(DockerHubLogin::class);
         $check = $login->check($username, $token);
         if (! $check['ok']) {
             $this->error((string) $check['error']);
@@ -96,5 +95,10 @@ class DockerHubLoginCommand extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    protected function tokenFromStdin(): string
+    {
+        return (string) stream_get_contents(STDIN);
     }
 }

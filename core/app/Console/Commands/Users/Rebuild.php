@@ -6,6 +6,7 @@ use App\Console\Commands\Concerns\ProjectOptions;
 use App\Console\Commands\ProjectFleetCommand;
 use App\Models\User;
 use App\System;
+use App\System\Project;
 
 class Rebuild extends ProjectFleetCommand
 {
@@ -22,7 +23,7 @@ class Rebuild extends ProjectFleetCommand
 
     protected function beforeAll(): void
     {
-        $this->system = new System;
+        $this->system = app(System::class);
         $this->webserver = $this->system->webserver()->getCurrentWebserver();
     }
 
@@ -33,7 +34,7 @@ class Rebuild extends ProjectFleetCommand
 
     protected function applyTo(User $user): void
     {
-        $project = $user->project();
+        $project = $this->project($user);
 
         if ($this->option('wipe-vhosts-dir')) {
             $project->deleteAllDomainsConfigs();
@@ -66,5 +67,10 @@ class Rebuild extends ProjectFleetCommand
         }
 
         $this->system->webserver()->rebuildDomains();
+    }
+
+    protected function project(User $user): Project
+    {
+        return $user->project();
     }
 }

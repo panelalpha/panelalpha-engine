@@ -11,6 +11,7 @@ use App\Models\MysqlUser;
 use App\Models\Setting;
 use App\Models\User;
 use App\System;
+use App\System\Project;
 use App\System\Project\PhpHosting\WordPress\WpCli;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
@@ -142,7 +143,7 @@ class CreateExampleDomain extends Command
     {
         // Only install WordPress if no git repo is specified
         $path = $user->getHomeDir().$domain->getDocumentRoot();
-        $result = $user->project()->runWpCli([
+        $result = $this->project($user)->runWpCli([
             'core',
             'download',
             '--path='.$path,
@@ -153,7 +154,7 @@ class CreateExampleDomain extends Command
             return 1;
         }
 
-        $mysql = (new System)->mysql();
+        $mysql = app(System::class)->mysql();
         $dbname = $user->getMysqlPrefix().'example';
         $mysql->databases()->createDatabase($dbname);
         MysqlDatabase::create([
@@ -175,7 +176,7 @@ class CreateExampleDomain extends Command
             $dbhost = 'database-users.shared-hosting.palocal';
         }
         try {
-            WpCli::for($user, $path)->createConfigFile([
+            $this->createWpConfig($user, $path, [
                 '--dbname='.$dbname,
                 '--dbuser='.$dbuser,
                 '--dbpass='.$dbpass,
@@ -188,7 +189,7 @@ class CreateExampleDomain extends Command
         }
 
         $url = 'https://'.(string) Setting::get('default_ipv4');
-        $result = $user->project()->runWpCli([
+        $result = $this->project($user)->runWpCli([
             'core',
             'install',
             '--path='.$path,
@@ -206,7 +207,7 @@ class CreateExampleDomain extends Command
         }
 
         $themeName = 'twentytwentyfour';
-        $result = $user->project()->runWpCli([
+        $result = $this->project($user)->runWpCli([
             'theme',
             'install',
             $themeName,
@@ -268,5 +269,16 @@ class CreateExampleDomain extends Command
         }
 
         return false;
+    }
+
+    protected function project(User $user): Project
+    {
+        return $user->project();
+    }
+
+    /** @param  list<string>  $options */
+    protected function createWpConfig(User $user, string $path, array $options): void
+    {
+        WpCli::for($user, $path)->createConfigFile($options);
     }
 }
