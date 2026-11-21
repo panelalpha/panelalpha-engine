@@ -264,6 +264,45 @@ class UserComposeStrategyTest extends TestCase
         $this->assertSame(['./.env'], $run['services']['app']['env_file']);
     }
 
+    /**
+     * Saltcorn: a recipe's compose runs in place of the repository's, whose `.env.example` (SQLITE_FILEPATH) seeded
+     * `.env`. The app service loads `.env.panelalpha`, optional, after its own files; one that names `.env` keeps it.
+     */
+    public function test_a_recipe_compose_app_service_loads_env_panelalpha_instead_of_env(): void
+    {
+        $recipePath = self::PROJECT_DIR . '/' . EngineArtifacts::APP_CONFIG_COMPOSE;
+        $system = $this->stubbedSystem([
+            $recipePath => "services:\n"
+                . "  app:\n    image: saltcorn/saltcorn:1.6.2\n    ports:\n      - \"3000:3000\"\n"
+                . "    env_file:\n      - ../.panelalpha/saltcorn/app.env\n"
+                . "  db:\n    image: postgres:17-alpine\n",
+        ]);
+
+        (new UserComposeStrategy($this->stubbedDind($system, $recipePath)))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
+        $this->assertSame(
+            ['../.panelalpha/saltcorn/app.env', ['path' => EngineArtifacts::ENV_OVERRIDES, 'required' => false]],
+            $run['services']['app']['env_file']
+        );
+        $this->assertArrayNotHasKey('env_file', $run['services']['db']);
+    }
+
+    /** Speedtest Tracker: a recipe that names `.env` itself still gets it, and nothing else is added. */
+    public function test_a_recipe_compose_app_service_naming_env_keeps_it(): void
+    {
+        $recipePath = self::PROJECT_DIR . '/' . EngineArtifacts::APP_CONFIG_COMPOSE;
+        $system = $this->stubbedSystem([
+            $recipePath => "services:\n  app:\n    image: acme/app\n    ports:\n      - \"8080:80\"\n"
+                . "    env_file:\n      - .env\n      - ../.panelalpha/acme/app.env\n",
+        ]);
+
+        (new UserComposeStrategy($this->stubbedDind($system, $recipePath)))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
+        $this->assertSame(['.env', '../.panelalpha/acme/app.env'], $run['services']['app']['env_file']);
+    }
+
     /** deemix: `${DEEMIX_CONFIG_PATH}:/config` with nothing setting it, and compose rejected `:/config`. */
     public function test_a_mount_from_an_unset_variable_becomes_a_named_volume_in_the_run_file(): void
     {

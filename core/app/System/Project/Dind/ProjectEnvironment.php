@@ -95,7 +95,8 @@ class ProjectEnvironment
     }
 
     /**
-     * The overrides go to `.env.panelalpha` too when `.env` cannot carry them: tracked, or followed by another file.
+     * The overrides go to `.env.panelalpha` too when `.env` cannot carry them: tracked, followed by another file, or not
+     * loaded at all by a recipe's compose file ({@see runsRecipeCompose()}).
      *
      * @param  array<string, string>  $overrides
      * @param  array<string, string>  $generated
@@ -108,7 +109,7 @@ class ProjectEnvironment
         $services = $this->writeEngineValues(
             $this->mailRelay()
                 + (new ApiAccess($this->dind->system()))->envFor($user)
-                + ($tracked || $outranking !== [] ? $overrides + $generated : $generated),
+                + ($tracked || $outranking !== [] || $this->runsRecipeCompose($projectDir) ? $overrides + $generated : $generated),
             $projectDir,
             $chown
         );
@@ -138,6 +139,16 @@ class ProjectEnvironment
                 .', loaded after the env files that follow .env in: '.implode(', ', $services)
             );
         }
+    }
+
+    /**
+     * A recipe's compose file replaces the repository's: its app service loads `.env.panelalpha` rather than the
+     * `.env` seeded from the repository's template ({@see Strategy\UserComposeStrategy}), so the env_vars go there too.
+     */
+    protected function runsRecipeCompose(string $projectDir): bool
+    {
+        return $this->usesComposeStrategy()
+            && $this->dind->system()->filesystem()->fileExists($projectDir.'/'.EngineArtifacts::APP_CONFIG_COMPOSE);
     }
 
     /**

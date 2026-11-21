@@ -277,6 +277,19 @@ class ComposeEnvFilesTest extends TestCase
         );
     }
 
+    public function test_attach_keeps_the_overrides_file_on_a_service_loading_it_in_place_of_env(): void
+    {
+        $compose = ['services' => [
+            'app' => ['image' => 'a', 'env_file' => ['app.env', ['path' => '.env.panelalpha', 'required' => false]]],
+            'db' => ['image' => 'd'],
+        ]];
+
+        [$attached, $services] = ComposeEnvFiles::attach($compose, '.env.panelalpha');
+
+        $this->assertSame($compose, $attached);
+        $this->assertSame(['app'], $services);
+    }
+
     public function test_detach_removes_the_overrides_file_and_unsets_env_file_when_it_was_the_only_entry(): void
     {
         $compose = Yaml::parse(<<<'YAML'

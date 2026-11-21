@@ -32,6 +32,7 @@ use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\LxcfsProc;
 use App\System\Project\Dind\Networking;
 use App\System\Project\Dind\Paths;
+use App\System\Project\Dind\ProjectEnvironment;
 use App\System\Project\Dind\Source\GitRepository;
 
 /**
@@ -143,7 +144,7 @@ class UserComposeStrategy
         $parsed = $this->withMovedImages($parsed, $env, $logger);
         $parsed = $this->withBuildCaches($parsed, $projectDir);
         $parsed = $this->hostingReady($parsed, $composePath, $projectDir, $chown, $logger, $replaced, $env);
-        $parsed = $this->withAppEnvFile($parsed);
+        $parsed = $this->withAppEnvFile($parsed, $replaced);
         $parsed = $this->withEnvOverrides($parsed, $system, $projectDir);
         $system->filesystem()->writeFileReplacingPath($runPath, ComposeYaml::dump($parsed, $raw, 6, 2, ...$included), $chown, EngineArtifacts::RUN_COMPOSE_MODE);
         $this->dind->strategy()->installRailsHostInitializer($projectDir, $chown);
@@ -512,12 +513,29 @@ class UserComposeStrategy
      * service reads only when its `env_file:` names it: the service that publishes the app's port loads it, before
      * a recipe's stored values ({@see ComposeEnvFiles::addTo()}).
      *
+     * A recipe's compose ($replaced) runs in place of the repository's, so the `.env` seeded from the repository's
+     * template (a `.env.example` written for the stack the recipe replaced: Saltcorn's SQLITE_FILEPATH, Spoolman's
+     * SPOOLMAN_PORT, OpenProject's PORT) is not its app's environment. Its app service loads `.env.panelalpha`
+     * instead, last, where the engine puts the account's env_vars for it
+     * ({@see ProjectEnvironment}); a recipe that wants `.env` names it in its own `env_file:`.
+     *
      * @param  array<string, mixed>  $parsed
      * @return array<string, mixed>
      */
-    private function withAppEnvFile(array $parsed): array
+    private function withAppEnvFile(array $parsed, bool $replaced): array
     {
-        [$parsed] = ComposeEnvFiles::addTo($parsed, PrimaryPortBinding::appServices($parsed), '.env');
+        $services = PrimaryPortBinding::appServices($parsed);
+        if (! $replaced) {
+            [$parsed] = ComposeEnvFiles::addTo($parsed, $services, '.env');
+
+            return $parsed;
+        }
+
+        $services = array_values(array_filter(
+            $services,
+            static fn (string $name): bool => ! (is_array($parsed['services'][$name] ?? null) && ComposeEnvFiles::loadsProjectEnv($parsed['services'][$name]))
+        ));
+        [$parsed] = ComposeEnvFiles::addLast($parsed, $services, EngineArtifacts::ENV_OVERRIDES);
 
         return $parsed;
     }

@@ -427,6 +427,54 @@ class DindProjectEnvironmentTest extends TestCase
     }
 
     /**
+     * Saltcorn, Spoolman, OpenProject: a recipe's compose replaces the repository's, and its app service loads
+     * `.env.panelalpha` in place of the `.env` seeded from the repository's `.env.example`. The env_vars go there
+     * too, so they still reach the app, and `.env` keeps them for interpolation.
+     */
+    public function test_a_recipe_compose_gets_the_env_vars_in_env_panelalpha(): void
+    {
+        file_put_contents($this->projectDir . '/.env.example', "PORT=3000\n");
+        file_put_contents($this->projectDir . '/' . EngineArtifacts::APP_CONFIG_COMPOSE, "services:\n  app:\n    image: acme/app\n");
+        file_put_contents($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE, <<<'YAML'
+        services:
+          app:
+            image: acme/app
+            env_file:
+              - ../.panelalpha/acme/app.env
+              - path: .env.panelalpha
+                required: false
+        YAML);
+
+        $model = $this->dindModel(['deploy_strategy' => 'compose', 'env_vars' => ['WORKERS' => '2']]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+
+        $engine = $this->vars((string) file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES));
+        $this->assertSame('2', $engine['WORKERS']);
+        $this->assertArrayNotHasKey('PORT', $engine);
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame('2', $env['WORKERS']);
+
+        $compose = Yaml::parseFile($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE);
+        $this->assertSame(
+            ['../.panelalpha/acme/app.env', ['path' => EngineArtifacts::ENV_OVERRIDES, 'required' => false]],
+            $compose['services']['app']['env_file']
+        );
+    }
+
+    /** The repository's own compose file still gets its env_vars in `.env`, with no `.env.panelalpha`. */
+    public function test_without_a_recipe_compose_untracked_env_vars_stay_in_env_only(): void
+    {
+        file_put_contents($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE, "services:\n  app:\n    image: acme/app\n    env_file: .env\n");
+
+        $model = $this->dindModel(['deploy_strategy' => 'compose', 'env_vars' => ['WORKERS' => '2']]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+
+        $this->assertSame('2', $this->vars((string) file_get_contents($this->projectDir . '/.env'))['WORKERS']);
+        $engine = (string) @file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES);
+        $this->assertArrayNotHasKey('WORKERS', $this->vars($engine));
+    }
+
+    /**
      * The pre-ADR-0001 behaviour: an untracked `.env` (or no git at all) is
      * still merged in place, and no `.env.panelalpha` is created.
      */

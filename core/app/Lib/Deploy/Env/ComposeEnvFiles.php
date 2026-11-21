@@ -49,14 +49,14 @@ final class ComposeEnvFiles
 
     /**
      * Add $overridesFile as the last `env_file` of every service already loading `.env` (ADR-0001 D3).
-     * Idempotent: an entry already there is moved to the end.
+     * Idempotent: an entry already there is moved to the end. A service that loads it in place of `.env` (a recipe's
+     * app service, {@see addLast()}) keeps it as it is.
      *
      * @param  array<string, mixed>  $compose  a decoded compose file
-     * @return array{0: array<string, mixed>, 1: list<string>} the compose file, and the services changed
+     * @return array{0: array<string, mixed>, 1: list<string>} the compose file, and the services that load it
      */
     public static function attach(array $compose, string $overridesFile): array
     {
-        [$compose] = self::detach($compose, $overridesFile);
         if (! is_array($compose['services'] ?? null)) {
             return [$compose, []];
         }
@@ -66,16 +66,15 @@ final class ComposeEnvFiles
             if (! is_array($service)) {
                 continue;
             }
-            $loadsEnv = false;
-            foreach (self::entriesOf($service['env_file'] ?? null) as $entry) {
-                if (self::projectRelative($entry) === '.env') {
-                    $loadsEnv = true;
-                    break;
+            if (! self::loadsProjectEnv($service)) {
+                if (self::loads($service, $overridesFile)) {
+                    $changed[] = (string) $name;
                 }
-            }
-            if (! $loadsEnv || self::loads($service, $overridesFile)) {
+
                 continue;
             }
+            [$detached] = self::detach(['services' => ['s' => $service]], $overridesFile);
+            $service = $detached['services']['s'];
             $entries = is_array($service['env_file']) ? array_values($service['env_file']) : [$service['env_file']];
             $entries[] = $overridesFile;
             $service['env_file'] = $entries;
@@ -153,6 +152,32 @@ final class ComposeEnvFiles
     }
 
     /**
+     * Add $envFile as the last `env_file` of $services, in the long form with `required: false`: a file the engine
+     * writes only when it has values, which then win over everything the service loads before it.
+     *
+     * @param  array<string, mixed>  $compose  a decoded compose file
+     * @param  list<string>  $services
+     * @return array{0: array<string, mixed>, 1: list<string>} the compose file, and the services changed
+     */
+    public static function addLast(array $compose, array $services, string $envFile): array
+    {
+        $changed = [];
+        foreach ($services as $name) {
+            $service = $compose['services'][$name] ?? null;
+            if (! is_array($service) || self::loads($service, $envFile)) {
+                continue;
+            }
+            $declared = $service['env_file'] ?? null;
+            $entries = is_array($declared) ? array_values($declared) : ($declared === null ? [] : [$declared]);
+            $entries[] = ['path' => $envFile, 'required' => false];
+            $compose['services'][$name]['env_file'] = $entries;
+            $changed[] = $name;
+        }
+
+        return [$compose, $changed];
+    }
+
+    /**
      * The services loading $envFile and, after it, some file other than $overridesFile, which wins over `.env`.
      *
      * @param  array<string, mixed>  $compose  a decoded compose file
@@ -210,6 +235,16 @@ final class ComposeEnvFiles
         $path = str_replace('\\', '/', trim($raw));
 
         return str_starts_with($path, '/') || in_array('..', explode('/', $path), true);
+    }
+
+    /**
+     * Whether one of the service's `env_file:` entries is the project's own `.env`.
+     *
+     * @param  array<string, mixed>  $service
+     */
+    public static function loadsProjectEnv(array $service): bool
+    {
+        return self::loads($service, '.env');
     }
 
     /**
