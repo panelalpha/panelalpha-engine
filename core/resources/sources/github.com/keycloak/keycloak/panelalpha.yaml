@@ -6,8 +6,15 @@ description: >-
   recipe runs the official quay.io/keycloak/keycloak image of the current
   release (26.7.4) in production mode (`start`) on port 8080 behind the
   engine's proxy, against PostgreSQL 17. The first admin is Keycloak's own
-  bootstrap admin, KC_BOOTSTRAP_ADMIN_USERNAME / KC_BOOTSTRAP_ADMIN_PASSWORD
-  from the project env vars: without them the admin console only offers
-  "Local access required", so a one-shot check fails the deploy naming
-  whichever is missing. The database password is generated once into
-  ~/.panelalpha/keycloak.
+  bootstrap admin, KC_BOOTSTRAP_ADMIN_USERNAME / KC_BOOTSTRAP_ADMIN_PASSWORD:
+  the engine generates them (`credentials:` below, returned by GET
+  /projects/{name}/app-credentials, or the project's own env vars of the same
+  names) and Keycloak reads them from app-credentials.env, so a deploy with no
+  env vars has a working admin instead of failing; without one the admin
+  console only offers "Local access required". The database password is
+  generated once into ~/.panelalpha/keycloak.
+credentials:
+  login_path: /admin/
+  fields:
+    KC_BOOTSTRAP_ADMIN_USERNAME: {kind: username, value: admin}
+    KC_BOOTSTRAP_ADMIN_PASSWORD: {kind: password}

@@ -4,19 +4,12 @@ Identity and access management: SSO, OIDC, SAML, OAuth2 (Java/Quarkus).
 
 ## Deploying
 
-Set two project environment variables, the first admin of the `master` realm:
-
-- `KC_BOOTSTRAP_ADMIN_USERNAME`
-- `KC_BOOTSTRAP_ADMIN_PASSWORD` (write any `$` as `$$`)
-
-Keycloak reads them only while the master realm has no admin. Without them the
-deploy fails with:
-
-```
-keycloak: missing project environment variable(s): KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD. ...
-```
-
-Sign in at `/admin/`. Keycloak marks this admin as temporary and suggests
+Deploy as is, open `/admin/` and sign in with the login the engine generates
+(`KC_BOOTSTRAP_ADMIN_USERNAME`, default `admin`, and
+`KC_BOOTSTRAP_ADMIN_PASSWORD`): read it with `GET /projects/{name}/app-credentials`
+(MCP `app_credentials_get`). Project environment variables of the same names
+take its place. Keycloak reads them only while the master realm has no admin,
+so a password changed in Keycloak is kept. Keycloak marks this admin as temporary and suggests
 creating a permanent one; that is upstream's own flow.
 
 ## What the recipe does
@@ -29,8 +22,12 @@ creating a permanent one; that is upstream's own flow.
   and `postgres:17-alpine` on the `db` volume.
 - `hooks/prepare.sh` generates the database password once into
   `~/.panelalpha/keycloak/` (0600).
-- `env-check` (one-shot) fails the deploy naming a missing variable; `ready`
-  makes `compose up -d` wait for `/health/ready` on the management port.
+- The engine's login reaches Keycloak as `env_file`
+  (`../.panelalpha/app-credentials.env`). Before it, the recipe required both
+  variables as project env vars and failed the deploy without them, so a deploy
+  that sets none (PanelAlpha Go's previews) never started.
+- `ready` makes `compose up -d` wait for `/health/ready` on the management
+  port.
 
 ## Memory
 
