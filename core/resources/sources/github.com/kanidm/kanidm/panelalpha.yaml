@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Kanidm, an identity management server (OAuth2/OIDC, LDAPS, RADIUS, passkeys)
+  with a web UI for its users. The repository is the Rust workspace; the rust
+  strategy built all of it from source and failed in libudev-sys (its build
+  script needs libudev, which the build image does not have). This recipe runs
+  the official image of the current release, docker.io/kanidm/server:1.12.1,
+  with its database on a named volume.
+
+  kanidmd serves only TLS and refuses to start without a certificate, so a
+  one-shot `certs` service runs `kanidmd cert-generate` (a self-signed CA and
+  certificate on the volume, kept across redeploys) and the engine's proxy
+  reaches port 8443 over https without checking it (port_scheme below).
+  KANIDM_DOMAIN and KANIDM_ORIGIN are the site's host and URL, which
+  WebAuthn, OAuth2 and the session cookies are bound to.
+
+  A new database has two built-in admins with no password, idm_admin (people
+  and groups) and admin (server settings, OAuth2); upstream gives them a
+  random one with `kanidmd recover-account`. kanidm has no way to set a chosen
+  password on them (protected service accounts; setting a password on any
+  service account fails on 1.12.1) and a person cannot sign in with a
+  password alone (MFA by default), so the engine's `credentials:` cannot be
+  used. Instead the `recover` service, once kanidmd is healthy, runs
+  recover-account for both, once per database, and writes the passwords to
+  ~/.panelalpha/kanidm/admins.env (0600); both sign in to the web UI at
+  /ui/login. A `ready` gate makes the deploy finish only after that.
+port_scheme: https

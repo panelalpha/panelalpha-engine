@@ -1,0 +1,21 @@
+# kanidmd's configuration (/data/server.toml). `domain` and `origin` come from
+# the environment (KANIDM_DOMAIN / KANIDM_ORIGIN, the site's public host and
+# URL), which kanidmd reads ahead of this file.
+version = "2"
+
+# TLS only: kanidmd has no plain HTTP listener. The engine's proxy reaches it
+# over https (port_scheme in panelalpha.yaml) without checking the certificate.
+bindaddress = "0.0.0.0:8443"
+db_path = "/data/kanidm.db"
+
+# Self-signed, made once by the `certs` service (kanidmd cert-generate) and
+# kept on the data volume.
+tls_chain = "/data/chain.pem"
+tls_key = "/data/key.pem"
+
+log_level = "info"
+
+# The engine's proxy reaches the app through the account's container network,
+# so the visitor's address is in X-Forwarded-For.
+[http_client_address_info]
+x-forward-for = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]

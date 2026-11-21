@@ -1,0 +1,85 @@
+# Compose-replace: the repository is kanidm's Rust workspace, whose source
+# build fails in an account (libudev-sys). Runs the official server image of
+# the current release.
+services:
+  # One-shot: a self-signed CA and certificate for kanidmd's TLS listener on
+  # the data volume. cert-generate leaves existing files alone.
+  certs:
+    image: docker.io/kanidm/server:1.12.1
+    restart: "no"
+    command: ["/sbin/kanidmd", "cert-generate"]
+    environment:
+      KANIDM_DOMAIN: ${PA_PUBLIC_HOST}
+      KANIDM_ORIGIN: ${PA_PUBLIC_URL}
+    volumes:
+      - data:/data
+      - ./panelalpha/kanidm/server.toml:/data/server.toml:ro
+    mem_limit: 128m
+
+  app:
+    image: docker.io/kanidm/server:1.12.1
+    restart: unless-stopped
+    environment:
+      # kanidmd reads these ahead of /data/server.toml. `domain` is used in
+      # security contexts (WebAuthn, OAuth2, SPNs) and must be the site's host.
+      KANIDM_DOMAIN: ${PA_PUBLIC_HOST}
+      KANIDM_ORIGIN: ${PA_PUBLIC_URL}
+    volumes:
+      # kanidm.db, the TLS files and the admin socket.
+      - data:/data
+      - ./panelalpha/kanidm/server.toml:/data/server.toml:ro
+    ports:
+      # TLS only; the engine's proxy speaks https to it (port_scheme).
+      - "8443:8443"
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/sbin/kanidmd", "scripting", "healthcheck"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 10s
+    mem_limit: 256m
+
+  # Once kanidmd is healthy, on a new database: gives the built-in admins
+  # idm_admin and admin their passwords (kanidmd recover-account) and writes
+  # them to ~/.panelalpha/kanidm/admins.env
+  # (files/panelalpha/kanidm/kanidm-recover.sh). The image is upstream's tools
+  # image plus kanidmd, as the server image has no shell.
+  recover:
+    build:
+      context: ./panelalpha/kanidm
+    image: panelalpha-kanidm-recover:1.12.1
+    restart: "no"
+    entrypoint: ["/bin/bash", "/panelalpha/kanidm-recover.sh"]
+    environment:
+      KANIDM_DOMAIN: ${PA_PUBLIC_HOST}
+      KANIDM_ORIGIN: ${PA_PUBLIC_URL}
+    volumes:
+      # kanidmd's admin socket (/data/kanidmd.sock) and config.
+      - data:/data
+      - ./panelalpha/kanidm/server.toml:/data/server.toml:ro
+      - ./panelalpha/kanidm/kanidm-recover.sh:/panelalpha/kanidm-recover.sh:ro
+      # ~/.panelalpha/kanidm, made by hooks/prepare.sh.
+      - ../.panelalpha/kanidm:/panelalpha-out
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once kanidm answers and the
+  # admins' passwords are written.
+  ready:
+    image: docker.io/kanidm/server:1.12.1
+    restart: "no"
+    entrypoint: ["/sbin/kanidmd", "version"]
+    healthcheck:
+      disable: true
+    depends_on:
+      recover:
+        condition: service_completed_successfully
+    mem_limit: 32m
+
+volumes:
+  data: {}
