@@ -704,6 +704,12 @@
           "minLength": 1,
           "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$"
         },
+        "written_by_app": {
+          "description": "A dotenv file relative to the account home that the application writes itself once it runs, for a login only it can make (an admin password it recovers or prints on first start and will not take from the engine). After every deploy that starts the app, a value it sets for a field's name replaces the stored one, so GET /projects/{name}/app-credentials and ~/.panelalpha/app-credentials.env name the login that works; until then the fields hold generated values. A field the project's env_vars set keeps that value. e.g. `.panelalpha/kanidm/admins.env`.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$"
+        },
         "fields": {
           "description": "Environment variable name => what the engine puts there.",
           "type": "object",

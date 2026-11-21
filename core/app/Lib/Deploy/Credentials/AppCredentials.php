@@ -50,6 +50,9 @@ final class AppCredentials
             'login_path' => $spec->loginPath,
             'created_at' => is_string($stored['created_at'] ?? null) ? $stored['created_at'] : ($now ?? date('c')),
         ];
+        if ($spec->writtenByApp !== null) {
+            $result['stored']['written_by_app'] = $spec->writtenByApp;
+        }
 
         return $result;
     }
@@ -96,6 +99,41 @@ final class AppCredentials
     {
         return is_array($kept) && ($kept['kind'] ?? null) === $kind
             && is_string($kept['value'] ?? null) && self::deliverable($kept['value']);
+    }
+
+    /**
+     * After the app started: the stored fields its `written_by_app` file sets, with the file's values. A field the
+     * project's env_vars set keeps that value; one the file leaves out or cannot be delivered keeps the stored one.
+     *
+     * @param  ?array<string, mixed>  $stored
+     * @param  array<string, string>  $envVars
+     * @param  \Closure(string): ?array<string, string>  $read  a dotenv file relative to the account home; null when missing
+     * @return array{stored: ?array<string, mixed>, adopted: list<string>, missing: bool}
+     */
+    public static function adoptWrittenByApp(?array $stored, array $envVars, \Closure $read): array
+    {
+        $path = is_string($stored['written_by_app'] ?? null) ? $stored['written_by_app'] : null;
+        if ($stored === null || $path === null) {
+            return ['stored' => $stored, 'adopted' => [], 'missing' => false];
+        }
+        $written = $read($path);
+        if ($written === null) {
+            return ['stored' => $stored, 'adopted' => [], 'missing' => true];
+        }
+
+        $adopted = [];
+        foreach (self::fields($stored) as $name => $field) {
+            $value = (string) ($written[$name] ?? '');
+            if ($value === '' || ! self::deliverable($value) || (string) ($envVars[$name] ?? '') !== '') {
+                continue;
+            }
+            if ($value !== $field['value']) {
+                $stored['fields'][$name] = ['kind' => $field['kind'], 'value' => $value];
+                $adopted[] = $name;
+            }
+        }
+
+        return ['stored' => $stored, 'adopted' => $adopted, 'missing' => false];
     }
 
     /**

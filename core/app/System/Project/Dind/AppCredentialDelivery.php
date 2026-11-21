@@ -10,6 +10,7 @@ use App\Models\User;
 use App\System\Filesystem;
 use App\System\Privileged;
 use App\System\Privileged\AccountFiles;
+use App\System\Project\Deployment\DindDeployMechanics;
 use App\System\Project\Dind as DindProject;
 
 /**
@@ -91,24 +92,72 @@ class AppCredentialDelivery
             $spec,
             $user->getAppCredentials(),
             $user->getEnvVars(),
-            function (string $relative) use ($fs, $home): ?array {
-                $file = $home.'/'.$relative;
-                if (! $fs->fileExists($file)) {
-                    return null;
-                }
-                $values = [];
-                foreach (EnvFile::parse($fs->fileGetContents($file)) as $row) {
-                    if (($row['type'] ?? null) === 'variable') {
-                        $values[$row['key']] = $row['value'];
-                    }
-                }
-
-                return $values;
-            },
+            fn (string $relative): ?array => self::readEnvFile($fs, $home, $relative),
             null,
             parse_url((string) $this->dind->publicAppUrl(), PHP_URL_HOST) ?: null,
             is_string($user->email) ? $user->email : null
         );
+    }
+
+    /**
+     * After the app started ({@see DindDeployMechanics::startApplication()}): the
+     * login the app wrote into its `written_by_app` file replaces the stored one, so the API and
+     * ~/.panelalpha/app-credentials.env name the login that works. Never fails a deploy: a file not written yet is
+     * said in the log, and the stored login stands.
+     */
+    public function adoptWrittenByApp(): void
+    {
+        $user = $this->dind->userModel();
+        $stored = $user->getAppCredentials();
+        $path = is_string($stored['written_by_app'] ?? null) ? $stored['written_by_app'] : null;
+        if ($path === null) {
+            return;
+        }
+
+        $fs = $this->dind->system()->filesystem();
+        $home = rtrim($this->dind->homeDirPath(), '/');
+        $logger = $this->dind->shell()->logger();
+        $result = AppCredentials::adoptWrittenByApp(
+            $stored,
+            $user->getEnvVars(),
+            fn (string $relative): ?array => self::readEnvFile($fs, $home, $relative)
+        );
+        if ($result['missing']) {
+            $logger?->warn("The app has not written ~/{$path}, so the app credentials are still the ones the engine generated");
+
+            return;
+        }
+        if ($result['adopted'] === [] || $result['stored'] === null) {
+            return;
+        }
+
+        $logger?->mask(AppCredentials::secretValues($result['stored']));
+        $user->setAppCredentials($result['stored']);
+        $user->save();
+        $this->writeEnvFile($user, $fs, $home.'/'.AppCredentials::ENV_FILE, AppCredentials::envFile($result['stored']));
+        $logger?->info("App credentials taken from the login the app wrote in ~/{$path}: ".implode(', ', $result['adopted']));
+    }
+
+    /**
+     * A dotenv file in the account home as KEY => value; null when it is missing. Reads stay inside the home
+     * ({@see Filesystem::fileGetContents()}).
+     *
+     * @return ?array<string, string>
+     */
+    private static function readEnvFile(Filesystem $fs, string $home, string $relative): ?array
+    {
+        $file = $home.'/'.$relative;
+        if (! $fs->fileExists($file)) {
+            return null;
+        }
+        $values = [];
+        foreach (EnvFile::parse($fs->fileGetContents($file)) as $row) {
+            if (($row['type'] ?? null) === 'variable') {
+                $values[$row['key']] = $row['value'];
+            }
+        }
+
+        return $values;
     }
 
     private function forgetCredentials(User $user, Filesystem $fs, string $path, ?DeployLogger $logger): void

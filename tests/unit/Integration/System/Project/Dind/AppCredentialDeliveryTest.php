@@ -201,6 +201,39 @@ class AppCredentialDeliveryTest extends TestCase
         $this->assertSame('login with *** refused', $logger->readLatest()['error']);
     }
 
+    public function test_after_the_app_starts_the_login_it_wrote_becomes_the_projects(): void
+    {
+        $logger = DeployLogger::start($this->username);
+        $logger->stage(DeployLogger::STAGE_RUNNING);
+        $model = $this->model();
+        $spec = CredentialSpec::parse([
+            'written_by_app' => '.panelalpha/demo/admins.env',
+            'fields' => ['DEMO_ADMIN_USER' => ['kind' => 'username', 'value' => 'idm_admin'], 'DEMO_ADMIN_PASSWORD' => ['kind' => 'password']],
+        ], fn (string $m) => new ManifestException($m));
+        $delivery = $this->dind($model)->appCredentials();
+        $delivery->deliver($spec, final: true);
+
+        // Started before the app wrote it: said, and the generated login stands.
+        $generated = $model->getAppCredentials()['fields']['DEMO_ADMIN_PASSWORD']['value'];
+        $delivery->adoptWrittenByApp();
+        $this->assertSame($generated, $model->getAppCredentials()['fields']['DEMO_ADMIN_PASSWORD']['value']);
+
+        mkdir($this->home . '/.panelalpha/demo', 0700, true);
+        file_put_contents($this->home . '/.panelalpha/demo/admins.env', "DEMO_ADMIN_PASSWORD=RecoveredByTheApp7\n");
+        $delivery->adoptWrittenByApp();
+        DeployLogger::current($this->username)?->dim('kanidm: login RecoveredByTheApp7 ok');
+        $logger->finish(DeployLogger::STATUS_SUCCESS);
+
+        $this->assertSame('RecoveredByTheApp7', $model->getAppCredentials()['fields']['DEMO_ADMIN_PASSWORD']['value']);
+        $this->assertSame('RecoveredByTheApp7', AppCredentials::reveal($model->getAppCredentials(), null)['fields'][1]['value']);
+        $this->assertStringContainsString("DEMO_ADMIN_PASSWORD='RecoveredByTheApp7'", (string) file_get_contents($this->home . '/' . AppCredentials::ENV_FILE));
+        $lines = array_column($logger->read()['lines'], 'msg');
+        $this->assertContains('The app has not written ~/.panelalpha/demo/admins.env, so the app credentials are still the ones the engine generated', $lines);
+        $this->assertContains('App credentials taken from the login the app wrote in ~/.panelalpha/demo/admins.env: DEMO_ADMIN_PASSWORD', $lines);
+        $this->assertContains('kanidm: login *** ok', $lines);
+        $this->assertStringNotContainsString('RecoveredByTheApp7', (string) file_get_contents($logger->getLogPath()));
+    }
+
     private function writeProject(string $yaml, ?string $prepare): void
     {
         file_put_contents($this->projectDir . '/index.html', '<!DOCTYPE html><title>x</title>');

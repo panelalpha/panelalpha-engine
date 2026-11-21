@@ -96,6 +96,8 @@ class CredentialsManifestTest extends TestCase
             'relative login path' => [['login_path' => 'login', 'fields' => ['X' => ['kind' => 'password']]], 'login_path'],
             'absolute adopt' => [['adopt_from' => '/etc/shadow', 'fields' => ['X' => ['kind' => 'password']]], 'adopt_from'],
             'escaping adopt' => [['adopt_from' => '../other/.env', 'fields' => ['X' => ['kind' => 'password']]], 'adopt_from'],
+            'absolute written by app' => [['written_by_app' => '/etc/shadow', 'fields' => ['X' => ['kind' => 'password']]], 'written_by_app'],
+            'escaping written by app' => [['written_by_app' => '.panelalpha/../../x.env', 'fields' => ['X' => ['kind' => 'password']]], 'written_by_app'],
         ];
     }
 
@@ -105,6 +107,18 @@ class CredentialsManifestTest extends TestCase
         $this->expectException(ManifestException::class);
         $this->expectExceptionMessageMatches('/^demo: .*' . preg_quote($message, '/') . '/');
         $this->make(['credentials' => $value]);
+    }
+
+    public function test_a_login_the_app_writes_itself_is_declared_with_its_file(): void
+    {
+        $spec = $this->make(['credentials' => [
+            'written_by_app' => '.panelalpha/kanidm/admins.env',
+            'fields' => ['KANIDM_ADMIN_USER' => ['kind' => 'username', 'value' => 'idm_admin'], 'KANIDM_ADMIN_PASSWORD' => ['kind' => 'password']],
+        ]])->credentials;
+
+        $this->assertSame('.panelalpha/kanidm/admins.env', $spec?->writtenByApp);
+        $this->assertNull($spec?->adoptFrom);
+        $this->assertSame('.panelalpha/kanidm/admins.env', CredentialSpec::fromArray($spec?->toArray())?->writtenByApp, 'It survives the decision array.');
     }
 
     public function test_a_compose_recipe_declares_it_without_describing_a_manifest(): void

@@ -6,7 +6,9 @@ use App\Lib\Deploy\Platform\ManifestException;
 
 /**
  * A manifest's `credentials:` block: the login an app is seeded with, which the engine generates, keeps and
- * delivers. Only the declaration; {@see AppCredentials} turns it into values.
+ * delivers. Only the declaration; {@see AppCredentials} turns it into values. `written_by_app` names a file the
+ * application writes once it runs, for a login only it can make (Kanidm's recovered admin password): its values
+ * replace the stored ones after each start ({@see AppCredentials::adoptWrittenByApp()}).
  */
 final class CredentialSpec
 {
@@ -24,7 +26,7 @@ final class CredentialSpec
         self::KIND_EMAIL => 'admin@example.com',
     ];
 
-    private const KEYS = ['login_path', 'adopt_from', 'fields'];
+    private const KEYS = ['login_path', 'adopt_from', 'written_by_app', 'fields'];
 
     private const FIELD_KEYS = ['kind', 'value', 'symbol'];
 
@@ -47,6 +49,7 @@ final class CredentialSpec
         public readonly array $fields,
         public readonly ?string $loginPath,
         public readonly ?string $adoptFrom,
+        public readonly ?string $writtenByApp = null,
     ) {}
 
     /**
@@ -76,7 +79,12 @@ final class CredentialSpec
             $fields[(string) $name] = self::parseField((string) $name, $field, $fail);
         }
 
-        return new self($fields, self::loginPath($raw['login_path'] ?? null, $fail), self::adoptFrom($raw['adopt_from'] ?? null, $fail));
+        return new self(
+            $fields,
+            self::loginPath($raw['login_path'] ?? null, $fail),
+            self::homePath('adopt_from', $raw['adopt_from'] ?? null, $fail),
+            self::homePath('written_by_app', $raw['written_by_app'] ?? null, $fail),
+        );
     }
 
     /**
@@ -93,7 +101,7 @@ final class CredentialSpec
         return self::parse($array, static fn (string $m): ManifestException => new ManifestException("credentials: {$m}"));
     }
 
-    /** @return array{login_path: ?string, adopt_from: ?string, fields: array<string, array<string, mixed>>} */
+    /** @return array{login_path: ?string, adopt_from: ?string, written_by_app: ?string, fields: array<string, array<string, mixed>>} */
     public function toArray(): array
     {
         $fields = [];
@@ -104,7 +112,7 @@ final class CredentialSpec
             );
         }
 
-        return ['login_path' => $this->loginPath, 'adopt_from' => $this->adoptFrom, 'fields' => $fields];
+        return ['login_path' => $this->loginPath, 'adopt_from' => $this->adoptFrom, 'written_by_app' => $this->writtenByApp, 'fields' => $fields];
     }
 
     /**
@@ -189,11 +197,11 @@ final class CredentialSpec
     }
 
     /**
-     * Relative to the account home, and never out of it: the file is read as root.
+     * `adopt_from` or `written_by_app`: relative to the account home, and never out of it: the file is read as root.
      *
      * @param  \Closure(string): ManifestException  $fail
      */
-    private static function adoptFrom(mixed $raw, \Closure $fail): ?string
+    private static function homePath(string $key, mixed $raw, \Closure $fail): ?string
     {
         if ($raw === null) {
             return null;
@@ -202,7 +210,7 @@ final class CredentialSpec
         $valid = is_string($raw) && ! str_starts_with(trim($raw), '/') && $segments !== []
             && array_filter($segments, static fn (string $s): bool => $s === '' || $s === '.' || $s === '..') === [];
         if (! $valid) {
-            throw $fail('credentials.adopt_from must be a relative path inside the account home');
+            throw $fail("credentials.{$key} must be a relative path inside the account home");
         }
 
         return trim($raw);

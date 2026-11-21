@@ -370,17 +370,29 @@ final class DindDeployMechanics implements DeployMechanics
         $this->aggregate()->domain($domain)->create();
     }
 
-    /** Every caller has just prepared the checkout, so a failed prepare or start may prepare it for another recipe. */
+    /**
+     * Every caller has just prepared the checkout, so a failed prepare or start may prepare it for another recipe.
+     * Once the app runs, a login it wrote itself becomes the project's app credentials.
+     */
     public function startApplication(): array
     {
         $failedPrepare = $this->failedPrepare;
         $this->failedPrepare = null;
 
-        return $this->recipeFallback()->start(
+        $result = $this->recipeFallback()->start(
             fn (): array => $this->aggregate()->startUserApp(),
             $this->prepareAgain ?? $this->preparing(true),
             $failedPrepare
         );
+        if (($result['exit_code'] ?? 1) === 0) {
+            try {
+                $this->dind->appCredentials()->adoptWrittenByApp();
+            } catch (\Throwable $e) {
+                $this->dind->shell()->logger()?->warn('Could not read the login the app wrote: '.$e->getMessage());
+            }
+        }
+
+        return $result;
     }
 
     public function abortPartialDeploy(bool $removeVolumes = false): void

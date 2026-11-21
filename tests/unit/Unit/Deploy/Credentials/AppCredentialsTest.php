@@ -302,4 +302,53 @@ class AppCredentialsTest extends TestCase
         $this->assertSame('https://a.example.com/', AppCredentials::loginUrl('https://a.example.com', null));
         $this->assertNull(AppCredentials::loginUrl(null, '/login'));
     }
+
+    public function test_a_login_the_app_wrote_replaces_the_generated_one_after_it_starts(): void
+    {
+        $spec = CredentialSpec::parse([
+            'written_by_app' => '.panelalpha/kanidm/admins.env',
+            'fields' => ['KANIDM_ADMIN_USER' => ['kind' => 'username', 'value' => 'idm_admin'], 'KANIDM_ADMIN_PASSWORD' => ['kind' => 'password']],
+        ], fn (string $m) => new ManifestException($m));
+        $stored = AppCredentials::reconcile($spec, null, [], self::noFile())['stored'];
+        $this->assertSame('.panelalpha/kanidm/admins.env', $stored['written_by_app'] ?? null);
+        $generated = $stored['fields']['KANIDM_ADMIN_PASSWORD']['value'];
+
+        $asked = [];
+        $read = static function (string $path) use (&$asked): ?array {
+            $asked[] = $path;
+
+            return ['KANIDM_ADMIN_PASSWORD' => 'Recovered4Kanidm', 'OTHER' => 'x'];
+        };
+        $result = AppCredentials::adoptWrittenByApp($stored, [], $read);
+
+        $this->assertSame(['.panelalpha/kanidm/admins.env'], $asked);
+        $this->assertSame(['KANIDM_ADMIN_PASSWORD'], $result['adopted']);
+        $this->assertSame('Recovered4Kanidm', $result['stored']['fields']['KANIDM_ADMIN_PASSWORD']['value']);
+        $this->assertSame('idm_admin', $result['stored']['fields']['KANIDM_ADMIN_USER']['value'], 'A field the file leaves out keeps its value.');
+        $this->assertNotSame($generated, $result['stored']['fields']['KANIDM_ADMIN_PASSWORD']['value']);
+
+        // Read again on the next start: the same value changes nothing; a redeploy keeps the stored one.
+        $this->assertSame([], AppCredentials::adoptWrittenByApp($result['stored'], [], $read)['adopted']);
+        $this->assertSame('Recovered4Kanidm', AppCredentials::reconcile($spec, $result['stored'], [], self::noFile())['stored']['fields']['KANIDM_ADMIN_PASSWORD']['value']);
+    }
+
+    public function test_a_login_the_app_wrote_is_not_taken_when_it_cannot_be_or_should_not_be(): void
+    {
+        $spec = CredentialSpec::parse(['written_by_app' => 'admins.env', 'fields' => ['PW' => ['kind' => 'password']]], fn (string $m) => new ManifestException($m));
+        $stored = AppCredentials::reconcile($spec, null, [], self::noFile())['stored'];
+
+        $missing = AppCredentials::adoptWrittenByApp($stored, [], self::noFile());
+        $this->assertSame([true, []], [$missing['missing'], $missing['adopted']]);
+        $this->assertSame($stored, $missing['stored']);
+
+        $quoted = AppCredentials::adoptWrittenByApp($stored, [], static fn (string $p): array => ['PW' => "it's"]);
+        $this->assertSame([], $quoted['adopted'], 'A value the env file cannot carry stays out.');
+
+        $overridden = AppCredentials::adoptWrittenByApp($stored, ['PW' => 'Owner-Chosen-42'], static fn (string $p): array => ['PW' => 'FromTheApp1']);
+        $this->assertSame([], $overridden['adopted'], "The project's env_vars win.");
+
+        $plain = AppCredentials::reconcile($this->spec(['PW' => ['kind' => 'password']]), null, [], self::noFile())['stored'];
+        $this->assertArrayNotHasKey('written_by_app', $plain);
+        $this->assertSame(['stored' => $plain, 'adopted' => [], 'missing' => false], AppCredentials::adoptWrittenByApp($plain, [], static fn (string $p): array => ['PW' => 'x1Y']));
+    }
 }
