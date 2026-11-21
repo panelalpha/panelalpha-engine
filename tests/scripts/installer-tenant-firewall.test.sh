@@ -42,12 +42,17 @@ docker() {
         ;;
     esac
 }
-bash() { echo "$* MTU=${DOCKER_NETWORK_MTU-unset}" >>"$W/ran"; }
+bash() {
+    echo "$* MTU=${DOCKER_NETWORK_MTU-unset}" >>"$W/ran"
+    [ -f "$W/fails" ] || return 0
+    cat "$W/fails" >&2
+    return 1
+}
 echo_info() { echo "$1" >>"$W/said"; }
 warn() { echo "$1" >>"$W/said"; }
 
 state() { # <members|none> <broker id|none> <broker's exit code>
-    rm -f "$W/members" "$W/broker" "$W/asked" "$W/ran" "$W/said" "$W/stdin"
+    rm -f "$W/members" "$W/broker" "$W/asked" "$W/ran" "$W/said" "$W/stdin" "$W/fails"
     [ "$1" = none ] || echo "$1" >"$W/members"
     [ "$2" = none ] || echo "$2" >"$W/broker"
     echo "$3" >"$W/ask"
@@ -81,6 +86,26 @@ for installer in installer.sh bootstrap-from-source.sh; do
     state 0 b1 0
     apply_tenant_network_firewall
     check "even with a broker running" "$FIREWALL --create --restart-docker MTU=1400" "$(ran)"
+
+    if [ "$installer" = installer.sh ]; then
+        check "a network made: no reason kept" "" "${TENANT_NETWORK_ERROR-unset}"
+
+        state none none 0
+        printf 'tenant-network-firewall: no free /16 for pash-tenants; set TENANT_NETWORK_PREFIX\n\n' >"$W/fails"
+        apply_tenant_network_firewall 2>"$W/stderr"
+        check "a network not made: the script's last line is the reason monitoring gets" \
+            "no free /16 for pash-tenants; set TENANT_NETWORK_PREFIX" "$TENANT_NETWORK_ERROR"
+        check "and the operator still sees it" "1" "$(grep -c 'no free /16' "$W/stderr")"
+
+        state none none 0
+        printf 'Error response from daemon: invalid pool request\n' >"$W/fails"
+        apply_tenant_network_firewall 2>/dev/null
+        check "Docker's own refusal is kept as it is" "Error response from daemon: invalid pool request" "$TENANT_NETWORK_ERROR"
+
+        state none none 0
+        apply_tenant_network_firewall
+        check "made on a retry: the old reason is dropped" "" "$TENANT_NETWORK_ERROR"
+    fi
 
     state 5 b1 0
     apply_tenant_network_firewall

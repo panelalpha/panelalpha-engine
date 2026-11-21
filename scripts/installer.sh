@@ -1591,10 +1591,17 @@ harden_host() {
 apply_tenant_network_firewall() {
     local compose=/opt/panelalpha/shared-hosting/docker-compose.yml
     # A missing network prints an empty line.
-    local on_network
+    local on_network errors
     on_network=$(docker network inspect -f '{{len .Containers}}' pash-tenants 2>/dev/null | tr -d '[:space:]') || true
     if [ "${on_network:-0}" = 0 ]; then
-        DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --create --restart-docker || true
+        errors=$(mktemp)
+        if DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --create --restart-docker 2>"$errors"; then
+            TENANT_NETWORK_ERROR=''
+        else
+            TENANT_NETWORK_ERROR=$(grep -v '^[[:space:]]*$' "$errors" | tail -n 1 | sed 's/^tenant-network-firewall: //' | cut -c 1-300)
+        fi
+        cat "$errors" >&2
+        rm -f "$errors"
     elif [ -z "$(docker compose -f "$compose" ps -q --status running root-broker 2>/dev/null)" ] ||
         ! docker compose -f "$compose" exec -T root-broker pa-broker --host host.applyTenantNetworkFirewall -- </dev/null; then
         echo_info "The accounts' network keeps the firewall in force until the new root broker applies it"
@@ -2005,8 +2012,11 @@ EOF
 
     # sites-db and the registries join pash-tenants: without it the
     # stack cannot start, so stop here and say why rather than at compose.
-    docker network inspect pash-tenants >/dev/null 2>&1 ||
-        echo_error "The accounts' network pash-tenants could not be created; the tenant-network-firewall messages above say why"
+    if ! docker network inspect pash-tenants >/dev/null 2>&1; then
+        [ -n "${TENANT_NETWORK_ERROR:-}" ] ||
+            echo_error "The accounts' network pash-tenants could not be created; the tenant-network-firewall messages above say why"
+        echo_error "The accounts' network pash-tenants could not be created: ${TENANT_NETWORK_ERROR}"
+    fi
 
     remove_unstarted_containers
     start_engine_stack

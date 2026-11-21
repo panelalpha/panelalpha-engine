@@ -125,11 +125,12 @@ LAN_IP=$(tn_host PRIVATE 25)
 LAN_ROUTER=$(tn_host PRIVATE 1)
 LAN=$(tn_prefix "$LAN_IP" 20)
 LAN_BROADCAST=$(tn_add "${LAN%/*}" 4095)
-tenant_prefix() {
+tenant_prefix_of() { # <prefix> <n> -- the prefix <n> /16s after <prefix>
     local net
-    net=$(tn_add "${TN_TENANT_NETWORK_CIDR%/*}" $(($1 << 16)))
+    net=$(tn_add "$1.0.0" $(($2 << 16)))
     echo "${net%.*.*}"
 }
+tenant_prefix() { tenant_prefix_of "${TN_TENANT_NETWORK_CIDR%.*.*}" "$1"; }
 T0=$(tenant_prefix 0)
 T1=$(tenant_prefix 1)
 T2=$(tenant_prefix 2)
@@ -138,6 +139,7 @@ T4=$(tenant_prefix 4)
 T7=$(tenant_prefix 7)
 T50=$(tenant_prefix 50)
 CANDIDATES=$(tn_prefix "$T0.0.0" 11)
+SHARED=${TN_CGNAT_CIDR%.*.*}
 
 failures=0
 expect() { # expect <label> <expected> <actual>
@@ -189,7 +191,16 @@ reset; echo "3: wg0    inet $T3.0.7/32 scope global wg0" >>"$W/addrs"; printf 'a
 expect "an interface address inside $T3: skipped too" "0" "$(run --create)"
 expect "$T4" "$T4.0.0/16" "$(created)"
 
-reset; echo "$CANDIDATES via $LAN_ROUTER dev eth0" >>"$W/routes"
+reset; echo "$TN_PRIVATE_10_CIDR via $LAN_ROUTER dev eth1" >>"$W/routes"
+expect "all of $TN_PRIVATE_10_CIDR routed (UpCloud): created" "0" "$(run --create)"
+expect "on the shared address space" "$SHARED.0.0/16" "$(created)"
+expect "and recorded in .env" "$SHARED" "$(recorded)"
+
+reset; printf '%s via %s dev eth1\n%s dev tailscale0\n' "$TN_PRIVATE_10_CIDR" "$LAN_ROUTER" "$SHARED.0.0/16" >>"$W/routes"
+expect "and its first /16 taken: the next one" "0" "$(run --create)"
+expect "$(tenant_prefix_of "$SHARED" 1)" "$(tenant_prefix_of "$SHARED" 1).0.0/16" "$(created)"
+
+reset; printf '%s via %s dev eth0\n%s via %s dev eth0\n' "$CANDIDATES" "$LAN_ROUTER" "$TN_CGNAT_CIDR" "$LAN_ROUTER" >>"$W/routes"
 expect "every candidate taken: refused" "1" "$(run --create)"
 expect "nothing created" "" "$(created)"
 expect "and the operator is told what to set" "1" "$(grep -c 'set TENANT_NETWORK_PREFIX' "$W/out")"
@@ -235,7 +246,7 @@ expect "recorded as --create records it" "$T2" "$(recorded)"
 expect "and made by the broker, not here" "" "$(created)"
 expect "docker's CLI is never asked" "0" "$(cat "$W/calls" 2>/dev/null | grep -c '^docker')"
 
-reset; echo "$CANDIDATES via $LAN_ROUTER dev eth0" >>"$W/routes"
+reset; printf '%s via %s dev eth0\n%s via %s dev eth0\n' "$CANDIDATES" "$LAN_ROUTER" "$TN_CGNAT_CIDR" "$LAN_ROUTER" >>"$W/routes"
 expect "every candidate taken: the broker is refused a prefix" "1" "$(run --prefix)"
 expect "with what to set" "1" "$(grep -c 'set TENANT_NETWORK_PREFIX' "$W/out")"
 expect "and nothing recorded" "" "$(recorded)"

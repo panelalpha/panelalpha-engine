@@ -35,8 +35,10 @@
 # --prefix prints the prefix --create would pick, from `network <cidr>` lines on stdin.
 #
 # --create makes the network when it is missing, on the first /16 of
-# 10.200-10.219 that nothing on the host uses (routes, addresses, Docker
-# networks), and records it as TENANT_NETWORK_PREFIX in .env, which
+# 10.200-10.219, then of the shared address space 100.64-100.127 (for hosts
+# that route all of 10.0.0.0/8, such as UpCloud's utility network), that
+# nothing on the host uses (routes, addresses, Docker networks), and records
+# it as TENANT_NETWORK_PREFIX in .env, which
 # docker-compose.yml reads. A prefix already in .env is used as it is, and
 # refused if it overlaps. --restart-docker is for the installers only: it
 # restarts Docker once when a firewall flush (moving a host off CSF) left it
@@ -124,10 +126,10 @@ choose_prefix() {
         echo "$configured"
         return 0
     fi
-    for b in $(seq 200 219); do
-        echo "$used" | overlaps "10.$b.0.0/16" || { echo "10.$b"; return 0; }
+    for candidate in $(seq 200 219 | sed s/^/10./) $(seq 64 127 | sed s/^/100./); do
+        echo "$used" | overlaps "$candidate.0.0/16" || { echo "$candidate"; return 0; }
     done
-    echo "tenant-network-firewall: no free /16 in 10.200-10.219 for $NET; set TENANT_NETWORK_PREFIX in $ENV_FILE" >&2
+    echo "tenant-network-firewall: no free /16 in 10.200-10.219 or 100.64-100.127 for $NET; set TENANT_NETWORK_PREFIX in $ENV_FILE" >&2
     return 1
 }
 
