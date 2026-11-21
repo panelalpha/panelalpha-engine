@@ -14,6 +14,10 @@ to `~/.panelalpha/kanidm/admins.env` in the account (0600):
 - `idm_admin` (`IDM_ADMIN_PASSWORD`): people, groups, credential resets.
 - `admin` (`ADMIN_PASSWORD`): the server's own settings, OAuth2 clients.
 
+idm_admin's login is also the project's app credentials (`GET
+/projects/{name}/app-credentials`, MCP `app_credentials_get`): the engine reads
+it from `admins.env` once the app has started (`credentials.written_by_app`).
+
 Both sign in at `/ui/login` and with the `kanidm` CLI
 (`kanidm login -H <site URL> -D idm_admin`). People you create then set their
 own credentials (a password plus TOTP, or a passkey) through a reset link:
@@ -45,7 +49,7 @@ deploy recover both admins again and write a new one.
   password. They are protected service accounts (only `recover-account` sets
   one, at random), a password set on any service account fails on 1.12.1
   (`pwd_changed_time` schema violation), and a person needs MFA to sign in. So
-  the engine's `credentials:` would hand out a password that never works.
+  a password the engine generated would never work.
   Instead `recover` (`files/panelalpha/kanidm/kanidm-recover.sh`) runs once
   kanidmd is healthy: on a new database it runs
   `kanidmd scripting recover-account` for `idm_admin` and `admin` over the
@@ -54,6 +58,10 @@ deploy recover both admins again and write a new one.
   database, it changes nothing. Its image is upstream's `kanidm/tools` (bash,
   curl, the CLI) plus `kanidmd` copied from the server image
   (`files/panelalpha/kanidm/Dockerfile`), as the server image has no shell.
+- `credentials:` declares idm_admin's login with `written_by_app:
+  .panelalpha/kanidm/admins.env`: after each start the engine takes
+  `IDM_ADMIN_PASSWORD` from that file, so the app credentials name the
+  password that works (until the first start they hold a generated one).
 - `hooks/prepare.sh` creates `~/.panelalpha/kanidm` (0700).
 - `ready` makes `compose up -d` wait until kanidm is healthy and `recover` has
   finished.

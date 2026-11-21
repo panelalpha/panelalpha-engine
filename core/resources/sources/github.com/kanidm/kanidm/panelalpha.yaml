@@ -19,9 +19,17 @@ description: >-
   random one with `kanidmd recover-account`. kanidm has no way to set a chosen
   password on them (protected service accounts; setting a password on any
   service account fails on 1.12.1) and a person cannot sign in with a
-  password alone (MFA by default), so the engine's `credentials:` cannot be
-  used. Instead the `recover` service, once kanidmd is healthy, runs
+  password alone (MFA by default), so the engine cannot generate the login.
+  Instead the `recover` service, once kanidmd is healthy, runs
   recover-account for both, once per database, and writes the passwords to
   ~/.panelalpha/kanidm/admins.env (0600); both sign in to the web UI at
-  /ui/login. A `ready` gate makes the deploy finish only after that.
+  /ui/login. A `ready` gate makes the deploy finish only after that, and
+  `credentials.written_by_app` makes idm_admin's login the project's app
+  credentials once the app has started.
 port_scheme: https
+credentials:
+  login_path: /ui/login
+  written_by_app: .panelalpha/kanidm/admins.env
+  fields:
+    IDM_ADMIN_USERNAME: {kind: username, value: idm_admin}
+    IDM_ADMIN_PASSWORD: {kind: password}
