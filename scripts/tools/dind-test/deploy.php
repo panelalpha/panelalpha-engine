@@ -633,6 +633,8 @@ class DindDeployTest
     private function createEngineObjects(): bool
     {
         $this->system = new TestSystem($this->testBaseDir, $this->engineRoot, $this->hostCacheDir);
+        // Code that looks a System up ($user->project(), app(System::class)) gets this one, not the engine's.
+        app()->instance(RealSystem::class, $this->system);
         $this->userModel = new InMemoryUser();
         $this->userModel->id = 1;
         $this->userModel->username = $this->containerName;

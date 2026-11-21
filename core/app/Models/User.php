@@ -889,9 +889,13 @@ class User extends Authenticatable
         return $names;
     }
 
+    /**
+     * The project on $system, or on the System the container hands out: the engine's own, or the one a test or the
+     * dind-test harness put there, so a lookup that names none stays on the caller's host.
+     */
     public function project(?System $system = null): AppSystemProject
     {
-        return ($system ?? new System)->project($this);
+        return ($system ?? app(System::class))->project($this);
     }
 
     /** The stored value for one limit, cast, or null when it is unset. */
