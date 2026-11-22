@@ -1652,6 +1652,23 @@ OUT;
         $this->assertSame('out-of-memory', DeployFailureExplainer::match($output)['rule'] ?? null);
     }
 
+    /** Floci UI: npm's arborist crashed, which npm reports as an error about nothing the project declared. */
+    public function test_npms_own_tree_crash_is_not_read_as_a_dependency_problem(): void
+    {
+        $output = <<<'OUT'
+#14 [frontend-build 4/6] RUN npm install
+#14 22.78 npm error Cannot read properties of null (reading 'edgesOut')
+#14 22.79 npm notice
+#14 22.79 npm error A complete log of this run can be found in: /root/.npm/_logs/2026-11-21T13_31_28_371Z-debug-0.log
+#14 ERROR: process "/bin/sh -c npm install" did not complete successfully: exit code: 1
+OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('npm-dependency-tree-crash', $match['rule'] ?? null);
+        $this->assertStringContainsString('a bug inside npm', $match['message'] ?? '');
+    }
+
     /** minthcm: the account daemon's libnetwork socket was missing. */
     public function test_a_missing_libnetwork_socket_is_a_server_fault(): void
     {
@@ -1665,6 +1682,73 @@ OUT;
 
         $this->assertSame('build-daemon-fault', $match['rule'] ?? null);
         $this->assertStringContainsString('not in the project', $match['message']);
+    }
+
+    /**
+     * Project deadair, reproduced on a sysbox dind with the containerd image store: `--mount=from` a stage image of more than one
+     * layer is refused by the account's Docker. `COPY --from` the same stage builds.
+     */
+    public function test_a_multi_layer_stage_that_could_not_be_mounted_names_the_copy_way_out(): void
+    {
+        $output = <<<'OUT'
+#6 [app 2/2] RUN --mount=from=tts,target=/mnt/tts set -eux; cat /mnt/tts/data/hello
+#6 0.173 runc run failed: unable to start container process: error during container init: error mounting "overlay" to rootfs at "/mnt/tts": mount src=overlay, dst=/mnt/tts, dstFd=/proc/thread-self/fd/11, data=lowerdir=/var/lib/docker/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/5/fs:/var/lib/docker/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/4/fs,userxattr,index=off: invalid argument
+#6 ERROR: process "/bin/sh -c set -eux; cat /mnt/tts/data/hello" did not complete successfully: exit code: 1
+OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('stage-mount-refused', $match['rule'] ?? null);
+        $this->assertStringContainsString('(/mnt/tts)', $match['message']);
+        $this->assertStringContainsString('COPY --from=<stage>', $match['message']);
+        $this->assertStringContainsString('not of the project', $match['message']);
+    }
+
+    /** The monitoring copy of the same failure: the account's paths are redacted to a base64 marker and the reason is cut off. */
+    public function test_a_redacted_stage_mount_refusal_is_still_named(): void
+    {
+        $output = <<<'OUT'
+#42 [stage-7 10/45] RUN --mount=from=tts,target=/mnt/tts set -eux;
+#42 0.419 runc run failed: unable to start container process: error during container init: error mounting "overlay" to rootfs at "/mnt/tts": mount src=overlay, dst=/mnt/tts, data=lowerdir=/PF9dQy5jb21lL2RlYWRhaXIvZG9ja2VyL2NvbnRhaW5lcmQvZGF...containerd.snapshotter.v1.overlayfs/snapshots/113/fs:...
+#42 ERROR: process "/bin/sh -c set -eux;" did not complete
+OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('stage-mount-refused', $match['rule'] ?? null);
+    }
+
+    /** Project Maya: `ARG LLAMA_CPP_COMMIT` has no default and only `docker/build.sh` passes it, so `test -n` stopped the step. */
+    public function test_a_build_arg_only_the_projects_own_build_script_passes_is_named(): void
+    {
+        $output = <<<'OUT'
+#13 [build 4/7] RUN test -n "$LLAMA_CPP_COMMIT"     && curl -fsSL -o /tmp/llama.zip "https://github.com/ggml-org/llama.cpp/archive/${LLAMA_CPP_COMMIT}.zip"     && unzip -q /tmp/llama.zip -d /tmp     && mv "/tmp/llama.cpp-${LLAMA_CPP_COMMIT}" /llama.cpp     && rm /tmp/llama.zip
+#13 ERROR: process "/bin/sh -c test -n \"$LLAMA_CPP_COMMIT\"     && curl -fsSL -o /tmp/llama.zip \"https://github.com/ggml-org/llama.cpp/archive/${LLAMA_CPP_COMMIT}.zip\"     && unzip -q /tmp/llama.zip -d /tmp     && mv \"/tmp/llama.cpp-${LLAMA_CPP_COMMIT}\" /llama.cpp     && rm /tmp/llama.zip" did not complete successfully: exit code: 1
+Dockerfile:34
+--------------------
+  34 | >>> RUN test -n "$LLAMA_CPP_COMMIT" \
+--------------------
+failed to solve: process "/bin/sh -c test -n \"$LLAMA_CPP_COMMIT\"     && curl -fsSL -o /tmp/llama.zip \"https://github.com/ggml-org/llama.cpp/archive/${LLAMA_CPP_COMMIT}.zip\"" did not complete successfully: exit code: 1
+OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('build-arg-guard-unset', $match['rule'] ?? null);
+        $this->assertStringContainsString('build argument LLAMA_CPP_COMMIT', $match['message'] ?? '');
+    }
+
+    /** The guard rule sits after the specific ones, so a build step it heads that failed for its own reason keeps that reason. */
+    public function test_a_guarded_build_step_that_failed_for_its_own_reason_keeps_that_reason(): void
+    {
+        $output = <<<'OUT'
+#5 0.4 test -n "$RELEASE"
+#5 9.1 error: could not compile `serde` (lib) due to 2 previous errors
+#5 ERROR: process "/bin/sh -c test -n \"$RELEASE\" && cargo build --release" did not complete successfully: exit code: 101
+OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertNotSame('build-arg-guard-unset', $match['rule'] ?? null);
     }
 
     /**

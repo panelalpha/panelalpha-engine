@@ -390,6 +390,7 @@ class DeployFailureExplainer
             ...self::gitBinaryRules(),
             ...self::installRules(),
             ...self::repositoryRules(),
+            ...self::buildArgGuardRules(),
             ...self::lastResortRules(),
         ];
     }
@@ -932,13 +933,24 @@ class DeployFailureExplainer
 
     /**
      * The account daemon's libnetwork socket not answering stops every RUN step (BuildKit's trailing EOF says nothing). A FROM
-     * build argument with no default is one only the repository's CI passes, refused before anything is pulled.
+     * build argument with no default is one only the repository's CI passes, refused before anything is pulled. A stage image
+     * with more than one layer cannot be mounted as a directory (see stage-mount-refused): the account's Docker mounts it with
+     * `userxattr` over its own overlay-backed store, which the kernel refuses with `invalid argument`.
      *
      * @return array<string, array{0: string, 1: callable(array<int|string, string>, string): ?string}>
      */
     private static function buildDaemonRules(): array
     {
         return [
+            'stage-mount-refused' => [
+                '/error mounting "overlay" to rootfs at "\/([^"]+)": mount src=overlay[^\n]*containerd\.snapshotter\.v1\.overlayfs/',
+                static fn (array $m): string => "A build step asked to mount a build stage as a directory (/{$m[1]}) and the account's "
+                        .'Docker refused it: a stage image with more than one layer cannot be mounted that way inside the '
+                        .'account, though the kernel also refuses the mount itself. `RUN --mount=from=<stage>` needs the '
+                        .'mount; `COPY --from=<stage> <source> <destination>` copies the files instead and does not, so '
+                        .'use it for a multi-layer stage. This is a limit of the account environment, not of the project.',
+            ],
+
             'build-daemon-fault' => [
                 '/error running prestart hook[^\n]*libnetwork\/\S+\.sock/',
                 static fn (): string => "The account's Docker daemon could not start a build container: its network controller did "
@@ -952,6 +964,27 @@ class DeployFailureExplainer
                         ."builds when the project's own tooling passes --build-arg {$m[1]}=..., and nothing in the "
                         .'repository supplies it. It needs a PanelAlpha recipe that sets build_args, or a default '
                         .'in the Dockerfile.',
+            ],
+        ];
+    }
+
+    /**
+     * A `test -n "$ARG"` guard heading a RUN that printed nothing: the argument only the project's own build script passes, or the
+     * `curl -s` it guards failing silently. Last before the last resort, since the same guard heads build steps whose own failure
+     * a specific rule above already names.
+     *
+     * @return array<string, array{0: string, 1: callable(array<int|string, string>, string): ?string}>
+     */
+    private static function buildArgGuardRules(): array
+    {
+        return [
+            'build-arg-guard-unset' => [
+                '/process "\/bin\/sh -c (?:test -n|\[ -n) \\\\?"?\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?\\\\?"?[^\n]*?" did not complete successfully: exit code: 1/',
+                static fn (array $m): string => "A build step headed by `test -n \"{$m[1]}\"` failed at once, with no output of its own: either the "
+                        ."build argument {$m[1]} had no value (this Dockerfile only builds when the project's own "
+                        ."tooling passes --build-arg {$m[1]}=..., and nothing here supplies it) or the command it "
+                        .'guards failed silently, as `curl -s` does. Give the argument a default or set it under '
+                        ."`build_args` in a panelalpha.yaml, and drop curl's `-s` so a download failure prints its reason.",
             ],
         ];
     }
@@ -1119,7 +1152,8 @@ class DeployFailureExplainer
 
     /**
      * The out-of-sync lockfile precedes dependency-conflict, as its log carries `npm warn ERESOLVE` lines; that rule takes npm's error
-     * form only, and ERESOLVE as a case-sensitive word (Vite's `--debug` dump prints `createResolver`).
+     * form only, and ERESOLVE as a case-sensitive word (Vite's `--debug` dump prints `createResolver`). npm crashing on its own tree
+     * comes before both, as it prints no reason the other two would read.
      *
      * @return array<string, array{0: string, 1: callable(array<int|string, string>, string): ?string}>
      */
@@ -1150,6 +1184,14 @@ class DeployFailureExplainer
                         .'and `npm ci` installs only from a lockfile that does. Regenerate it with '
                         .'`npm install` and commit it.';
                 },
+            ],
+
+            'npm-dependency-tree-crash' => [
+                '/npm (?:error|ERR!) Cannot read properties of null \(reading \'edgesOut\'\)/',
+                static fn (): string => 'npm itself crashed while it built the dependency tree (`Cannot read properties of null '
+                        .'(reading \'edgesOut\')`) — a bug inside npm\'s resolver, not a statement about this project\'s '
+                        .'dependencies. Installing from a committed package-lock.json with `npm ci`, or running a newer '
+                        .'npm in the Dockerfile (`RUN npm install -g npm@latest`) before the install step, usually avoids it.',
             ],
 
             'dependency-conflict' => [
