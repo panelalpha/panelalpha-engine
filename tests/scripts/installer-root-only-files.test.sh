@@ -11,7 +11,7 @@ SCRIPT_DIR="$ROOT/scripts"
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 
-for fn in running_bind_sources place_mounted_engine_files replace_running_updaters unzip_panelalpha_engine hand_engine_files_to_root hand_account_compose_files; do
+for fn in running_bind_sources place_mounted_engine_files replace_running_updaters unzip_panelalpha_engine hand_engine_files_to_root hand_account_compose_files hand_engine_written_directory; do
     sed -n "/^${fn}() {/,/^}\$/p" "$SCRIPT_DIR/installer.sh" >>"$W/funcs.sh"
 done
 # shellcheck source=/dev/null
@@ -48,6 +48,17 @@ touch "$W/chowned"
 INSTALL_DIR="$W/install"
 PANELALPHA_DIR="$W/opt"
 ENGINE="$PANELALPHA_DIR/shared-hosting"
+
+# The host's users directory is owned by root or the engine (33); a from-source upload left it at 1000. Every other
+# stat question is the real one.
+REAL_STAT=$(command -v stat)
+cat >"$W/bin/stat" <<EOF
+#!/bin/bash
+if [ "\$1" = -c ] && [ "\$2" = %u ] && [ "\$4" = "$ENGINE/users" ]; then cat "$W/users-uid"; exit 0; fi
+exec "$REAL_STAT" "\$@"
+EOF
+chmod +x "$W/bin/stat"
+echo 0 >"$W/users-uid"
 SCRIPTS=(scripts/tenant-network-firewall.sh scripts/build-network-firewall.sh scripts/prune-project-caches.sh
     scripts/letsencrypt-request-cert.sh scripts/updater.sh scripts/webserver.sh scripts/firewall.sh
     scripts/firewall/ufw.sh updater.sh webserver.sh installer.sh)
@@ -181,6 +192,17 @@ for f in users users/alice users/alice/docker-compose.yml; do
     check "$f keeps its owner, the engine or root" "0" "$(grep -cxF -- "$ENGINE/$f" "$W/chowned")"
     check "$f loses group and other write" "0" "$(($(stat -c '0%a' "$ENGINE/$f") & 022))"
 done
+
+# A tree a workstation uploaded before 2.3.0 left the users directory at its own uid; an update repairs it there,
+# since cp keeps the owner of a directory that already exists.
+echo 33 >"$W/users-uid"
+hand_engine_files_to_root "$PANELALPHA_DIR" 2>/dev/null
+check "a users directory the engine owns is left alone" "0" "$(grep -cxF -- "$ENGINE/users" "$W/chowned")"
+echo 1000 >"$W/users-uid"
+hand_engine_files_to_root "$PANELALPHA_DIR" 2>/dev/null
+check "a users directory another uid owns is handed to root" "1" "$(grep -cxF -- "$ENGINE/users" "$W/chowned")"
+check "the account directory below it keeps its owner" "0" "$(grep -cxF -- "$ENGINE/users/alice" "$W/chowned")"
+echo 0 >"$W/users-uid"
 check ".env-core is left to secure-env-core.sh" "640 0" "$(stat -c %a "$ENGINE/.env-core") $(grep -c 'env-core' "$W/chowned")"
 check "a link is not followed" "0" "$(grep -c -- 'link\|outside\|webserver$' "$W/chowned")"
 check "what a link points at keeps its mode" "666" "$(stat -c %a "$W/outside")"

@@ -1323,8 +1323,20 @@ hand_engine_files_to_root() { # <panelalpha dir>
 
 hand_account_compose_files() { # <users dir>
     [ -d "$1" ] || return 0
-    find "$1" -maxdepth 1 -type d -exec chmod go-w {} + &&
+    hand_engine_written_directory "$1" &&
+        find "$1" -maxdepth 1 -type d -exec chmod go-w {} + &&
         find "$1" -mindepth 2 -maxdepth 2 -type f -name docker-compose.yml -exec chmod go-w {} +
+}
+
+# A directory the root broker reads compose files through must belong to root or to the engine (www-data, 33); it
+# refuses every account compose action on one anybody else owns. A tree uploaded from a workstation before 2.3.0 left
+# the users directory at the workstation's uid, and `cp -Rf --preserve=mode` keeps the owner of a directory
+# that already exists, so an update is the one place such a host is repaired. Handing it to root is safe: the engine
+# makes each account's directory below it through the broker, as root.
+hand_engine_written_directory() { # <dir>
+    local owner
+    owner=$(stat -c %u -- "$1") || return 1
+    [ "$owner" = 0 ] || [ "$owner" = 33 ] || chown root:root "$1"
 }
 
 # bash reads the running updater as it goes, so it is renamed in, never rewritten.
