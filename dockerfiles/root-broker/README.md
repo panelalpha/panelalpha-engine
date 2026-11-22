@@ -66,6 +66,10 @@ The client and the broker speak frames (`protocol.py`): one type byte, a 4-byte 
 `REQUEST` (JSON), its stdin as `STDIN` frames and `STDIN_END`; the broker answers with `STDOUT`, `STDERR` and one
 `EXIT`. A client that hangs up stops its request: the command is killed, an API run is removed.
 
+An action can end before the client has sent `STDIN_END`: the broker answers, closes, and the client's write of that
+last frame then fails with `EPIPE` on a socket that still holds the answer. `pa-root` reads that as the answer
+arriving, never as a failed request, so a fast action is not reported as `pa-root: [Errno 32] Broken pipe`.
+
 | Exit | Meaning |
 |---|---|
 | the command's | the action ran; its exit code is the caller's |

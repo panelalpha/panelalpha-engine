@@ -75,7 +75,7 @@ class Session:
         if self.resized is not None:
             self.selector.register(self.resized, selectors.EVENT_READ, self.on_resize)
         if not self.watch_stdin():
-            self.conn.sendall(protocol.frame(protocol.STDIN_END))
+            self.to_broker(protocol.frame(protocol.STDIN_END))
         while True:
             for key, _ in self.selector.select():
                 code = key.data()
@@ -95,18 +95,37 @@ class Session:
         except OSError:
             data = b''
         if data:
-            self.conn.sendall(protocol.frame(protocol.STDIN, data))
+            self.to_broker(protocol.frame(protocol.STDIN, data))
             return None
-        self.selector.unregister(self.stdin)
-        self.conn.sendall(protocol.frame(protocol.STDIN_END))
+        self.unwatch_stdin()
+        self.to_broker(protocol.frame(protocol.STDIN_END))
         return None
+
+    def to_broker(self, frame):
+        """Input to the broker; a broker that took no more of it has answered, so the answer is still read.
+
+        A request that finished before the client had sent its last frame closes the connection with that frame
+        unread, and the client's write then fails with EPIPE: that is the answer arriving, not the request failing.
+        """
+        try:
+            self.conn.sendall(frame)
+            return True
+        except OSError:
+            self.unwatch_stdin()
+            return False
+
+    def unwatch_stdin(self):
+        try:
+            self.selector.unregister(self.stdin)
+        except (KeyError, ValueError):
+            pass
 
     def on_resize(self):
         try:
             os.read(self.resized, CHUNK)
         except BlockingIOError:
             pass
-        self.conn.sendall(protocol.resize(*terminal.size_of(self.stdin)))
+        self.to_broker(protocol.resize(*terminal.size_of(self.stdin)))
         return None
 
     def from_broker(self):
@@ -184,5 +203,5 @@ def main(argv):
     try:
         return ask(conn, action, values, host, passing, pty)
     except (protocol.ProtocolError, OSError) as e:
-        print(f'pa-root: {e}', file=sys.stderr)
+        print(f'pa-root: {action}: {e}', file=sys.stderr)
         return protocol.EXIT_PROTOCOL
