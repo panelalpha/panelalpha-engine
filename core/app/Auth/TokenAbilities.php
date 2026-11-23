@@ -121,6 +121,10 @@ class TokenAbilities
         array $existing = [],
         ?array $projects = null
     ): array {
+        if ($commands === [] || $routes === []) {
+            throw new \InvalidArgumentException('An empty limit would be stored as no limit at all; revoke the token instead.');
+        }
+
         // Anything outside this vocabulary belongs to someone else.
         $kept = self::foreign($existing);
 
@@ -377,7 +381,8 @@ class TokenAbilities
     }
 
     /**
-     * This token's abilities with its MCP command limit replaced.
+     * This token's abilities with its MCP command limit replaced. A legacy token limited here keeps MCP only:
+     * a tool call skips REST route limits, so its unlimited REST surface beside a limited one would undo it.
      *
      * @param  array<int, string>|null  $commands
      * @return array<int, string>
@@ -385,7 +390,7 @@ class TokenAbilities
     public function withCommands(?array $commands): array
     {
         return self::build(
-            api: $this->mayUseApi(),
+            api: $this->mayUseApi() && ! ($commands !== null && $this->isLegacy()),
             mcp: true,
             commands: $commands,
             routes: $this->routes(),
@@ -395,7 +400,8 @@ class TokenAbilities
     }
 
     /**
-     * This token's abilities with its REST operation limit replaced.
+     * This token's abilities with its REST operation limit replaced. A legacy token limited here keeps the REST
+     * API only: a tool call skips route limits, so its unlimited MCP surface would undo the limit.
      *
      * @param  array<int, string>|null  $routes
      * @return array<int, string>
@@ -404,7 +410,7 @@ class TokenAbilities
     {
         return self::build(
             api: true,
-            mcp: $this->mayUseMcp(),
+            mcp: $this->mayUseMcp() && ! ($routes !== null && $this->isLegacy()),
             commands: $this->commands(),
             routes: $routes,
             existing: $this->abilities,

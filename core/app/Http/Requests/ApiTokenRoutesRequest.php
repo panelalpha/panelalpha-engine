@@ -11,14 +11,17 @@ class ApiTokenRoutesRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'routes' => ['present', 'nullable', 'array', 'max:2000'],
+            'routes' => ['present', 'nullable', 'array', 'min:1', 'max:2000'],
             'routes.*' => ['string', 'distinct', Rule::in(ApiSurface::all())],
         ];
     }
 
     public function messages(): array
     {
-        return ['routes.*.in' => ':input is not an operation of this API; write one as its method, a space and its path, as the OpenAPI document lists it.'];
+        return [
+            'routes.*.in' => ':input is not an operation of this API; write one as its method, a space and its path, as the OpenAPI document lists it.',
+            'routes.min' => 'A token limited to no operation is not a limit the engine can store; revoke the token to stop it.',
+        ];
     }
 
     /** @return list<string>|null the operations the token may call, null for every one */

@@ -14,7 +14,7 @@ class ApiTokenStoreRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:255'],
             'expires_in' => ['sometimes', 'nullable', 'string', 'max:16', new TokenLifetime],
-            'routes' => ['sometimes', 'nullable', 'array', 'max:2000'],
+            'routes' => ['sometimes', 'nullable', 'array', 'min:1', 'max:2000'],
             'routes.*' => ['string', 'distinct', Rule::in(ApiSurface::all())],
             'projects' => ['sometimes', 'nullable', 'array', 'max:500'],
             'projects.*' => ['string', 'exists:users,username'],
@@ -23,6 +23,9 @@ class ApiTokenStoreRequest extends FormRequest
 
     public function messages(): array
     {
-        return ['routes.*.in' => ':input is not an operation of this API; write one as its method, a space and its path, as the OpenAPI document lists it.'];
+        return [
+            'routes.*.in' => ':input is not an operation of this API; write one as its method, a space and its path, as the OpenAPI document lists it.',
+            'routes.min' => 'A token limited to no operation is not a limit the engine can store; revoke the token to stop it.',
+        ];
     }
 }

@@ -314,6 +314,41 @@ class TokenAbilitiesTest extends TestCase
         $this->assertTrue($widened->mayUseApi());
     }
 
+    public function test_an_empty_limit_is_never_built(): void
+    {
+        foreach (['routes' => ['routes' => []], 'commands' => ['commands' => []]] as $case => $limit) {
+            try {
+                TokenAbilities::build(...['api' => true, 'mcp' => true, ...$limit]);
+                $this->fail("An empty {$case} list must not be stored as no limit.");
+            } catch (\InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    /** Each surface's limit is skipped at the other door, so a narrowed legacy token keeps only the narrowed one. */
+    public function test_a_legacy_token_limited_on_one_surface_keeps_only_that_surface(): void
+    {
+        $legacy = TokenAbilities::fromList(['*']);
+
+        $routes = TokenAbilities::fromList($legacy->withRoutes(['GET /projects']));
+        $this->assertTrue($routes->mayUseApi());
+        $this->assertFalse($routes->mayUseMcp());
+        $this->assertFalse($routes->isLegacy());
+
+        $commands = TokenAbilities::fromList($legacy->withCommands(['project_list']));
+        $this->assertTrue($commands->mayUseMcp());
+        $this->assertFalse($commands->mayUseApi());
+    }
+
+    public function test_lifting_no_limit_on_a_legacy_token_keeps_both_surfaces(): void
+    {
+        $lifted = TokenAbilities::fromList(TokenAbilities::fromList(['*'])->withRoutes(null));
+
+        $this->assertTrue($lifted->mayUseApi());
+        $this->assertTrue($lifted->mayUseMcp());
+    }
+
     public function test_the_label_says_what_a_token_is(): void
     {
         $this->assertSame('everything', TokenAbilities::fromList(['*'])->label());

@@ -137,7 +137,7 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'name', type: 'string', example: 'deploy-bot'),
         new OA\Property(property: 'routes', type: 'array', nullable: true, items: new OA\Items(type: 'string'), description: 'The operations it may call, "VERB /path"; null for every one.'),
         new OA\Property(property: 'projects', type: 'array', nullable: true, items: new OA\Items(type: 'string'), description: 'The projects it may reach; null for every one.'),
-        new OA\Property(property: 'legacy', type: 'boolean', description: 'A token from before tokens had kinds; it reaches the API and MCP alike.'),
+        new OA\Property(property: 'legacy', type: 'boolean', description: 'A token from before tokens had kinds; it reaches the API and MCP alike until its operations are limited, which keeps it to the API.'),
         new OA\Property(property: 'expires_at', type: 'string', format: 'date-time', nullable: true),
         new OA\Property(property: 'last_used_at', type: 'string', format: 'date-time', nullable: true),
         new OA\Property(property: 'revoked_at', type: 'string', format: 'date-time', nullable: true),

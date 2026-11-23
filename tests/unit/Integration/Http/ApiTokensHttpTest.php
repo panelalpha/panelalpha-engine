@@ -82,6 +82,34 @@ class ApiTokensHttpTest extends TestCase
         $this->assertSame(['api'], PersonalAccessToken::findOrFail($id)->abilities);
     }
 
+    /** An empty list would be stored as no route ability at all, which reads back as every operation. */
+    public function test_an_empty_route_list_is_refused_rather_than_stored_as_every_operation(): void
+    {
+        $this->postJson('/api/api-tokens', ['name' => 'x', 'routes' => []])
+            ->assertStatus(422)->assertJsonValidationErrors('routes');
+        $id = $this->postJson('/api/api-tokens', ['name' => 'ci', 'routes' => ['GET /projects']])->json('data.id');
+
+        $this->putJson("/api/api-tokens/{$id}/routes", ['routes' => []])
+            ->assertStatus(422)->assertJsonValidationErrors('routes');
+
+        $this->assertSame(['GET /projects'], TokenAbilities::of(PersonalAccessToken::findOrFail($id))->routes());
+        $this->assertCount(1, PersonalAccessToken::all());
+    }
+
+    /** A tool call skips route limits, so a legacy token limited here must not keep an unlimited MCP door. */
+    public function test_limiting_a_legacy_tokens_routes_keeps_it_to_the_api(): void
+    {
+        $legacy = Admin::rootAccount()->createToken('old', ['*'])->accessToken;
+
+        $this->putJson("/api/api-tokens/{$legacy->id}/routes", ['routes' => ['GET /projects']])
+            ->assertOk()->assertJsonPath('data.routes', ['GET /projects'])->assertJsonPath('data.legacy', false);
+
+        $abilities = TokenAbilities::of(PersonalAccessToken::findOrFail($legacy->id));
+        $this->assertTrue($abilities->mayUseApi());
+        $this->assertFalse($abilities->mayUseMcp());
+        $this->assertSame(['GET /projects'], $abilities->routes());
+    }
+
     public function test_revoke_keeps_the_token_listed_and_delete_removes_it(): void
     {
         $id = $this->postJson('/api/api-tokens', ['name' => 'ci'])->json('data.id');

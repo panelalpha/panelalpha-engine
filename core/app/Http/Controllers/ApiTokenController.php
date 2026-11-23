@@ -47,7 +47,8 @@ class ApiTokenController extends Controller
         summary: 'Mint an API token',
         description: 'A token for the REST API only, answered once as `plain_text_token` and never again. '
             .'`expires_in` is a number and a unit (30m, 12h, 90d, 2w); left out, it never expires. `routes` limits it '
-            .'to those operations, written "VERB /path" as in this document; left out, it may call every one. '
+            .'to those operations, written "VERB /path" as in this document; left out, it may call every one, and an empty '
+            .'list is refused. '
             .'`projects` scopes it to those projects. The token stays within the caller\'s own: a caller limited to some '
             .'operations must name `routes` among its own, and one that expires must give a lifetime that ends by then; '
             .'otherwise 422 on that field. Refused with 403 to a token scoped to some projects. Panel-facing; not an MCP '
@@ -91,7 +92,8 @@ class ApiTokenController extends Controller
         path: '/api-tokens/{id}/routes',
         summary: 'Limit which operations an API token may call',
         description: 'Replaces the token\'s operation list: `routes` names every operation it may call, null lifts '
-            .'the limit, [] leaves it able to call nothing. Applies to its next call. The result stays within the '
+            .'the limit, and an empty list is refused (422): revoke the token to stop it. A token from before tokens had '
+            .'kinds keeps only the REST API once limited. Applies to its next call. The result stays within the '
             .'caller\'s own token: a caller limited to some operations may name only those, and may not lift the limit '
             .'(422). A token that reaches further than the caller\'s is refused with 403. Panel-facing; not an MCP '
             .'tool.',
