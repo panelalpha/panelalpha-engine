@@ -57,17 +57,19 @@ class DindDeployMechanicsTest extends TestCase
         // Artifact untracked in `git status`.
         foreach (['ingestApplicationSource', 'reprepareApplicationFromCheckout', 'ingestForWipeRebuild'] as $method) {
             $body = $this->existingMethodBody($source, $method);
-            $prepare = strpos($body, 'prepareFromSources()');
-            $exclude = strpos($body, 'excludeEngineArtifacts()');
-            $this->assertNotFalse($prepare, $method);
-            $this->assertNotFalse($exclude, $method);
-            $this->assertGreaterThan($prepare, $exclude, "{$method} writes the block after preparing the app");
+            $this->assertStringContainsString('$this->prepareApplication();', $body, "{$method} prepares and writes the block");
         }
+        $preparing = $this->existingMethodBody($source, 'preparing');
+        $prepare = strpos($preparing, 'prepareFromSources()');
+        $exclude = strpos($preparing, 'excludeEngineArtifacts()');
+        $this->assertNotFalse($prepare);
+        $this->assertNotFalse($exclude);
+        $this->assertGreaterThan($prepare, $exclude, 'the block is written after preparing the app');
 
         // Not only after a re-clone: a git_connect'd checkout rebuilt in place takes
         // the same method's other path, and its first push would lose the files.
         $wipe = $this->existingMethodBody($source, 'ingestForWipeRebuild');
-        $this->assertSame(1, substr_count($wipe, 'excludeEngineArtifacts()'));
+        $this->assertSame(1, substr_count($wipe, 'prepareApplication()'));
         $this->assertStringNotContainsString('} else {', $wipe, 'the block is written on every path');
 
         $helper = $this->existingMethodBody($source, 'excludeEngineArtifacts');
@@ -132,7 +134,7 @@ class DindDeployMechanicsTest extends TestCase
         $this->assertNotFalse($clone, 'The wipe rebuild is expected to re-clone the repository.');
         $this->assertGreaterThan(
             $clone,
-            (int) strpos($body, 'prepareFromSources'),
+            (int) strpos($body, 'prepareApplication'),
             'ingestForWipeRebuild re-clones over the directory the app config wrote into '
             . 'but never bootstraps the checkout again.'
         );

@@ -1002,6 +1002,19 @@ class DeployFailureExplainer
                         .'and newer refuse to run without the OpenSSL legacy provider. Upgrade the build toolchain '
                         .'to webpack 5, or set NODE_OPTIONS=--openssl-legacy-provider for the build.',
             ],
+            'bun-native-addon-failed' => [
+                '/error: install script from "([^"]+)" exited with \d+/',
+                static function (array $m, string $output = ''): ?string {
+                    if (! str_contains($output, 'gyp ')) {
+                        return null;
+                    }
+                    $node = preg_match('/gyp info using node@(\d+)\./', $output, $v) === 1 ? "Node {$v[1]}" : 'its own Node version';
+
+                    return "Bun could not build the native dependency {$m[1]}: Bun builds it for {$node}, for which "
+                        ."{$m[1]} has no prebuilt binary. If the project uses npm, delete bun.lockb (or bun.lock) from "
+                        ."the repository; if it uses Bun, upgrade {$m[1]} to a release that supports {$node}.";
+                },
+            ],
             'native-build-toolchain-missing' => [
                 '/(Could not find any Python installation to use|node-gyp: (?:command )?not found'
                     .'|gyp ERR! stack Error: not found: (?:make|g\+\+|gcc|cc|c\+\+)\b'

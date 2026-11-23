@@ -3,6 +3,8 @@
 namespace App\Lib\Deploy\Platform\Runtime;
 
 use App\Lib\Deploy\AccountHomeRead;
+use App\Lib\Deploy\Platform\RecipeChoiceContext;
+use Illuminate\Container\Container;
 
 /**
  * npm/yarn/pnpm/bun mechanics shared by every JS recipe: which manager a repo uses, its commands,
@@ -10,17 +12,71 @@ use App\Lib\Deploy\AccountHomeRead;
  */
 class JsPackageManager
 {
+    /** Dependencies that only a project written for Bun's own APIs declares. */
+    private const BUN_TYPE_PACKAGES = ['bun-types', '@types/bun'];
+
     /**
-     * The lockfile's manager (bun, pnpm, yarn, npm, in that order), then package.json's `packageManager`,
-     * then npm.
+     * The manager a fallback chose for the deploy under way ({@see RecipeChoiceContext}) when this project has its
+     * lockfile, else {@see detectedPackageManager()}.
      *
      * @param  array<string, true>  $files
      * @param  array<string, mixed>  $package
      */
     public static function detectPackageManager(array $files, array $package = []): string
     {
+        $chosen = self::chosenForThisDeploy();
+
+        return $chosen !== null && in_array($chosen, self::lockfileManagers($files), true)
+            ? $chosen
+            : self::detectedPackageManager($files, $package);
+    }
+
+    /**
+     * Every manager the project has a lockfile for, in the order detection reads them.
+     *
+     * @param  array<string, true>  $files
+     * @return list<string>
+     */
+    public static function lockfileManagers(array $files): array
+    {
+        $managers = [];
         if (isset($files['bun.lock']) || isset($files['bun.lockb'])) {
-            return 'bun';
+            $managers[] = 'bun';
+        }
+        if (isset($files['pnpm-lock.yaml'])) {
+            $managers[] = 'pnpm';
+        }
+        if (isset($files['yarn.lock'])) {
+            $managers[] = 'yarn';
+        }
+        if (self::hasNpmLockfile($files)) {
+            $managers[] = 'npm';
+        }
+
+        return $managers;
+    }
+
+    /** Unbound outside the application, as in a plain unit test: detection alone decides there. */
+    private static function chosenForThisDeploy(): ?string
+    {
+        $container = Container::getInstance();
+
+        return $container->bound(RecipeChoiceContext::class)
+            ? $container->make(RecipeChoiceContext::class)->packageManager()
+            : null;
+    }
+
+    /**
+     * The lockfile's manager (bun, pnpm, yarn, npm, in that order), then package.json's `packageManager`,
+     * then npm. A Bun lockfile beside package-lock.json is npm's unless the project asks for Bun.
+     *
+     * @param  array<string, true>  $files
+     * @param  array<string, mixed>  $package
+     */
+    public static function detectedPackageManager(array $files, array $package = []): string
+    {
+        if (isset($files['bun.lock']) || isset($files['bun.lockb'])) {
+            return self::hasNpmLockfile($files) && ! self::asksForBun($package) ? 'npm' : 'bun';
         }
         if (isset($files['pnpm-lock.yaml'])) {
             return 'pnpm';
@@ -46,6 +102,69 @@ class JsPackageManager
         }
 
         return 'npm';
+    }
+
+    /**
+     * Both a Bun lockfile and package-lock.json, and nothing that asks for Bun: a template's leftover
+     * Bun lockfile (Lovable commits one and documents `npm install`).
+     *
+     * @param  array<string, true>  $files
+     * @param  array<string, mixed>  $package
+     */
+    public static function prefersNpmOverBunLockfile(array $files, array $package = []): bool
+    {
+        return (isset($files['bun.lock']) || isset($files['bun.lockb']))
+            && self::detectedPackageManager($files, $package) === 'npm';
+    }
+
+    /** @param  array<string, true>  $files */
+    private static function hasNpmLockfile(array $files): bool
+    {
+        return isset($files['package-lock.json']) || isset($files['npm-shrinkwrap.json']);
+    }
+
+    /**
+     * `packageManager: bun@…`, `engines.bun`, Bun's type packages, or a script that runs `bun`/`bunx`.
+     *
+     * @param  array<string, mixed>  $package
+     */
+    private static function asksForBun(array $package): bool
+    {
+        $field = $package['packageManager'] ?? '';
+        if (is_string($field) && str_starts_with($field, 'bun')) {
+            return true;
+        }
+        if (is_array($package['engines'] ?? null) && isset($package['engines']['bun'])) {
+            return true;
+        }
+
+        return self::declaresBunTypes($package) || self::scriptRunsBun($package);
+    }
+
+    /** @param  array<string, mixed>  $package */
+    private static function declaresBunTypes(array $package): bool
+    {
+        foreach (['dependencies', 'devDependencies'] as $section) {
+            $deps = $package[$section] ?? null;
+            if (is_array($deps) && array_intersect(self::BUN_TYPE_PACKAGES, array_keys($deps)) !== []) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @param  array<string, mixed>  $package */
+    private static function scriptRunsBun(array $package): bool
+    {
+        $scripts = $package['scripts'] ?? null;
+        foreach (is_array($scripts) ? $scripts : [] as $script) {
+            if (is_string($script) && preg_match('/(^|[\s;&|(])bunx?(\s|$)/', $script) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** Each manager's spelling of a script: `yarn <script>`, `pnpm run <script>`, `bun run <script>`. */

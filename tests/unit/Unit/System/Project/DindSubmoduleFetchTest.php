@@ -261,7 +261,7 @@ class DindSubmoduleFetchTest extends TestCase
         $body = substr($body, 0, (int) strpos($body, "\n    }\n"));
 
         $fetch = strpos($body, '$this->fetchSubmodulesOfCheckout();');
-        $prepare = strpos($body, '$this->dind->prepareFromSources();');
+        $prepare = strpos($body, '$this->prepareApplication();');
         $this->assertNotFalse($fetch);
         $this->assertNotFalse($prepare);
         $this->assertLessThan($prepare, $fetch);

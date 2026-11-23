@@ -59,10 +59,16 @@ final class BuildRecipe
         $this->portHint = (int) ($decision['port_hint'] ?? 0);
         $this->env = self::environment($decision);
         $this->packageManager = self::text($decision, 'package_manager')
-            ?: JsPackageManager::detectPackageManager($files);
+            ?: JsPackageManager::detectPackageManager($files, self::packageAt($projectDir));
 
         $heap = $decision['node_heap_mb'] ?? null;
         $this->nodeHeapMb = is_numeric($heap) && (int) $heap > 0 ? (int) $heap : null;
+    }
+
+    /** @return array<string, mixed> */
+    private static function packageAt(string $projectDir): array
+    {
+        return $projectDir === '' ? [] : (ProjectContext::readPackageJson($projectDir) ?? []);
     }
 
     public function port(int $default): int

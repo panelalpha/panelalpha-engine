@@ -52,6 +52,8 @@ Everywhere else in the report, such as a deploy log line, an error message or a 
 
 A failed or partial deploy also includes which stage failed and the end of the deploy log, with sensitive values removed. A successful deploy is reported without that log.
 
+When a deploy tried more than one way to run the project ([When the first match fails](../07-supported-projects/how-detection-works.md#when-the-first-match-fails)), or started with the one an earlier deploy fell back to, the report also lists each attempt: the kind of project, the package manager, and the name of the rule its failure matched, such as `composer-package-not-found`. That holds for a deploy that succeeded in the end too. It carries no log lines.
+
 **None of this is sent:**
 
 - Project names outside the website names above, replaced with `<account>`

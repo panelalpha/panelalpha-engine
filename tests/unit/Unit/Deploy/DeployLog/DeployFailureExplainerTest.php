@@ -668,6 +668,44 @@ OUT;
         $this->assertStringContainsString('compiled during install', $match['message']);
     }
 
+    /** A Lovable project: Bun builds better-sqlite3 9.6.0 for Node 26, which has no prebuild and no Python. */
+    public function test_a_native_addon_bun_cannot_build_points_at_the_bun_lockfile(): void
+    {
+        $output = "bun install v1.4.5 (a7733435c)\n"
+            . "prebuild-install warn install No prebuilt binaries found (target=26.3.0 runtime=node arch=x64 libc= platform=linux)\n"
+            . "gyp info using node@26.3.0 | linux | x64\n"
+            . "gyp ERR! find Python\n"
+            . "gyp ERR! stack Error: Could not find any Python installation to use\n"
+            . 'error: install script from "better-sqlite3" exited with 1';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('bun-native-addon-failed', $match['rule']);
+        $this->assertStringContainsString('better-sqlite3', $match['message']);
+        $this->assertStringContainsString('Node 26', $match['message']);
+        $this->assertStringContainsString('delete bun.lockb', $match['message']);
+    }
+
+    /** With a toolchain present the addon fails on Node 26's V8 headers instead; still Bun's build. */
+    public function test_a_native_addon_that_does_not_compile_under_bun_is_the_same_answer(): void
+    {
+        $output = "gyp info using node@26.3.0 | linux | x64\n"
+            . "./src/util/binder.lzz:126:75: error: no matching function for call to 'v8::Object::HasOwnProperty'\n"
+            . "gyp ERR! node -v v26.3.0\n"
+            . 'error: install script from "better-sqlite3" exited with 1';
+
+        $this->assertSame('bun-native-addon-failed', DeployFailureExplainer::match($output)['rule']);
+    }
+
+    /** A Bun install script that is not a native build is left to the other rules. */
+    public function test_a_bun_install_script_without_node_gyp_is_not_a_native_addon(): void
+    {
+        $output = "postinstall: Error: Region is missing\n"
+            . 'error: install script from "keystone" exited with 1';
+
+        $this->assertNotSame('bun-native-addon-failed', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
     /** React-Messenger-Clone (react-scripts 3.4.3) on Node 22. */
     public function test_webpack4_on_openssl3_is_named(): void
     {

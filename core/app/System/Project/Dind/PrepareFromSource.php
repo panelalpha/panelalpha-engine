@@ -13,8 +13,11 @@ use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigStack;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\HostScript;
+use App\Lib\Deploy\Platform\PlatformCandidates;
 use App\Lib\Deploy\Platform\PlatformStage;
+use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
+use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 use App\Lib\Deploy\Platform\SourceRecipes;
 use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Source\GitUrl;
@@ -24,6 +27,7 @@ use App\Lib\Project\PublicRouting\ProjectPublicRouting;
 use App\Lib\Project\PublicRouting\PublicRouting;
 use App\Models\User as ModelsUser;
 use App\System\Privileged;
+use App\System\Project\Deployment\RecipeFallback;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Source\GitRepository;
 use App\System\Project\Dind\Strategy\ManifestDatabase;
@@ -71,6 +75,7 @@ class PrepareFromSource
         $stackConfig = AppConfigStack::for($decision, $appConfig);
         $this->freezeSnapshot($decision, $stackConfig, $stackConfig === $appConfig, $projectDir, $gitRepo);
         $this->logDecision($decision, $logger);
+        $this->explainNpmOverBunLockfile($projectDir, $logger);
         $this->explainIgnoredComposeFile($decision, $projectDir, $logger);
         $this->warnInertDatabase($decision, $logger);
         $this->reportUnreciped($user->username, $decision, $projectDir);
@@ -87,10 +92,11 @@ class PrepareFromSource
      */
     private function detectDecision(string $projectDir, ?string $gitRepo, ?DeployLogger $logger): array
     {
-        $recipe = app(RecipeChoiceContext::class)->get();
-        $decision = DetectProjectStrategy::detect($projectDir, $gitRepo, $recipe);
-        if ($recipe !== null) {
-            $logger?->info("Deploy request pinned the recipe: {$recipe}");
+        $choice = app(RecipeChoiceContext::class);
+        $this->startWithRememberedFallback($choice, $projectDir, $gitRepo, $logger);
+        $decision = DetectProjectStrategy::detect($projectDir, $gitRepo, $choice->get());
+        if ($choice->requested() !== null) {
+            $logger?->info("Deploy request pinned the recipe: {$choice->requested()}");
         }
 
         $plan = app(DeployPlanContext::class)->get();
@@ -102,6 +108,29 @@ class PrepareFromSource
         }
 
         return $decision;
+    }
+
+    /**
+     * The recipe and package manager the last deploy fell back to and started, while the project still has them
+     * ({@see RecipeFallback}). Only the first prepare of a deploy reads them: a later one is a fallback's own.
+     */
+    private function startWithRememberedFallback(RecipeChoiceContext $choice, string $projectDir, ?string $gitRepo, ?DeployLogger $logger): void
+    {
+        if ($choice->fallback() !== null || $choice->packageManager() !== null) {
+            return;
+        }
+        $details = $this->dind->userModel()->getDetails();
+        $context = ProjectContext::at($projectDir, $gitRepo);
+        $recipe = $details[RecipeFallback::DETAIL_RECIPE] ?? null;
+        if ($choice->get() === null && is_string($recipe) && in_array($recipe, PlatformCandidates::fallbackOrder($context), true)) {
+            $choice->fallTo($recipe);
+            $logger?->info("Starting with recipe {$recipe}, which the last deploy fell back to after the detected one failed");
+        }
+        $manager = $details[RecipeFallback::DETAIL_PACKAGE_MANAGER] ?? null;
+        if (is_string($manager) && in_array($manager, JsPackageManager::lockfileManagers($context->files), true)) {
+            $choice->fallToPackageManager($manager);
+            $logger?->info("Installing with {$manager}, which the last deploy fell back to after the detected one failed");
+        }
     }
 
     /**
@@ -136,6 +165,8 @@ class PrepareFromSource
             'deploy_port' => $decision['port_hint'],
             'deploy_runtime' => $decision['runtime'] ?? null,
             'deploy_platform' => is_string($decision['platform'] ?? null) ? $decision['platform'] : null,
+            RecipeFallback::DETAIL_DEPLOYED_PACKAGE_MANAGER => is_string($decision['package_manager'] ?? null) ? $decision['package_manager'] : null,
+            RecipeFallback::DETAIL_REPORT => null,
             'deploy_checks_dir' => $this->recipeChecksDirectory($gitRepo),
             'deploy_image' => is_string($decision['image'] ?? null) ? $decision['image'] : null,
             AppHealth::DETAIL_START_PERIOD => $stackConfig?->startPeriod(),
@@ -167,6 +198,20 @@ class PrepareFromSource
         }
         $logger?->info("Detected project type: {$decision['label']}");
         $logger?->info("Using strategy: {$decision['strategy']}");
+    }
+
+    /** A support reader otherwise sees `npm ci` and a bun.lockb in the repository, and no reason. */
+    private function explainNpmOverBunLockfile(string $projectDir, ?DeployLogger $logger): void
+    {
+        if (app(RecipeChoiceContext::class)->packageManager() !== null) {
+            return;
+        }
+        $context = ProjectContext::at($projectDir);
+        if (JsPackageManager::prefersNpmOverBunLockfile($context->files, $context->package() ?? [])) {
+            $logger?->info(
+                'Both a Bun lockfile and package-lock.json found; installing with npm, since nothing in package.json asks for Bun'
+            );
+        }
     }
 
     /**

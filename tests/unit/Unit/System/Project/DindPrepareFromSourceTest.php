@@ -9,6 +9,7 @@ use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System\Project as ProjectAggregate;
+use App\System\Project\Deployment\RecipeFallback;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind\SourceAccess;
@@ -85,6 +86,92 @@ class DindPrepareFromSourceTest extends TestCase
         $this->assertFalse($details['deploy_admin_sso']);
         $this->assertTrue($details['deploy_app_config_fits']);
         $this->assertFileExists($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE);
+    }
+
+    /** The last deploy fell back to Express after PHP failed: this one starts there, and says so. */
+    public function test_a_remembered_fallback_recipe_is_tried_first(): void
+    {
+        $this->writeExpressBesideComposer();
+        $model = $this->dindModel([RecipeFallback::DETAIL_RECIPE => 'express']);
+
+        $logger = DeployLogger::start('alice');
+        try {
+            $this->dind($model)->prepareFromSources();
+            $messages = array_column($logger->tail(), 'msg');
+        } finally {
+            $logger->finish(DeployLogger::STATUS_SUCCESS);
+        }
+
+        $this->assertSame('express', $model->getDetails()['deploy_platform']);
+        $this->assertSame('express', app(RecipeChoiceContext::class)->fallback());
+        $this->assertContains(
+            'Starting with recipe express, which the last deploy fell back to after the detected one failed',
+            $messages
+        );
+    }
+
+    /** A remembered recipe the checkout no longer matches is dropped for detection. */
+    public function test_a_remembered_recipe_that_no_longer_claims_the_project_is_ignored(): void
+    {
+        $this->writeExpressBesideComposer();
+        unlink($this->projectDir . '/composer.json');
+        $model = $this->dindModel([RecipeFallback::DETAIL_RECIPE => 'php']);
+
+        $this->dind($model)->prepareFromSources();
+
+        $this->assertSame('express', $model->getDetails()['deploy_platform']);
+        $this->assertNull(app(RecipeChoiceContext::class)->get());
+    }
+
+    /** The last deploy installed with npm after Bun failed: this one does too, and the decision freezes it. */
+    public function test_a_remembered_package_manager_is_installed_with_first(): void
+    {
+        $this->writeExpressBesideComposer();
+        unlink($this->projectDir . '/composer.json');
+        file_put_contents($this->projectDir . '/package.json', '{"packageManager":"bun@1.1.0","scripts":{"start":"node server.js"},"dependencies":{"express":"^4"}}');
+        file_put_contents($this->projectDir . '/bun.lockb', 'binary');
+        file_put_contents($this->projectDir . '/package-lock.json', '{"lockfileVersion":3}');
+        $model = $this->dindModel([RecipeFallback::DETAIL_PACKAGE_MANAGER => 'npm']);
+
+        $this->dind($model)->prepareFromSources();
+
+        $this->assertSame('npm', app(RecipeChoiceContext::class)->packageManager());
+        $this->assertSame('npm', $model->getDetails()[RecipeFallback::DETAIL_DEPLOYED_PACKAGE_MANAGER]);
+    }
+
+    /** Without the remembered one the same project installs with Bun, which it asks for. */
+    public function test_the_package_manager_detection_picks_is_frozen(): void
+    {
+        $this->writeExpressBesideComposer();
+        unlink($this->projectDir . '/composer.json');
+        file_put_contents($this->projectDir . '/package.json', '{"packageManager":"bun@1.1.0","scripts":{"start":"node server.js"},"dependencies":{"express":"^4"}}');
+        file_put_contents($this->projectDir . '/bun.lockb', 'binary');
+        file_put_contents($this->projectDir . '/package-lock.json', '{"lockfileVersion":3}');
+        $model = $this->dindModel();
+
+        $this->dind($model)->prepareFromSources();
+
+        $this->assertSame('bun', $model->getDetails()[RecipeFallback::DETAIL_DEPLOYED_PACKAGE_MANAGER]);
+    }
+
+    /** A recipe the request named outranks the remembered one. */
+    public function test_a_requested_recipe_outranks_the_remembered_one(): void
+    {
+        $this->writeExpressBesideComposer();
+        app(RecipeChoiceContext::class)->set('node');
+        $model = $this->dindModel([RecipeFallback::DETAIL_RECIPE => 'express']);
+
+        $this->dind($model)->prepareFromSources();
+
+        $this->assertSame('node', $model->getDetails()['deploy_platform']);
+    }
+
+    private function writeExpressBesideComposer(): void
+    {
+        file_put_contents($this->projectDir . '/composer.json', '{"require":{"php":">=8.1","monolog/monolog":"^3"}}');
+        file_put_contents($this->projectDir . '/index.php', '<?php echo "hi";');
+        file_put_contents($this->projectDir . '/package.json', '{"scripts":{"start":"node server.js"},"dependencies":{"express":"^4"}}');
+        file_put_contents($this->projectDir . '/server.js', 'require("express")().listen(3000)');
     }
 
     public function test_pre_check_is_a_no_op_when_the_repo_has_no_precheck_script(): void

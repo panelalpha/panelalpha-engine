@@ -53,6 +53,22 @@ The first match is the one it uses. That matters most if you have a `docker-comp
 
 A few ready-made apps, such as WordPress, are recognised even when they also ship a Compose file.
 
+### When the first match fails
+
+A repository often matches more than one kind of project: a `composer.json` and a `package.json` side by side are both PHP and Node. If the deploy fails with the first match, the engine tries the next one, in the same order, until one starts. A Node project with lockfiles for more than one package manager tries each of them before the next kind of project: Bun, then npm.
+
+The deploy log names every attempt:
+
+```text
+Recipe php failed (composer-unresolvable); trying express
+```
+
+What started is remembered, and the next deploy starts with it. If nothing starts, the deploy fails with the error of the first match.
+
+The engine does not try again when the problem is the server, not the project: a full disk, too little memory, a build that ran out of time, a registry limit or a network failure. It does not try another kind of project when you named one (`Deploy … as php`) or the repository has a `panelalpha.yaml`. With a named one, it still tries the other package managers. Railpack and the "Project not configured" page are never tried this way.
+
+Each attempt is a full build, so a repository that matches several kinds of project takes longer to fail. If you know which one is right, name it, or remove the file that makes the other match.
+
 ### Extra notes in the repository
 
 You can add a folder named `.panelalpha` with extra notes: extra commands, extra settings or which known app this is. A `panelalpha.yaml` or `panelalpha.md` at the top of the repository works too. Every key it may hold: [panelalpha.yaml](panelalpha-yaml.md).

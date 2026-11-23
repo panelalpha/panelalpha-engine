@@ -61,6 +61,7 @@ class DeployFailureExplainerRuleOrderTest extends TestCase
             'package-archive-gone',
             'native-build-headers-download-failed',
             'webpack4-openssl-unsupported',
+            'bun-native-addon-failed',
             'native-build-toolchain-missing',
             'missing-embedded-assets',
             'go-cgo-required',

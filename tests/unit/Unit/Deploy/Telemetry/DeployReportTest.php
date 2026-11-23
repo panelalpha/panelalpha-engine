@@ -5,6 +5,7 @@ namespace Tests\Unit\Deploy\Telemetry;
 use App\Lib\Deploy\Platform\Metadata\AppPackage;
 use App\Lib\Deploy\Platform\Metadata\Framework;
 use App\Lib\Deploy\Telemetry\DeployReport;
+use App\System\Project\Deployment\RecipeFallback;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\TestNetwork;
@@ -707,6 +708,52 @@ class DeployReportTest extends TestCase
         $this->assertSame('laravel', $candidates[0]);
         $this->assertNotContains('Not An Id', $candidates);
         $this->assertNotContains('../../etc/passwd', $candidates);
+    }
+
+    /** A deploy that started on a later attempt says what failed first; a success otherwise reads as a plain one. */
+    public function test_what_a_deploy_fell_back_through_travels_with_the_report(): void
+    {
+        $input = $this->input(['outcome' => DeployReport::OUTCOME_SUCCESS]);
+        $input['details'][RecipeFallback::DETAIL_REPORT] = [
+            'remembered' => false,
+            'attempts' => [
+                ['recipe' => 'php', 'package_manager' => null, 'failed' => true, 'rule' => 'composer-package-not-found'],
+                ['recipe' => 'express', 'package_manager' => 'npm', 'failed' => false, 'rule' => null],
+            ],
+            'started' => ['recipe' => 'express', 'package_manager' => 'npm'],
+        ];
+
+        $report = DeployReport::build($input);
+
+        $this->assertSame($input['details'][RecipeFallback::DETAIL_REPORT], $report['deploy']['fallback']);
+    }
+
+    /** Only the engine's vocabulary leaves: a malformed record is trimmed, never sent as it stands. */
+    public function test_a_fallback_record_is_shape_checked(): void
+    {
+        $input = $this->input();
+        $input['details'][RecipeFallback::DETAIL_REPORT] = [
+            'remembered' => 'yes',
+            'attempts' => [
+                ['recipe' => '../etc/passwd', 'package_manager' => 'cargo', 'failed' => 1, 'rule' => 'Not A Rule'],
+                'not an attempt',
+            ],
+            'started' => null,
+            'log' => 'secret',
+        ];
+
+        $fallback = DeployReport::build($input)['deploy']['fallback'];
+
+        $this->assertSame([
+            'remembered' => false,
+            'attempts' => [['recipe' => null, 'package_manager' => null, 'failed' => false, 'rule' => null]],
+            'started' => null,
+        ], $fallback);
+    }
+
+    public function test_a_deploy_that_tried_only_what_detection_picked_has_no_fallback(): void
+    {
+        $this->assertArrayNotHasKey('fallback', DeployReport::build($this->input())['deploy']);
     }
 
     /** A deploy nothing gathered for still produces a report. */

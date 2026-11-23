@@ -188,6 +188,23 @@ class HostNodeBuildTest extends TestCase
         );
     }
 
+    /**
+     * The same lockfile installed by another manager is no cache hit: a Bun build after an npm one ran
+     * `tsc` against npm's tree, which held a node-cron the Bun lockfile does not.
+     */
+    public function test_a_cache_hit_needs_the_install_that_wrote_node_modules(): void
+    {
+        $npm = HostNodeBuild::innerScript('npm ci', 'npm run build');
+        $bun = HostNodeBuild::innerScript('bun install', 'bun run build');
+        $npmKey = HostNodeBuild::installKey('npm ci');
+
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{16}$/', $npmKey);
+        $this->assertNotSame($npmKey, HostNodeBuild::installKey('bun install'));
+        $this->assertStringContainsString("grep -qsx {$npmKey} /app/node_modules/.pa-install && {", $npm);
+        $this->assertStringContainsString("if [ -d /app/node_modules ]; then echo {$npmKey} > /app/node_modules/.pa-install; fi", $npm);
+        $this->assertStringNotContainsString($npmKey, $bun);
+    }
+
     public function test_package_manager_setup_runs_even_on_a_node_modules_cache_hit(): void
     {
         $install = 'corepack enable && corepack prepare pnpm@10 --activate && pnpm install --frozen-lockfile';

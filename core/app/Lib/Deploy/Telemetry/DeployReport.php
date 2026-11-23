@@ -8,6 +8,7 @@ use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\Platform\Metadata\AppPackage;
 use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Limits\ResourceLimit;
+use App\System\Project\Deployment\RecipeFallback;
 use App\System\Project\Dind\AppHealth;
 
 /**
@@ -191,7 +192,7 @@ class DeployReport
      */
     private static function deployFacts(array $input, array $details, array $latest, ?string $strategy, ?string $runtime): array
     {
-        return [
+        $facts = [
             'id' => self::stringOrNull($latest['id'] ?? null),
             'source' => self::stringOrNull($details['deploy_source'] ?? null),
             'strategy' => $strategy,
@@ -202,6 +203,59 @@ class DeployReport
             'manifests' => self::manifests($input['manifests'] ?? []),
             'candidates' => self::candidates($input['candidates'] ?? []),
         ];
+        $fallback = self::fallback($details[RecipeFallback::DETAIL_REPORT] ?? null);
+        if ($fallback !== null) {
+            $facts['fallback'] = $fallback;
+        }
+
+        return $facts;
+    }
+
+    /**
+     * What a deploy tried before one attempt started or none did ({@see RecipeFallback}): recipe ids, package managers
+     * and rule slugs, all the engine's own vocabulary. Anything else is dropped, so a malformed record cannot stop a report.
+     *
+     * @return ?array{remembered: bool, attempts: list<array{recipe: ?string, package_manager: ?string, failed: bool, rule: ?string}>, started: ?array{recipe: ?string, package_manager: ?string}}
+     */
+    private static function fallback(mixed $record): ?array
+    {
+        if (! is_array($record) || ! is_array($record['attempts'] ?? null)) {
+            return null;
+        }
+        $attempts = [];
+        foreach (array_slice($record['attempts'], 0, self::MAX_CANDIDATES * 4) as $attempt) {
+            if (is_array($attempt)) {
+                $attempts[] = [
+                    'recipe' => self::slugOrNull($attempt['recipe'] ?? null),
+                    'package_manager' => self::packageManagerOrNull($attempt['package_manager'] ?? null),
+                    'failed' => ($attempt['failed'] ?? false) === true,
+                    'rule' => self::slugOrNull($attempt['rule'] ?? null),
+                ];
+            }
+        }
+        if ($attempts === []) {
+            return null;
+        }
+        $started = is_array($record['started'] ?? null) ? $record['started'] : null;
+
+        return [
+            'remembered' => ($record['remembered'] ?? false) === true,
+            'attempts' => $attempts,
+            'started' => $started === null ? null : [
+                'recipe' => self::slugOrNull($started['recipe'] ?? null),
+                'package_manager' => self::packageManagerOrNull($started['package_manager'] ?? null),
+            ],
+        ];
+    }
+
+    private static function slugOrNull(mixed $value): ?string
+    {
+        return is_string($value) && preg_match('/^[a-z0-9][a-z0-9_-]{0,63}$/', $value) === 1 ? $value : null;
+    }
+
+    private static function packageManagerOrNull(mixed $value): ?string
+    {
+        return in_array($value, ['bun', 'pnpm', 'yarn', 'npm'], true) ? $value : null;
     }
 
     /**

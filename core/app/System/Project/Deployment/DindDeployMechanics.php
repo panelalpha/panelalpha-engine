@@ -31,6 +31,13 @@ final class DindDeployMechanics implements DeployMechanics
 {
     private bool $removedTheAccount = false;
 
+    private ?RecipeFallback $recipeFallback = null;
+
+    /** @var (\Closure(): void)|null how the last ingest prepared the checkout, for another recipe */
+    private ?\Closure $prepareAgain = null;
+
+    private ?RecipeAttempt $failedPrepare = null;
+
     public function __construct(
         private Dind $dind,
     ) {}
@@ -140,8 +147,7 @@ final class DindDeployMechanics implements DeployMechanics
             $this->dind->preCheckFromSources();
             (new GitRepository($this->dind))->cloneConfiguredRepository();
         }
-        $this->dind->prepareFromSources();
-        $this->excludeEngineArtifacts();
+        $this->prepareApplication();
     }
 
     public function isApplicationEnvironmentRunning(): bool
@@ -261,23 +267,21 @@ final class DindDeployMechanics implements DeployMechanics
                 fn () => $this->stopApplicationBeforeWipe(),
             );
         }
-        $this->dind->prepareFromSources();
-        $this->excludeEngineArtifacts();
+        $this->prepareApplication();
     }
 
     public function ingestArchive(string $zipPath): void
     {
         $this->keepCheckoutReadable();
         $this->aggregate()->importProjectArchive($zipPath);
-        $this->dind->prepareFromSources();
+        $this->prepareApplication(excludeArtifacts: false);
     }
 
     public function reprepareApplicationFromCheckout(): void
     {
         $this->keepCheckoutReadable();
         $this->fetchSubmodulesOfCheckout();
-        $this->dind->prepareFromSources();
-        $this->excludeEngineArtifacts();
+        $this->prepareApplication();
     }
 
     /** The checkout a redeploy moved aside: back if it failed, gone once replaced. */
@@ -369,9 +373,17 @@ final class DindDeployMechanics implements DeployMechanics
         $this->aggregate()->domain($domain)->create();
     }
 
+    /** Every caller has just prepared the checkout, so a failed prepare or start may prepare it for another recipe. */
     public function startApplication(): array
     {
-        return $this->aggregate()->startUserApp();
+        $failedPrepare = $this->failedPrepare;
+        $this->failedPrepare = null;
+
+        return $this->recipeFallback()->start(
+            fn (): array => $this->aggregate()->startUserApp(),
+            $this->prepareAgain ?? $this->preparing(true),
+            $failedPrepare
+        );
     }
 
     public function abortPartialDeploy(bool $removeVolumes = false): void
@@ -420,6 +432,42 @@ final class DindDeployMechanics implements DeployMechanics
      * List what the deploy just wrote in the checkout's local exclude file
      * (ADR-0001), once the app is prepared and every Engine Artifact exists.
      */
+    /**
+     * A failure another recipe may not repeat waits for startApplication() to fall back from it ({@see RecipeFallback});
+     * any other is the deploy's, as before.
+     *
+     * @throws \Exception
+     */
+    private function prepareApplication(bool $excludeArtifacts = true): void
+    {
+        $this->prepareAgain = $this->preparing($excludeArtifacts);
+        $attempt = RecipeAttempt::run(function (): array {
+            ($this->prepareAgain)();
+
+            return ['stdout' => '', 'stderr' => '', 'exit_code' => 0];
+        });
+        if ($attempt->failed() && ! $this->recipeFallback()->defers($attempt)) {
+            $attempt->result();
+        }
+        $this->failedPrepare = $attempt->failed() ? $attempt : null;
+    }
+
+    /** @return \Closure(): void */
+    private function preparing(bool $excludeArtifacts): \Closure
+    {
+        return function () use ($excludeArtifacts): void {
+            $this->dind->prepareFromSources();
+            if ($excludeArtifacts) {
+                $this->excludeEngineArtifacts();
+            }
+        };
+    }
+
+    private function recipeFallback(): RecipeFallback
+    {
+        return $this->recipeFallback ??= new RecipeFallback($this->dind);
+    }
+
     private function excludeEngineArtifacts(): void
     {
         EngineArtifactExclude::forProject($this->dind)->writeForDeploy();

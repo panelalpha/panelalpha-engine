@@ -271,12 +271,15 @@ class HostNodeBuild
     }
 
     /**
-     * The install, skipped while node_modules/.pa-lock matches a lockfile. Only an existing lockfile is copied:
+     * The install, skipped while node_modules/.pa-lock matches a lockfile and .pa-install the install that wrote it:
+     * a tree npm installed is no Bun install of the same package.json. Only an existing lockfile is copied:
      * a failing `cp` printed `cannot stat` last on every pnpm build, which reads as the cause of a failure.
      */
     private static function cachedInstallStep(string $install, string $dir): string
     {
-        return 'if [ -f '.$dir.'/node_modules/.pa-lock ] && { '
+        $key = self::installKey($install);
+
+        return 'if [ -f '.$dir.'/node_modules/.pa-lock ] && grep -qsx '.$key.' '.$dir.'/node_modules/.pa-install && { '
             .'cmp -s '.$dir.'/package-lock.json '.$dir.'/node_modules/.pa-lock '
             .'|| cmp -s '.$dir.'/pnpm-lock.yaml '.$dir.'/node_modules/.pa-lock '
             .'|| cmp -s '.$dir.'/yarn.lock '.$dir.'/node_modules/.pa-lock '
@@ -285,7 +288,13 @@ class HostNodeBuild
             .'else '.$install.' && { '
             .'for f in package-lock.json pnpm-lock.yaml yarn.lock bun.lock; do '
             .'if [ -f "'.$dir.'/$f" ]; then cp "'.$dir.'/$f" '.$dir.'/node_modules/.pa-lock; break; fi; '
-            .'done; true; }; fi';
+            .'done; if [ -d '.$dir.'/node_modules ]; then echo '.$key.' > '.$dir.'/node_modules/.pa-install; fi; true; }; fi';
+    }
+
+    /** Hex, so the script needs no quoting for it. */
+    public static function installKey(string $install): string
+    {
+        return substr(hash('sha256', $install), 0, 16);
     }
 
     public static function isSafeProjectDir(string $dir): bool

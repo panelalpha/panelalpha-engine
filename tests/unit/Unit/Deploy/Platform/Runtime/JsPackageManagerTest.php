@@ -14,6 +14,53 @@ use Tests\Support\TestNetwork;
  */
 class JsPackageManagerTest extends TestCase
 {
+    /** Lovable commits bun.lockb beside package-lock.json and documents `npm install`. */
+    public function test_a_bun_lockfile_beside_package_lock_is_npm(): void
+    {
+        $files = ['bun.lockb' => true, 'package-lock.json' => true];
+        $package = ['scripts' => ['dev' => 'vite', 'build' => 'vite build', 'start' => 'node server.js']];
+
+        $this->assertSame('npm', JsPackageManager::detectPackageManager($files, $package));
+        $this->assertSame('npm', JsPackageManager::detectPackageManager(['bun.lock' => true, 'package-lock.json' => true]));
+        $this->assertSame('npm', JsPackageManager::detectPackageManager(['bun.lockb' => true, 'npm-shrinkwrap.json' => true]));
+        $this->assertTrue(JsPackageManager::prefersNpmOverBunLockfile($files, $package));
+    }
+
+    public function test_a_project_that_asks_for_bun_keeps_bun_beside_package_lock(): void
+    {
+        $files = ['bun.lockb' => true, 'package-lock.json' => true];
+
+        foreach ([
+            'packageManager' => ['packageManager' => 'bun@1.1.0'],
+            'engines' => ['engines' => ['bun' => '>=1.1']],
+            'bun-types' => ['devDependencies' => ['bun-types' => '^1.1.0']],
+            '@types/bun' => ['devDependencies' => ['@types/bun' => 'latest']],
+            'script' => ['scripts' => ['dev' => 'bun --hot src/index.ts']],
+            'bunx script' => ['scripts' => ['build' => 'tsc && bunx vite build']],
+            'env-prefixed script' => ['scripts' => ['start' => 'NODE_ENV=production bun run server.ts']],
+        ] as $case => $package) {
+            $this->assertSame('bun', JsPackageManager::detectPackageManager($files, $package), $case);
+            $this->assertFalse(JsPackageManager::prefersNpmOverBunLockfile($files, $package), $case);
+        }
+    }
+
+    /** A script mentioning a word that merely contains "bun" is not Bun. */
+    public function test_a_script_naming_something_else_is_not_bun(): void
+    {
+        $this->assertSame('npm', JsPackageManager::detectPackageManager(
+            ['bun.lock' => true, 'package-lock.json' => true],
+            ['scripts' => ['bundle' => 'rollup -c', 'lint' => 'eslint bundle/']]
+        ));
+    }
+
+    public function test_other_lockfile_pairs_are_unchanged(): void
+    {
+        $this->assertSame('bun', JsPackageManager::detectPackageManager(['bun.lockb' => true]));
+        $this->assertSame('pnpm', JsPackageManager::detectPackageManager(['pnpm-lock.yaml' => true, 'package-lock.json' => true]));
+        $this->assertSame('yarn', JsPackageManager::detectPackageManager(['yarn.lock' => true, 'package-lock.json' => true]));
+        $this->assertFalse(JsPackageManager::prefersNpmOverBunLockfile(['package-lock.json' => true]));
+    }
+
     public function test_detect_package_manager_prefers_lockfiles_over_package_manager_field(): void
     {
         $this->assertSame('bun', JsPackageManager::detectPackageManager(['bun.lock' => true]));

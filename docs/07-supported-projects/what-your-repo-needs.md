@@ -77,6 +77,8 @@ Whichever lockfile is present is the package manager that gets used:
 | `yarn.lock` | yarn |
 | `package-lock.json` | npm |
 
+A `bun.lock` or `bun.lockb` next to a `package-lock.json` is installed with npm, unless your `package.json` asks for Bun: a `packageManager` of `bun@…`, an `engines.bun`, the `bun-types` or `@types/bun` package, or a script that runs `bun`. Some project generators commit a Bun lockfile you never use. If npm is not what you want, delete `package-lock.json`. If the first one fails, the engine also tries the others whose lockfile is in the project ([When the first match fails](how-detection-works.md#when-the-first-match-fails)).
+
 **Commit your lockfile.** Without one, dependency versions are not pinned, and a build that worked last week can fail this week because something upstream released a new version.
 
 The engine never puts one in your repository. A lockfile its own install generates, because none was committed, is kept out of the project's changes on the server and is never pushed. That holds for a PHP project's `composer.lock` too.

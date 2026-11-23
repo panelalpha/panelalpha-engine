@@ -59,6 +59,29 @@ final class PlatformCandidates
     }
 
     /**
+     * The recipes a failed start falls back through, in the order a deploy tries them: the detected ones, by priority,
+     * without the placeholder, which runs nothing, and Railpack. None when a source recipe names the platform.
+     *
+     * @return list<string>
+     *
+     * @throws ManifestException
+     */
+    public static function fallbackOrder(ProjectContext $context, ?string $directory = null): array
+    {
+        $ids = [];
+        foreach (self::forContext($context, $directory) as $candidate) {
+            if ($candidate['via'] === self::VIA_RECIPE) {
+                return [];
+            }
+            if ($candidate['via'] === self::VIA_DETECTED && $candidate['strategy'] !== Strategies::FALLBACK) {
+                $ids[] = $candidate['id'];
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
      * Railpack publishes .NET as the engine does, so a repository only .NET reads whose projects serve no HTTP (desktop
      * apps, libraries, tests) runs there no more than here.
      */
