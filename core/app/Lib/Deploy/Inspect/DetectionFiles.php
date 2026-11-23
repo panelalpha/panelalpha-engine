@@ -56,7 +56,7 @@ final class DetectionFiles
     private const MANIFEST_PATTERNS = [
         'requirements*.txt',
         'next.config.*', 'nuxt.config.*', 'svelte.config.*', 'vite.config.*', 'vitest.config.*',
-        'astro.config.*', 'remix.config.*', 'webpack.config.*', 'rollup.config.*',
+        'astro.config.*', 'remix.config.*', 'react-router.config.*', 'webpack.config.*', 'rollup.config.*',
         'quasar.config.*', 'electron.vite.config.*', 'gulpfile.*', 'gruntfile.*',
     ];
 

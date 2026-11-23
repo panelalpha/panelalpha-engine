@@ -41,6 +41,7 @@ class DetectionFilesTest extends TestCase
         'procfile-web' => ['Procfile'],
         'pyproject' => ['pyproject.toml'],
         'python-nothing-to-start' => ['requirements.txt', 'pyproject.toml', 'Pipfile', 'main.py', 'SABnzbd.py'],
+        'react-router-server' => ['react-router.config.ts', 'package.json'],
         'static-entry' => [],
         'sveltekit-static-adapter' => ['svelte.config.js', 'vite.config.ts'],
         'vite-not-the-build' => ['vite.config.ts', 'package.json'],

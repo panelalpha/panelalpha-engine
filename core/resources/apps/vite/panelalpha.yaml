@@ -44,6 +44,8 @@ detect:
     - dep: '@remix-run/serve'
     - dep: socket.io
     - dep: '@sveltejs/adapter-node'
+    # React Router framework mode builds a server; see ReactRouterServerProbe.
+    - probe: react-router-server
     # A workspace root whose own build is not Vite (fluxer runs cargo); see
     # ViteNotTheBuildProbe.
     - probe: vite-not-the-build
@@ -54,6 +56,12 @@ detect:
     # A PHP front controller at the root (Tiki, with no root composer.json):
     # Vite builds its assets, as for Laravel, and is not the application.
     - file: index.php
+    # A Django or Go application at the root whose Vite build only makes its
+    # assets: the backend is what serves the site.
+    - contains:
+        path: manage.py
+        pattern: DJANGO_SETTINGS_MODULE
+    - file: go.mod
 commands:
   - id: npm-install
     stage: build

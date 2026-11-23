@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../../platforms/_schema.json
+id: react-router
+strategy: remix
+label: 'React Router'
+priority: 906
+runtime: node
+port: 3000
+output_directory: build
+requires:
+  node: runtime
+detect:
+  probe: react-router-server
+commands:
+  - id: npm-install
+    stage: build
+    role: dependencies
+    run: '{{js.install}}'
+    description: "Resolved from the project's lockfile — npm ci, pnpm install --frozen-lockfile, yarn or bun."
+  - id: react-router-build
+    stage: build
+    run: '{{js.build:npx react-router build}}'
+    description: "The project's own build script wins over this default when package.json defines one."
+  - id: serve
+    stage: start
+    serve: true
+    run: '{{js.start:npx react-router-serve ./build/server/index.js}}'
+    description: "The project's own start script wins over this default when package.json defines one."
