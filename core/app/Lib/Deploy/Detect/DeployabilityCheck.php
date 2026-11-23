@@ -102,10 +102,10 @@ final class DeployabilityCheck
      */
     private function assertSvelteKitAdapter(): void
     {
-        $adapter = SvelteKitAdapter::configured(ProjectContext::at(AppRoot::path($this->projectDir, $this->decision)));
-        $refusal = $adapter === null ? null : SvelteKitAdapter::refusal($adapter);
+        $configured = SvelteKitAdapter::configuredIn(ProjectContext::at(AppRoot::path($this->projectDir, $this->decision)));
+        $refusal = $configured === null ? null : SvelteKitAdapter::refusal($configured['adapter'], $configured['file']);
         if ($refusal !== null) {
-            throw new DeployRefusal(self::SVELTEKIT_ADAPTER_UNSUPPORTED, $refusal, ['adapter' => $adapter]);
+            throw new DeployRefusal(self::SVELTEKIT_ADAPTER_UNSUPPORTED, $refusal, ['adapter' => $configured['adapter']]);
         }
     }
 

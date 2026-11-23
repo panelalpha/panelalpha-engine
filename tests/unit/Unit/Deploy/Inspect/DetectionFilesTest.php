@@ -42,7 +42,7 @@ class DetectionFilesTest extends TestCase
         'pyproject' => ['pyproject.toml'],
         'python-nothing-to-start' => ['requirements.txt', 'pyproject.toml', 'Pipfile', 'main.py', 'SABnzbd.py'],
         'static-entry' => [],
-        'sveltekit-static-adapter' => ['svelte.config.js'],
+        'sveltekit-static-adapter' => ['svelte.config.js', 'vite.config.ts'],
         'vite-not-the-build' => ['vite.config.ts', 'package.json'],
         'vite-without-entry' => ['vite.config.ts', 'package.json'],
     ];

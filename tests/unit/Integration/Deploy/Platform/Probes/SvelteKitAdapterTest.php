@@ -18,7 +18,7 @@ use InvalidArgumentException;
 class SvelteKitAdapterTest extends ProbeTestCase
 {
     /**
-     * @param array<string, string> $deps
+     * @param  array<string, string>  $deps
      */
     private function project(string $adapterImport, array $deps): void
     {
@@ -107,5 +107,59 @@ class SvelteKitAdapterTest extends ProbeTestCase
 
         $this->project('', ['@sveltejs/adapter-static' => '^3.0.0', '@sveltejs/adapter-node' => '^5.0.0']);
         $this->assertSame('SvelteKit', DetectProjectStrategy::detect($this->dir)['label']);
+    }
+
+    /**
+     * @param  array<string, string>  $deps
+     */
+    private function viteConfiguredProject(string $adapter, array $deps): void
+    {
+        $this->writeJson('package.json', [
+            'scripts' => ['build' => 'vite build'],
+            'devDependencies' => ['@sveltejs/kit' => '^3.2.0', 'svelte' => '^5.57.0'] + $deps,
+        ]);
+        $this->write('vite.config.ts', "import adapter from '@sveltejs/adapter-{$adapter}';\n"
+            ."import { sveltekit } from '@sveltejs/kit/vite';\n"
+            ."export default { plugins: [sveltekit({ adapter: adapter() })] };\n");
+    }
+
+    /** cogsend dropped svelte.config and passes adapter-cloudflare to the Vite plugin; it restart-looped on build/index.js. */
+    public function test_an_adapter_passed_to_the_vite_plugin_is_refused_by_name(): void
+    {
+        $this->viteConfiguredProject('cloudflare', ['@sveltejs/adapter-cloudflare' => '^8.0.0']);
+
+        $this->assertSame('SvelteKit', DetectProjectStrategy::detect($this->dir)['label']);
+        $this->assertSame(
+            'vite.config.ts uses @sveltejs/adapter-cloudflare, which builds for Cloudflare only. Switch it to '
+            .'@sveltejs/adapter-node (a Node server) or @sveltejs/adapter-static (a static site) to deploy it here.',
+            $this->refusal()
+        );
+    }
+
+    public function test_adapter_static_in_the_vite_config_is_the_static_recipe(): void
+    {
+        $this->viteConfiguredProject('static', ['@sveltejs/adapter-static' => '^3.0.0', '@sveltejs/adapter-node' => '^5.0.0']);
+
+        $this->assertSame('SvelteKit (static)', DetectProjectStrategy::detect($this->dir)['label']);
+        $this->assertNull($this->refusal());
+    }
+
+    /** svelte.config naming the adapter still decides over a vite.config that names another. */
+    public function test_svelte_config_wins_over_the_vite_config(): void
+    {
+        $this->viteConfiguredProject('cloudflare', ['@sveltejs/adapter-node' => '^5.0.0']);
+        $this->write('svelte.config.js', "import adapter from '@sveltejs/adapter-node';\nexport default { kit: { adapter: adapter() } };\n");
+
+        $this->assertSame(['adapter' => 'node', 'file' => 'svelte.config.js'], SvelteKitAdapter::configuredIn($this->context()));
+        $this->assertNull($this->refusal());
+    }
+
+    /** A svelte.config choosing between two adapters is no answer, whatever vite.config imports. */
+    public function test_two_adapters_in_svelte_config_are_not_overruled_by_the_vite_config(): void
+    {
+        $this->viteConfiguredProject('cloudflare', []);
+        $this->write('svelte.config.js', "import a from '@sveltejs/adapter-node';\nimport b from '@sveltejs/adapter-static';\n");
+
+        $this->assertNull(SvelteKitAdapter::configured($this->context()));
     }
 }
