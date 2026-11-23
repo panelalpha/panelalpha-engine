@@ -166,10 +166,61 @@ class PhpHostBuildPluginTest extends TestCase
 
         $lines = explode("\n", PhpHostBuild::script('', '', true, '8.2', false, true, true));
         $this->assertSame(
-            '[ -e composer.lock ] || cp ' . PhpHostBuild::RUNTIME_LOCK_FILE . ' composer.lock',
+            '[ -e composer.lock ] || cp '.PhpHostBuild::RUNTIME_LOCK_FILE.' composer.lock',
             end($lines)
         );
         $this->assertStringNotContainsString(' cp ', PhpHostBuild::script('', '', true, '8.2', false, true, false));
+    }
+
+    /**
+     * Allowed during the install that installs it, the merge plugin re-runs `composer update` in a Composer
+     * of its own, with the project's scripts on; it is allowed only once installed, for an update that keeps
+     * every locked version.
+     */
+    public function test_a_project_requiring_the_merge_plugin_runs_it_after_the_install(): void
+    {
+        $composerJson = '{"require": {"php": "^8.3", "wikimedia/composer-merge-plugin": "^2.1"}}';
+
+        $lines = explode("\n", PhpHostBuild::script('', '', true, '8.3', false, true, true, $composerJson));
+        $install = array_search($this->installLine(implode("\n", $lines)), $lines, true);
+
+        $this->assertIsInt($install);
+        $this->assertSame(PhpHostBuild::allowMergePlugin(), $lines[$install + 2]);
+        $this->assertSame(
+            'composer update --minimal-changes --no-interaction --no-scripts --no-audit --no-dev --optimize-autoloader',
+            $lines[$install + 3]
+        );
+        $this->assertSame('[ -e composer.lock ] || cp '.PhpHostBuild::RUNTIME_LOCK_FILE.' composer.lock', end($lines));
+        $this->assertArrayNotHasKey(PhpHostBuild::MERGE_PLUGIN, PhpHostBuild::allowPlugins());
+    }
+
+    public function test_the_merge_update_skips_the_php_check_the_install_skipped(): void
+    {
+        $composerJson = '{"require": {"wikimedia/composer-merge-plugin": "^2.1"}}';
+
+        $script = PhpHostBuild::script('', '', true, '8.3', true, true, false, $composerJson);
+
+        $this->assertStringContainsString(
+            'composer update --minimal-changes --no-interaction --no-scripts --no-audit --no-dev --optimize-autoloader --ignore-platform-req=php',
+            $script
+        );
+    }
+
+    public function test_no_merge_step_without_the_plugin_required_or_the_runtime_manifest(): void
+    {
+        $merging = '{"require": {"wikimedia/composer-merge-plugin": "^2.1"}}';
+
+        foreach ([
+            [true, '{"require": {"laravel/framework": "^12"}}'],
+            [true, '{"require-dev": {"wikimedia/composer-merge-plugin": "^2.1"}}'],
+            [true, 'not json'],
+            [false, $merging],
+        ] as [$restricted, $composerJson]) {
+            $script = PhpHostBuild::script('', '', true, '8.3', false, $restricted, false, $composerJson);
+
+            $this->assertStringNotContainsString('composer update', $script, $composerJson);
+            $this->assertStringNotContainsString(PhpHostBuild::MERGE_PLUGIN, $script, $composerJson);
+        }
     }
 
     /** The install command in a script, not the pin above it. */

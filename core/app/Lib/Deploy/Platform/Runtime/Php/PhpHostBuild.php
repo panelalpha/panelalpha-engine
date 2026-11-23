@@ -32,6 +32,9 @@ final class PhpHostBuild
         'symfony/runtime',
     ];
 
+    /** Merges the composer.json files a modular app names under `extra.merge-plugin` into its own. */
+    public const MERGE_PLUGIN = 'wikimedia/composer-merge-plugin';
+
     /**
      * Each installer allowed, then a last `"*": false`: an unmentioned plugin throws PluginBlockedException
      * under --no-interaction. It replaces the project's own list, so `"*": true` there re-enables nothing.
@@ -288,11 +291,68 @@ final class PhpHostBuild
             $install .= ' --ignore-platform-req=php';
         }
         $steps[] = $install;
+        if ($pluginsRestricted && self::mergesManifests($composerJson)) {
+            array_push($steps, ...self::mergeSteps($install));
+        }
         if ($mirrorLock) {
             $steps[] = '[ -e composer.lock ] || cp '.self::RUNTIME_LOCK_FILE.' composer.lock';
         }
 
         return $steps;
+    }
+
+    /** Whether composer.json requires {@see MERGE_PLUGIN}, without which its module manifests are never read. */
+    public static function mergesManifests(?string $composerJson): bool
+    {
+        $decoded = json_decode((string) $composerJson, true);
+
+        return is_array($decoded)
+            && is_array($decoded['require'] ?? null)
+            && array_key_exists(self::MERGE_PLUGIN, $decoded['require']);
+    }
+
+    /**
+     * {@see MERGE_PLUGIN} allowed only once installed, then an update that merges its manifests: allowed in the install
+     * that installs it, it re-runs `composer update` in a Composer of its own, with the project's scripts on.
+     *
+     * @return list<string>
+     */
+    private static function mergeSteps(string $install): array
+    {
+        return [
+            'echo "[panelalpha] composer plugin allowed after the install: '.self::MERGE_PLUGIN.'" >&2',
+            self::allowMergePlugin(),
+            'composer update '.implode(' ', self::mergeUpdateFlags($install)),
+        ];
+    }
+
+    /**
+     * The install's dev mode, autoloader and php platform check carried over; `--minimal-changes` keeps every locked
+     * version, so only the merged requirements the lock lacks are resolved.
+     *
+     * @return list<string>
+     */
+    private static function mergeUpdateFlags(string $install): array
+    {
+        $flags = ['--minimal-changes', '--no-interaction', '--no-scripts', '--no-audit'];
+        foreach (['--no-dev', '--optimize-autoloader', '--ignore-platform-req=php'] as $flag) {
+            if (preg_match('/(?<!\S)'.preg_quote($flag, '/').'(?!\S)/', $install) === 1) {
+                $flags[] = $flag;
+            }
+        }
+
+        return $flags;
+    }
+
+    /** Puts {@see MERGE_PLUGIN} ahead of the runtime manifest's allow-plugins, whose `"*": false` would match first. */
+    public static function allowMergePlugin(): string
+    {
+        $code = '$m = getenv("'.self::MANIFEST_ENV.'");'
+            .' $r = json_decode((string) file_get_contents($m));'
+            .' $r->config->{"allow-plugins"} = (object) (["'.self::MERGE_PLUGIN.'" => true] + (array) $r->config->{"allow-plugins"});'
+            .' file_put_contents($m, json_encode($r, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION));';
+
+        return 'php -r '.escapeshellarg($code);
     }
 
     /**

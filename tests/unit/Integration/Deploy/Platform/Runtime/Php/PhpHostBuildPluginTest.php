@@ -4,6 +4,7 @@ namespace Tests\Integration\Deploy\Platform\Runtime\Php;
 
 use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Process\Process;
 
 /**
  * Which Composer plugins the host install may run: the installers in
@@ -23,7 +24,7 @@ class PhpHostBuildPluginTest extends TestCase
     /** The restore step itself, run for real against a written manifest. */
     public function test_the_restore_step_copies_allow_plugins_from_composer_json(): void
     {
-        $dir = sys_get_temp_dir() . '/pa-restore-' . bin2hex(random_bytes(4));
+        $dir = sys_get_temp_dir().'/pa-restore-'.bin2hex(random_bytes(4));
         mkdir($dir);
         try {
             foreach ([
@@ -35,25 +36,55 @@ class PhpHostBuildPluginTest extends TestCase
                 if ($theirs !== null) {
                     $project['config']['allow-plugins'] = $theirs;
                 }
-                file_put_contents($dir . '/composer.json', (string) json_encode($project));
+                file_put_contents($dir.'/composer.json', (string) json_encode($project));
                 file_put_contents(
-                    $dir . '/' . PhpHostBuild::RUNTIME_MANIFEST_FILE,
+                    $dir.'/'.PhpHostBuild::RUNTIME_MANIFEST_FILE,
                     (string) PhpHostBuild::runtimeManifest((string) json_encode($project))
                 );
 
-                $process = \Symfony\Component\Process\Process::fromShellCommandline(
+                $process = Process::fromShellCommandline(
                     PhpHostBuild::restoreProjectAllowPlugins(),
                     $dir,
                     [PhpHostBuild::MANIFEST_ENV => PhpHostBuild::RUNTIME_MANIFEST_FILE]
                 );
                 $process->mustRun();
 
-                $written = json_decode((string) file_get_contents($dir . '/' . PhpHostBuild::RUNTIME_MANIFEST_FILE), true);
+                $written = json_decode((string) file_get_contents($dir.'/'.PhpHostBuild::RUNTIME_MANIFEST_FILE), true);
                 $this->assertSame($expected, $written['config']['allow-plugins'] ?? null);
                 $this->assertTrue($written['config']['sort-packages']);
             }
         } finally {
-            array_map('unlink', glob($dir . '/{,.}*.json', GLOB_BRACE) ?: []);
+            array_map('unlink', glob($dir.'/{,.}*.json', GLOB_BRACE) ?: []);
+            rmdir($dir);
+        }
+    }
+
+    /** First match wins in allow-plugins, so the merge plugin goes ahead of the catch-all. */
+    public function test_the_merge_step_allows_the_merge_plugin_ahead_of_the_catch_all(): void
+    {
+        $dir = sys_get_temp_dir().'/pa-merge-'.bin2hex(random_bytes(4));
+        mkdir($dir);
+        try {
+            $project = ['require' => [PhpHostBuild::MERGE_PLUGIN => '^2.1'], 'config' => ['sort-packages' => true]];
+            file_put_contents(
+                $dir.'/'.PhpHostBuild::RUNTIME_MANIFEST_FILE,
+                (string) PhpHostBuild::runtimeManifest((string) json_encode($project))
+            );
+
+            Process::fromShellCommandline(
+                PhpHostBuild::allowMergePlugin(),
+                $dir,
+                [PhpHostBuild::MANIFEST_ENV => PhpHostBuild::RUNTIME_MANIFEST_FILE]
+            )->mustRun();
+
+            $written = json_decode((string) file_get_contents($dir.'/'.PhpHostBuild::RUNTIME_MANIFEST_FILE), true);
+            $this->assertSame(
+                [PhpHostBuild::MERGE_PLUGIN => true, ...PhpHostBuild::allowPlugins()],
+                $written['config']['allow-plugins']
+            );
+            $this->assertTrue($written['config']['sort-packages']);
+        } finally {
+            array_map('unlink', glob($dir.'/{,.}*.json', GLOB_BRACE) ?: []);
             rmdir($dir);
         }
     }
