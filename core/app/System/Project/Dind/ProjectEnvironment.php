@@ -988,7 +988,7 @@ class ProjectEnvironment
     }
 
     /**
-     * Signing keys a `.env.example` sets to a well-known placeholder (SECRET_KEY=changeme), with the compose path's
+     * Signing keys and tokens a `.env.example` sets to a well-known placeholder (SECRET_KEY=changeme), with the compose path's
      * seed and rule. APP_KEY is left to withGeneratedSecrets; keys the account set are left to its env_vars.
      *
      * @param  array<string, string>  $overrides
@@ -1000,7 +1000,7 @@ class ProjectEnvironment
         foreach (EnvFile::parse($contents) as $row) {
             $key = self::variableKey($row);
             if ($key === '' || $key === 'APP_KEY' || isset($overrides[$key])
-                || ! ComposePlaceholders::isPublishedSecret($key, (string) ($row['value'] ?? ''))
+                || ! self::isPublishedPlaceholder($key, (string) ($row['value'] ?? ''))
             ) {
                 continue;
             }
@@ -1010,6 +1010,11 @@ class ProjectEnvironment
         return $generated === []
             ? [$contents, []]
             : [EnvFile::merge($contents, $generated), array_keys($generated)];
+    }
+
+    private static function isPublishedPlaceholder(string $key, string $value): bool
+    {
+        return ComposePlaceholders::isPublishedSecret($key, $value) || ComposePlaceholders::isPublishedToken($key, $value);
     }
 
     /**

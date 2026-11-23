@@ -215,6 +215,26 @@ class ProjectEnvironmentSecretsTest extends TestCase
         $this->assertSame('False', $this->vars($filled)['DEBUG']);
     }
 
+    /** Resin's `.env.example` says RESIN_PROXY_TOKEN=change-me-proxy-token, the path segment its proxy is used with. */
+    public function test_a_published_token_in_the_example_is_replaced(): void
+    {
+        [$filled, $keys] = ProjectEnvironment::withoutPublishedSecrets("RESIN_PORT=2260\nRESIN_PROXY_TOKEN=change-me-proxy-token\n", 'seed');
+        [$other] = ProjectEnvironment::withoutPublishedSecrets("RESIN_PROXY_TOKEN=change-me-proxy-token\n", 'another-seed');
+        $token = $this->vars($filled)['RESIN_PROXY_TOKEN'];
+
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{48}$/', $token);
+        $this->assertNotSame($token, $this->vars($other)['RESIN_PROXY_TOKEN']);
+        $this->assertSame(['RESIN_PROXY_TOKEN'], $keys);
+        $this->assertSame('2260', $this->vars($filled)['RESIN_PORT']);
+    }
+
+    public function test_an_integrations_token_and_a_token_list_are_left_as_written(): void
+    {
+        $contents = "GITHUB_TOKEN=changeme\nINIT_BACKEND_API_TOKENS=default:development.unleash-insecure-api-token\n";
+
+        $this->assertSame([$contents, []], ProjectEnvironment::withoutPublishedSecrets($contents, 'seed'));
+    }
+
     public function test_blanks_third_party_keys_and_real_secrets_are_left_as_written(): void
     {
         $contents = "DB_PASSWORD=\nSTRIPE_API_KEY=changeme\nSECRET_KEY=8f3a9c1e5b7d2f4a6c8e0b1d3f5a7c9e1b3d5f7a\n";

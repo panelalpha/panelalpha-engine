@@ -40,6 +40,9 @@ class ComposePlaceholders
 
     private const THIRD_PARTY_KEY_PATTERN = '/API_?KEY|PUBLIC_KEY|ACCESS_KEY|CLIENT_SECRET/i';
 
+    /** One token, not a list: Unleash's INIT_BACKEND_API_TOKENS is `project:environment.secret` pairs. */
+    private const OWN_TOKEN_KEY_PATTERN = '/(^|_)TOKEN$/i';
+
     /** A salt or pepper is the app's own even under a third-party word: OpenAlgo's API_KEY_PEPPER hashes its API keys. */
     private const OWN_SECRET_SUFFIX_PATTERN = '/(SALT|PEPPER)$/i';
 
@@ -222,7 +225,7 @@ class ComposePlaceholders
      */
     private static function filledValue(string $key, string $value, array $replacements, string $seed, ?string $publicUrl, array $accountEnv, array $publishedPorts): array
     {
-        $published = self::isPublishedSecret($key, $value);
+        $published = self::isPublishedSecret($key, $value) || self::isPublishedToken($key, $value);
         $filled = $published && strcasecmp($key, 'APP_KEY') === 0
             ? $value
             : self::applyReplacements($key, $value, $replacements);
@@ -372,6 +375,22 @@ class ComposePlaceholders
         if (self::isTemplatePlaceholder($value)) {
             return self::isOwnSalt($key) || preg_match(self::ISSUED_CREDENTIAL_PATTERN, $key) !== 1;
         }
+
+        return self::isWellKnownSecretValue($value);
+    }
+
+    /** The app's own token (RESIN_PROXY_TOKEN) at a value everyone can read; an integration's token or a blank is left as written. */
+    public static function isPublishedToken(string $key, string $value): bool
+    {
+        return preg_match(self::OWN_TOKEN_KEY_PATTERN, $key) === 1
+            && preg_match(self::INTEGRATION_WORD_PATTERN, $key) !== 1
+            && preg_match(self::THIRD_PARTY_KEY_PATTERN, $key) !== 1
+            && ! self::isTemplatePlaceholder($value)
+            && self::isWellKnownSecretValue($value);
+    }
+
+    private static function isWellKnownSecretValue(string $value): bool
+    {
         $value = strtolower(trim(trim($value), '"\''));
 
         return in_array($value, self::PUBLISHED_SECRET_VALUES, true)

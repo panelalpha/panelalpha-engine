@@ -730,6 +730,36 @@ YAML);
         $this->assertFalse(ComposePlaceholders::isPublishedSecret('SECRET_KEY', $real));
     }
 
+    public function test_an_apps_own_token_at_a_published_value_is_published(): void
+    {
+        foreach (['RESIN_PROXY_TOKEN' => 'change-me-proxy-token', 'API_TOKEN' => 'notsecretkey', 'ADMIN_TOKEN' => 'xxxxxx'] as $key => $value) {
+            $this->assertTrue(ComposePlaceholders::isPublishedToken($key, $value), $key);
+        }
+        foreach ([
+            ['GITHUB_TOKEN', 'changeme'],
+            ['SLACK_BOT_TOKEN', 'change-me-token'],
+            ['INIT_BACKEND_API_TOKENS', 'changeme'],
+            ['RESIN_PROXY_TOKEN', 'YOUR_TOKEN_HERE'],
+            ['RESIN_PROXY_TOKEN', 'k8Jd2mQx9Lw4Rt6Yp1Zs'],
+            ['TOKEN_TTL', 'changeme'],
+        ] as [$key, $value]) {
+            $this->assertFalse(ComposePlaceholders::isPublishedToken($key, $value), $key.'='.$value);
+        }
+    }
+
+    public function test_a_published_token_in_compose_is_generated_per_account(): void
+    {
+        $compose = ['services' => ['app' => ['environment' => ['PROXY_TOKEN' => 'notsecretkey']]]];
+
+        $first = ComposePlaceholders::fill($compose, self::SEED);
+        $other = ComposePlaceholders::fill($compose, 'another-account');
+        $token = $first['compose']['services']['app']['environment']['PROXY_TOKEN'];
+
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{48}$/', $token);
+        $this->assertNotSame($token, $other['compose']['services']['app']['environment']['PROXY_TOKEN']);
+        $this->assertSame(['PROXY_TOKEN'], $first['published']);
+    }
+
     public function test_the_value_list_is_exact(): void
     {
         foreach (['"changeme"', ' CHANGE-ME ', 'xxxxxx', 'django-insecure-abc123', 'Your_Secret_Key'] as $value) {
