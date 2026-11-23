@@ -203,8 +203,8 @@ final class ComposePortScan
     }
 
     /**
-     * `demoted` holds the ports ranked after every other web port: expose-only ones, and those
-     * offered only by a service another publishing service depends_on.
+     * `demoted` holds the ports ranked after every other web port: expose-only ones, and those offered only
+     * by a service another publishing service depends_on or by a stock web server beside a built one.
      *
      * @param  array<array-key, array<string, mixed>>  $services
      * @return array{public: list<int>, refused: list<Refusal>, guessed: list<int>, ranks: array<int, int>, demoted: list<int>, checked: list<int>, owners: array<int, list<string>>, published: array<string, list<int>>}
@@ -212,14 +212,15 @@ final class ComposePortScan
     private static function scan(array $services): array
     {
         $fronted = self::frontedServices($services);
+        $stock = self::stockServersBesideABuild($services);
         $scan = ['ports' => [], 'refused' => [], 'guessed' => [], 'ranks' => [], 'checked' => [], 'owners' => [], 'published' => []];
         foreach ($services as $name => $service) {
             if (self::isOptIn($service)) {
                 continue;
             }
             $found = self::serviceScan($service);
-            $isBehind = in_array(strtolower((string) $name), $fronted, true);
-            self::addServiceScan($scan, (string) $name, $found, $isBehind);
+            $ranksLast = in_array(strtolower((string) $name), $fronted, true) || in_array((string) $name, $stock, true);
+            self::addServiceScan($scan, (string) $name, $found, $ranksLast);
         }
 
         return [
@@ -238,14 +239,14 @@ final class ComposePortScan
      * @param  array{ports: array<int, bool>, refused: array<int, Refusal>, guessed: array<int, true>, ranks: array<int, int>, checked: array<int, true>, owners: array<int, list<string>>, published: array<string, list<int>>}  $scan
      * @param  array{public: list<int>, refused: list<Refusal>, guessed: list<int>, ranks: array<int, int>, demoted: list<int>, checked: list<int>}  $found
      */
-    private static function addServiceScan(array &$scan, string $name, array $found, bool $isBehind): void
+    private static function addServiceScan(array &$scan, string $name, array $found, bool $ranksLast): void
     {
         $scan['published'][$name] = $found['public'];
         foreach ($found['checked'] as $port) {
             $scan['checked'][$port] = true;
         }
         foreach ($found['public'] as $port) {
-            $scan['ports'][$port] = ($scan['ports'][$port] ?? true) && ($isBehind || in_array($port, $found['demoted'], true));
+            $scan['ports'][$port] = ($scan['ports'][$port] ?? true) && ($ranksLast || in_array($port, $found['demoted'], true));
             $scan['ranks'][$port] = min($scan['ranks'][$port] ?? PHP_INT_MAX, $found['ranks'][$port]);
             $scan['owners'][$port][] = $name;
         }
@@ -273,6 +274,29 @@ final class ComposePortScan
         }
 
         return array_values(array_unique($names));
+    }
+
+    /**
+     * The {@see StockWebServer} services, when a service built from the checkout publishes ports beside them.
+     *
+     * @param  array<array-key, array<string, mixed>>  $services
+     * @return list<string>
+     */
+    private static function stockServersBesideABuild(array $services): array
+    {
+        $stock = [];
+        $built = false;
+        foreach ($services as $name => $service) {
+            if (self::isOptIn($service)) {
+                continue;
+            }
+            $built = $built || (! empty($service['build']) && ! empty($service['ports']));
+            if (StockWebServer::servesOnlyItsDefaultPage($service)) {
+                $stock[] = (string) $name;
+            }
+        }
+
+        return $built ? $stock : [];
     }
 
     /**
