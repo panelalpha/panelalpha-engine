@@ -96,15 +96,17 @@ The parts are chosen with `only` or `exclude`, never both. Each is an object wit
 
 ### Into a new project
 
-A backup can also be restored into a **new project**, under a new name and domain, without touching the project it was taken from. The new project is created, the backup's files, volumes and databases are restored into it under its own database prefix, and the application is started on its own domain. The original project keeps running and keeps its backups.
+A backup can also be restored into a **new project**, under a new name and domain, without touching the project it was taken from. The new project is created, the backup's files, volumes and application database are restored into it under its own database prefix, and the application is started on its own domain. The original project keeps running and keeps its backups.
+
+The new project signs in to its own database. Its environment variables and the login a recipe generated come from the original, since the restored data was set up with them. Any file in the restored code that holds the original's database password, such as the configuration Matomo writes during its setup, gets the new project's database login and domain instead. A database that runs in the project's own containers comes back from its volume and belongs to the new project alone.
 
 ```text
 Restore the newest backup of tshop into a new project called tshop2.
 ```
 
-Only a backup of a container project can be restored this way. A traditional PHP hosting backup carries an application configuration that names the original project's databases, so restoring it beside the original would leave both projects sharing one database. Use a container project, or the WordPress migration for a traditional PHP site.
+Only a backup of a container project can be restored this way. A traditional PHP hosting backup carries an application configuration that names the original project's databases, so restoring it beside the original would leave both projects sharing one database. Use a container project, or the WordPress migration for a traditional PHP site. For the same reason a backup that holds databases besides the project's application database is refused: the new project would still sign in to the original's copies of them.
 
-A restore into a new project runs as a task: the call answers with the new project and a task ID, and the project's `async_status.restore` becomes `completed` or `failed`. A failed one leaves the new project in place with the reason in its error, so it can be inspected and deleted.
+A restore into a new project runs as a task: the call answers with the new project and a task ID, and the project's `async_status.restore` becomes `completed` or `failed`. A failed one leaves the new project in place, marked failed like a failed deploy, with the reason in its error, so it can be inspected and deleted.
 
 A token limited to some projects can restore only its own projects' backups, and only into a new project name that is in its list.
 

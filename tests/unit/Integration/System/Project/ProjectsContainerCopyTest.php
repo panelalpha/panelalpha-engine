@@ -64,6 +64,7 @@ class ProjectsContainerCopyTest extends TestCase
             'stg copyHomeDirFrom live',
             'stg repointCopiedRunFile live',
             'stg adoptCopiedEnvVars live',
+            'stg repointCopiedAppFiles live',
             'stg startUserApp',
         ], $this->steps);
         $stg = User::findByUsernameOrFail('stg');
@@ -375,6 +376,11 @@ final class ContainerCopyProject extends Project
     public function adoptCopiedEnvVars(User $source): void
     {
         $this->steps[] = "{$this->name} adoptCopiedEnvVars {$source->username}";
+    }
+
+    public function repointCopiedAppFiles(User $source): void
+    {
+        $this->steps[] = "{$this->name} repointCopiedAppFiles {$source->username}";
     }
 
     public function syncGeneratedProxyRules(): void

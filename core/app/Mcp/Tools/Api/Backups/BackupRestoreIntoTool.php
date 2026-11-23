@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Restore a project backup into a new project
 
-    Creates a new project and restores this backup into it, leaving the project that owns the backup and its backups untouched. The databases are restored under the new project's prefix. Answers 202 with the new project and a `task_id`; poll `GET /projects/{new_username}` until `details.async_status.restore` is `completed` or `failed`. Only a container project's backup can be restored this way. CLI equivalent: `php artisan project:backup:restore-into`.
+    Creates a new project and restores this backup into it, leaving the project that owns the backup and its backups untouched. The application database is restored under the new project's prefix. Answers 202 with the new project and a `task_id`; poll `GET /projects/{new_username}` until `details.async_status.restore` is `completed` or `failed`. Files that hold the source's database password get the new project's login and domain. Only a container project's backup holding no database beside its application database can be restored this way. CLI equivalent: `php artisan project:backup:restore-into`.
     MARKDOWN)]
 #[IsDestructive]
 class BackupRestoreIntoTool extends ApiTool

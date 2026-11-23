@@ -10,6 +10,7 @@ use App\Models\BackupItem;
 use App\Models\Task;
 use App\Models\User;
 use App\System;
+use App\System\Project\Dind\AppDatabase;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\LocalRoot;
@@ -125,6 +126,35 @@ class BackupRestoreIntoHttpTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    /** Another database's login stays the source's in every file that names it, so the copy would use the source's data. */
+    public function test_a_backup_holding_another_database_is_refused(): void
+    {
+        $source = $this->dindUser();
+        $backup = $this->completedBackup($source, $this->localContainer());
+        $this->addDatabaseItem($backup, AppDatabase::nameFor($source));
+        $this->addDatabaseItem($backup, $source->getMysqlPrefix().'shop');
+
+        $response = $this->postJson($this->uri($source, $backup), ['new_username' => 'copyproj', 'domain' => 'copyproj.test']);
+
+        $this->assertSame(422, $response->getStatusCode(), (string) $response->getContent());
+        $response->assertJsonPath('problems.0.code', 'restore_into_other_databases');
+        $this->assertStringContainsString($source->getMysqlPrefix().'shop', (string) $response->json('problems.0.message'));
+        $this->assertNull(User::findByUsername('copyproj'));
+        Queue::assertNothingPushed();
+    }
+
+    public function test_a_backup_holding_only_the_application_database_is_restored(): void
+    {
+        $source = $this->dindUser();
+        $backup = $this->completedBackup($source, $this->localContainer());
+        $this->addDatabaseItem($backup, AppDatabase::nameFor($source));
+
+        $response = $this->postJson($this->uri($source, $backup), ['new_username' => 'copyproj', 'domain' => 'copyproj.test']);
+
+        $this->assertSame(202, $response->getStatusCode(), (string) $response->getContent());
+        Queue::assertPushed(RestoreBackupInto::class);
+    }
+
     public function test_an_incomplete_backup_is_a_409(): void
     {
         $source = $this->dindUser();
@@ -236,5 +266,16 @@ class BackupRestoreIntoHttpTest extends TestCase
         $item->save();
 
         return $backup->fresh(['container', 'items']);
+    }
+
+    private function addDatabaseItem(BackupRecord $backup, string $name): void
+    {
+        $item = new BackupItem();
+        $item->backup_id = $backup->id;
+        $item->remote_path = $backup->username.'/'.$backup->id.'/'.$name.'.sql.gz';
+        $item->size_bytes = 1;
+        $item->details = ['type' => 'database', 'name' => $name, 'sha256' => hash('sha256', $name)];
+        $item->save();
+        $backup->unsetRelation('items');
     }
 }

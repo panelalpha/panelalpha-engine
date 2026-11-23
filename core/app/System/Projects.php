@@ -1195,6 +1195,7 @@ class Projects
             $copy->databaseResult = $this->appDatabaseCopy()->intoCopy($copy->source, $copy->dest, $copy->copyDatabases);
             $copy->destProject->repointCopiedRunFile($copy->source);
             $copy->destProject->adoptCopiedEnvVars($copy->source);
+            $copy->destProject->repointCopiedAppFiles($copy->source);
         }
     }
 

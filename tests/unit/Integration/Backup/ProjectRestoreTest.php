@@ -47,6 +47,9 @@ class ProjectRestoreTest extends TestCase
             'restoreInto:bob',
             'fixPermissions:bob',
             'repointCopiedRunFile:bob:alice',
+            'adoptCopiedEnvVars:bob:alice',
+            'adoptCopiedAppCredentials:bob:alice',
+            'repointCopiedAppFiles:bob:alice',
             'syncGeneratedProxyRules:bob',
             'createDomain:bob.example.test',
         ], $system->steps);
@@ -55,6 +58,7 @@ class ProjectRestoreTest extends TestCase
         $this->assertSame('active', $target->status);
     }
 
+    /** Left as a failed deploy leaves a project, so it is not stuck pending and can be inspected or deleted. */
     public function test_a_backup_restore_that_failed_fails_the_copy_and_publishes_nothing(): void
     {
         [$source, $target, $record] = $this->copyOfAlice();
@@ -71,7 +75,8 @@ class ProjectRestoreTest extends TestCase
         $target->refresh();
         $this->assertSame('failed', $target->asyncStatus()['restore']);
         $this->assertSame(self::RESTORE_FAILURE, $target->getDetails()['error']);
-        $this->assertSame('pending', $target->status);
+        $this->assertSame('failed', $target->getDetails()['deployment_status']);
+        $this->assertSame('active', $target->status);
     }
 
     /**
@@ -154,6 +159,21 @@ class RestoreRecordingProject extends Project
     public function repointCopiedRunFile(User $source, ?string $path = null): void
     {
         $this->recorder->steps[] = 'repointCopiedRunFile:'.$this->username().':'.$source->username;
+    }
+
+    public function adoptCopiedEnvVars(User $source): void
+    {
+        $this->recorder->steps[] = 'adoptCopiedEnvVars:'.$this->username().':'.$source->username;
+    }
+
+    public function adoptCopiedAppCredentials(User $source): void
+    {
+        $this->recorder->steps[] = 'adoptCopiedAppCredentials:'.$this->username().':'.$source->username;
+    }
+
+    public function repointCopiedAppFiles(User $source): void
+    {
+        $this->recorder->steps[] = 'repointCopiedAppFiles:'.$this->username().':'.$source->username;
     }
 
     public function hasUserApp(): bool

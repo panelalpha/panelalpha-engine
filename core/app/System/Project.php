@@ -22,6 +22,8 @@ use App\System\Project\Deployment\DeploymentWorkflow;
 use App\System\Project\Deployment\RollBackProject;
 use App\System\Project\Deployment\TemplateDeployMechanics;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AppCredentialDelivery;
+use App\System\Project\Dind\CopiedAppFiles;
 use App\System\Project\Dind\CopiedImages;
 use App\System\Project\Dind\CopiedRunFile;
 use App\System\Project\Dind\CopyVolumes;
@@ -844,6 +846,23 @@ class Project
     {
         if ($this->runtime instanceof Dind) {
             (new CopiedRunFile($this->runtime))->repointFrom($source, $path ?? $this->runtime->userAppComposeFilePath());
+        }
+    }
+
+    /** Files the copied application wrote with $source's database login get this project's ({@see CopiedAppFiles}). */
+    public function repointCopiedAppFiles(ModelsUser $source): void
+    {
+        if ($this->runtime instanceof Dind) {
+            (new CopiedAppFiles($this->runtime))->repointFrom($source);
+        }
+    }
+
+    /** The login a recipe generated for $source, which the copied data was set up with, delivered to this account. */
+    public function adoptCopiedAppCredentials(ModelsUser $source): void
+    {
+        $stored = $source->getAppCredentials();
+        if ($this->runtime instanceof Dind && $stored !== null) {
+            (new AppCredentialDelivery($this->runtime))->adoptCopied($stored);
         }
     }
 

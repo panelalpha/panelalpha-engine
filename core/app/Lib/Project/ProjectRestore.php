@@ -20,10 +20,11 @@ use Throwable;
  * started on the new project's domain. The project that owns the backup, and
  * the backup itself, are left as they were.
  *
- * Container projects only. A PHP hosting backup also carries an application
- * configuration that names the source project's databases, and the restore
- * writes only the databases it maps, so such a copy would answer from the
- * source's data.
+ * Container projects only, holding no database beside the application's. A PHP
+ * hosting backup carries an application configuration that names the source
+ * project's databases, and another database's login is the source's in every
+ * file that names it, so either copy would answer from the source's data. The
+ * application database's login is rewritten wherever the copied files hold it.
  */
 class ProjectRestore
 {
@@ -53,6 +54,31 @@ class ProjectRestore
         if ($record->backupStatus() !== 'completed' || $record->items->isEmpty()) {
             throw ProblemException::conflict('backup', 'backup_not_completed', 'Backup is not complete');
         }
+
+        if (self::otherDatabases($source, $record) !== []) {
+            throw ProblemException::one(
+                'backup',
+                'restore_into_other_databases',
+                'This backup holds databases beside the project\'s application database ('
+                    .implode(', ', self::otherDatabases($source, $record)).'). A new project would still sign in to '
+                    .'the source\'s copies of them, so it can only be restored into the project it was taken from.'
+            );
+        }
+    }
+
+    /** @return list<string> the backup's databases other than the source's application database */
+    private static function otherDatabases(User $source, BackupRecord $record): array
+    {
+        $own = AppDatabase::nameFor($source);
+        $names = [];
+        foreach ($record->items as $item) {
+            $name = $item->details['name'] ?? null;
+            if (($item->details['type'] ?? null) === 'database' && is_string($name) && $name !== $own) {
+                $names[] = $name;
+            }
+        }
+
+        return $names;
     }
 
     /** The backup restore records its own failure on the new project rather than throwing it. */
@@ -117,7 +143,7 @@ class ProjectRestore
             $this->publish($target);
             $this->markRestored($target);
         } catch (Throwable $e) {
-            $target->markRestoreFailed($e->getMessage());
+            $this->markFailed($target, $e->getMessage());
 
             throw $e;
         }
@@ -153,13 +179,17 @@ class ProjectRestore
 
     /**
      * Nothing deployed this account, so the restored files are what starts it; they arrive owned by
-     * the source account and are handed to this one first, as a clone does.
+     * the source account and are handed to this one first, as a clone does, with the source's environment,
+     * its generated login and its database login made this project's.
      */
     private function start(User $source, User $target): void
     {
         $project = $this->system->project($target);
         $project->fixPermissions();
         $project->repointCopiedRunFile($source);
+        $project->adoptCopiedEnvVars($source);
+        $project->adoptCopiedAppCredentials($source);
+        $project->repointCopiedAppFiles($source);
 
         if (! $project->hasUserApp()) {
             return;
@@ -186,6 +216,15 @@ class ProjectRestore
         $project = $this->system->project($target);
         $project->syncGeneratedProxyRules();
         $project->domain($domain)->create();
+    }
+
+    /** As a failed deploy leaves a project: there to inspect or delete, with the reason in its error. */
+    private function markFailed(User $target, string $error): void
+    {
+        $target->markRestoreFailed($error);
+        $target->setDetails(['deployment_status' => 'failed']);
+        $target->status = 'active';
+        $target->save();
     }
 
     private function markRestored(User $target): void

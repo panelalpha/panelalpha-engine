@@ -100,6 +100,21 @@ class AppCredentialDelivery
     }
 
     /**
+     * A copy's login, taken from the project it copies: the copied data was set up with that login, so it is
+     * stored and written into this account as it is, before anything starts.
+     *
+     * @param  array<string, mixed>  $stored
+     */
+    public function adoptCopied(array $stored): void
+    {
+        $user = $this->dind->userModel();
+        $user->setAppCredentials($stored);
+        $user->save();
+        $home = rtrim($this->dind->homeDirPath(), '/');
+        $this->writeEnvFile($user, $this->dind->system()->filesystem(), $home.'/'.AppCredentials::ENV_FILE, AppCredentials::envFile($stored));
+    }
+
+    /**
      * After the app started ({@see DindDeployMechanics::startApplication()}): the
      * login the app wrote into its `written_by_app` file replaces the stored one, so the API and
      * ~/.panelalpha/app-credentials.env name the login that works. Never fails a deploy: a file not written yet is

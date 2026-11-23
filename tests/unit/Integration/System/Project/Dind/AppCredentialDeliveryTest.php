@@ -234,6 +234,39 @@ class AppCredentialDeliveryTest extends TestCase
         $this->assertStringNotContainsString('RecoveredByTheApp7', (string) file_get_contents($logger->getLogPath()));
     }
 
+    /** The copied data was set up with the source's login, so a copy keeps it rather than generating its own. */
+    public function test_a_copy_takes_the_login_of_the_project_it_copies(): void
+    {
+        $stored = [
+            'fields' => [
+                'DEMO_ADMIN_USER' => ['kind' => 'username', 'value' => 'admin'],
+                'DEMO_ADMIN_PASSWORD' => ['kind' => 'password', 'value' => 'set-up-with-this'],
+            ],
+            'login_path' => '/login',
+            'created_at' => '2026-11-01T00:00:00+00:00',
+        ];
+        $source = $this->makeUser('src' . bin2hex(random_bytes(3)), ['template' => 'dind']);
+        $source->setAppCredentials($stored);
+        $source->save();
+        $copy = $this->model();
+
+        (new ProjectAggregate($this->system, $copy))->adoptCopiedAppCredentials($source);
+
+        $this->assertSame($stored, $copy->fresh()?->getAppCredentials());
+        $file = $this->home . '/' . AppCredentials::ENV_FILE;
+        $this->assertSame(AppCredentials::envFile($stored), file_get_contents($file));
+        $this->assertSame(0600, fileperms($file) & 0777);
+    }
+
+    public function test_a_copy_of_a_project_without_a_generated_login_gets_no_file(): void
+    {
+        $source = $this->makeUser('src' . bin2hex(random_bytes(3)), ['template' => 'dind']);
+
+        (new ProjectAggregate($this->system, $this->model()))->adoptCopiedAppCredentials($source);
+
+        $this->assertFileDoesNotExist($this->home . '/' . AppCredentials::ENV_FILE);
+    }
+
     private function writeProject(string $yaml, ?string $prepare): void
     {
         file_put_contents($this->projectDir . '/index.html', '<!DOCTYPE html><title>x</title>');
