@@ -145,6 +145,28 @@ class RubyDockerfileTest extends TestCase
         $this->assertFalse(RubyApp::at($withoutApp, ['gemfile' => true])->isRails());
     }
 
+    public function test_a_sinatra_app_with_a_rails_shaped_config_is_not_rails(): void
+    {
+        $dir = $this->projectDir([
+            'Gemfile' => "source 'https://rubygems.org'\ngem 'sinatra'\ngem 'puma'\n",
+            'Gemfile.lock' => "GEM\n  specs:\n    puma (7.1.0)\n    sinatra (4.2.2)\n      rack (>= 3.0.0)\n",
+            'config/application.rb' => "require 'bundler/setup'\nBundler.require(:default)\n",
+        ]);
+
+        $this->assertFalse(RubyApp::at($dir, ['gemfile' => true])->isRails());
+    }
+
+    public function test_an_app_locking_railties_is_rails_whatever_its_gemfile_names(): void
+    {
+        $dir = $this->projectDir([
+            'Gemfile' => "source 'https://rubygems.org'\ngem 'actionpack'\n",
+            'Gemfile.lock' => "GEM\n  specs:\n    railties (8.0.1)\n      actionpack (= 8.0.1)\n",
+            'config/application.rb' => "module X; end\n",
+        ]);
+
+        $this->assertTrue(RubyApp::at($dir, ['gemfile' => true])->isRails());
+    }
+
     public function test_fallback_rails_server_uses_detected_port(): void
     {
         $dir = $this->projectDir([
@@ -194,7 +216,7 @@ class RubyDockerfileTest extends TestCase
     public function test_serves_static_files_so_the_copied_public_dir_is_reachable(): void
     {
         $dir = $this->projectDir([
-            'Gemfile' => "source 'https://rubygems.org'\n",
+            'Gemfile' => "source 'https://rubygems.org'\ngem 'rails'\n",
             'config/application.rb' => "module Demo\nend\n",
         ]);
 

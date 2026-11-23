@@ -14,6 +14,10 @@ final class RubyApp
 
     private const RACKUP = 'config.ru';
 
+    private const RAILS_GEMS = ['rails', 'railties'];
+
+    private const RAILS_APPLICATION = 'Rails::Application';
+
     private readonly Gemfile $gemfile;
 
     private readonly Procfile $procfile;
@@ -37,9 +41,22 @@ final class RubyApp
         return $this->gemfile;
     }
 
+    /** Rails by what it loads, not by layout: Sinatra and Hanami keep a config/application.rb too. */
     public function isRails(): bool
     {
-        return $this->project->hasFile('gemfile') && $this->project->isFile(self::RAILS_MARKER);
+        return $this->project->hasFile('gemfile')
+            && $this->project->isFile(self::RAILS_MARKER)
+            && ($this->dependsOnRails() || $this->definesRailsApplication());
+    }
+
+    private function dependsOnRails(): bool
+    {
+        return $this->gemfile->requiresAny(self::RAILS_GEMS) || $this->gemfile->locks('railties');
+    }
+
+    private function definesRailsApplication(): bool
+    {
+        return str_contains($this->project->contents(self::RAILS_MARKER) ?? '', self::RAILS_APPLICATION);
     }
 
     public function isRackup(): bool

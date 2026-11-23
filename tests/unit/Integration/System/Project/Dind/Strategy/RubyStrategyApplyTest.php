@@ -51,6 +51,18 @@ class RubyStrategyApplyTest extends TestCase
         $this->assertMatchesGolden('ruby-rails');
     }
 
+    public function test_a_sinatra_app_with_config_initializers_gets_no_rails_initializer(): void
+    {
+        $this->sinatra();
+        $this->putFile('config/application.rb', "require 'bundler/setup'\n");
+        $this->putFile('config/initializers/05-string.rb', "\n");
+
+        (new RubyStrategy($this->harnessDind(['UID' => 1001, 'GID' => 1001])))
+            ->installHostInitializer($this->dir, '1001:1001');
+
+        $this->assertSame([], $this->events);
+    }
+
     public function test_a_mounted_strategy_runs_the_base_image_with_the_server_command(): void
     {
         $this->sinatra();

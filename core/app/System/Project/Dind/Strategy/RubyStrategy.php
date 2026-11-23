@@ -185,11 +185,8 @@ class RubyStrategy
      */
     public function installHostInitializer(string $projectDir, ?string $chown): void
     {
-        if (! is_file($projectDir.'/config/application.rb')) {
-            return;
-        }
         $dir = $projectDir.'/config/initializers';
-        if (! is_dir($dir)) {
+        if (! is_dir($dir) || ! $this->app($projectDir)->isRails()) {
             return;
         }
         $this->dind->system()->filesystem()->writeFileReplacingPath(

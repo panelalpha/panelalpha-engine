@@ -113,9 +113,11 @@ panelalpha.Dockerfile.dockerignore
 # An empty config.hosts already accepts every Host; only extend a whitelist
 # the application chose to keep.
 
-Rails.application.config.after_initialize do
-  hosts = Rails.application.config.hosts
-  hosts << 'acme.example.test' unless hosts.empty? || hosts.include?('acme.example.test')
+if defined?(Rails) && Rails.respond_to?(:application)
+  Rails.application.config.after_initialize do
+    hosts = Rails.application.config.hosts
+    hosts << 'acme.example.test' unless hosts.empty? || hosts.include?('acme.example.test')
+  end
 end
 
 

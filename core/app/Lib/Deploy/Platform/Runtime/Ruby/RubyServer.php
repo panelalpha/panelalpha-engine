@@ -81,7 +81,7 @@ final class RubyServer
     /** @return list<string>|null */
     private function railsServer(): ?array
     {
-        return $this->app->hasConfigFile('config/application.rb')
+        return $this->app->isRails()
             ? ['bundle', 'exec', 'rails', 'server', '-b', '0.0.0.0', '-p', (string) $this->port]
             : null;
     }

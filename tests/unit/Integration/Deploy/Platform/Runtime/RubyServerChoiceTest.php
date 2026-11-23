@@ -43,4 +43,17 @@ class RubyServerChoiceTest extends TestCase
             RubyServer::command(RubyApp::at($this->dir), 4567)
         );
     }
+
+    public function test_a_sinatra_app_with_a_config_application_rb_is_not_started_with_rails(): void
+    {
+        mkdir($this->dir.'/config');
+        file_put_contents($this->dir.'/Gemfile', "source 'https://rubygems.org'\ngem 'sinatra'\n");
+        file_put_contents($this->dir.'/config/application.rb', "require 'bundler/setup'\n");
+        file_put_contents($this->dir.'/config.ru', "require './app'\nrun Sinatra::Application\n");
+
+        $this->assertSame(
+            '["bundle","exec","rackup","config.ru","-o","'.TestNetwork::ANY.'","-p","4567"]',
+            RubyServer::command(RubyApp::at($this->dir, ['gemfile' => true]), 4567)
+        );
+    }
 }

@@ -4,8 +4,10 @@
 # An empty config.hosts already accepts every Host; only extend a whitelist
 # the application chose to keep.
 
-Rails.application.config.after_initialize do
-  hosts = Rails.application.config.hosts
-  hosts << {{ host }} unless hosts.empty? || hosts.include?({{ host }})
+if defined?(Rails) && Rails.respond_to?(:application)
+  Rails.application.config.after_initialize do
+    hosts = Rails.application.config.hosts
+    hosts << {{ host }} unless hosts.empty? || hosts.include?({{ host }})
+  end
 end
 {{/ host }}

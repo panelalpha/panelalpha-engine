@@ -22,6 +22,16 @@ class RubyDockerfileTest extends TestCase
         $this->assertStringNotContainsString('/.+/', $ruby);
     }
 
+    public function test_rails_host_initializer_does_nothing_where_rails_is_not_loaded(): void
+    {
+        $ruby = RailsProxy::hostAuthorizationInitializer('https://app.example.test');
+
+        $this->assertMatchesRegularExpression(
+            '/^if defined\?\(Rails\) && Rails\.respond_to\?\(:application\)\n  Rails\.application\.config\.after_initialize do$/m',
+            $ruby
+        );
+    }
+
     public function test_rails_behind_the_proxy_does_not_pin_hsts_on_a_self_signed_cert(): void
     {
         $this->assertSame(
