@@ -4,7 +4,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-apache
-    image: ghcr.io/panelalpha/engine-apache:v2.3.2
+    image: ghcr.io/panelalpha/engine-apache:v2.4.0
     pull_policy: missing
     labels:
       - com.panelalpha.webserver=apache
