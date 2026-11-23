@@ -1859,6 +1859,8 @@ prepare_engine_images() {
     webserver="$host/docker-compose.yml-webserver"
     [ -f "$webserver" ] || webserver="$src/docker-compose.yml-nginx-proxy"
     cp "$webserver" "$src/docker-compose.yml-webserver"
+    # With the release's webserver tag, as the copy will have after the update, so that image is prepared here too.
+    bash "$src/scripts/refresh-webserver-image.sh" "$src" >/dev/null 2>&1 || true
     images=$(engine_built_images "${compose[@]}") ||
         echo_error "Could not read the engine images from the new docker-compose.yml"
     while IFS=$'\t' read -r service image context dockerfile; do

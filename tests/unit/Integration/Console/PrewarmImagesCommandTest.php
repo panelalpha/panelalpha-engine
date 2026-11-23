@@ -180,7 +180,7 @@ class PrewarmImagesCommandTest extends TestCase
         $this->assertSame([], $this->called('forceRemoveImages'));
     }
 
-    public function test_it_builds_the_selected_bases_publishes_them_and_trims_the_registry(): void
+    public function test_the_weekly_refresh_builds_the_selected_bases_publishes_them_and_trims_the_registry(): void
     {
         [$first, $second] = $this->builds;
         $this->host([AccountImage::REF, $this->sibling], free: 50 * self::GB);
@@ -202,14 +202,14 @@ class PrewarmImagesCommandTest extends TestCase
         $this->answer('httpRequest DELETE', ['out' => "HTTP/1.1 202 Accepted\r\n\r\n"]);
         $this->answer('registryStorageKilobytes', [['out' => "2097152\t/var/lib/registry"], ['out' => "1048576\t/var/lib/registry"]]);
 
-        $this->assertSame(0, Artisan::call('system:image:prewarm', ['--budget' => 'none', '--reserve' => '10G']));
+        $this->assertSame(0, Artisan::call('system:image:prewarm', ['--budget' => 'none', '--reserve' => '10G', '--refresh' => true]));
 
         $output = Artisan::output();
         $this->assertStringContainsString("→ build {$first['ref']}", $output);
         $this->assertStringContainsString('  failed, leaving it to the first deploy that needs it', $output);
         $this->assertStringContainsString("→ build {$second['ref']}", $output);
         $this->assertStringContainsString('2G of disk', $output);
-        $this->assertStringContainsString('Warmed 1 image(s), 1 failed', $output);
+        $this->assertStringContainsString('Warmed 2 image(s), 1 failed', $output);
         $this->assertStringContainsString('Published 1 image(s) to the cache registry', $output);
         $this->assertStringContainsString("removed from the cache registry: {$repository}:old", $output);
         $this->assertStringContainsString('Cache registry garbage-collected: 2G → 1G', $output);
@@ -217,6 +217,23 @@ class PrewarmImagesCommandTest extends TestCase
         $this->assertSame([DindImageStore::HOST_CACHE_REGISTRY . '/' . $second['ref']], array_slice($this->values('pushQuietly')[0] ?? [], 0, 1));
         $this->assertCount(1, $this->called('registryGarbageCollect'));
         $this->assertSame([['gone/repo']], array_map(static fn (array $v): array => array_slice($v, -1), $this->values('removeRegistryRepository')));
+    }
+
+    /** The run an install or an update starts must not delete the images deploys pushed to the registry. */
+    public function test_without_the_weekly_refresh_the_registry_is_left_as_it_is(): void
+    {
+        $this->registry([
+            '/v2/_catalog?n=1000' => $this->jsonResponse(['repositories' => ['panelalpha/php']]),
+            '/v2/panelalpha/php/tags/list' => $this->jsonResponse(['tags' => ['8.3-cli-bookworm-pa1']]),
+        ]);
+        $this->manifest('panelalpha/php:8.3-cli-bookworm-pa1', 'a');
+        $this->answer('httpRequest DELETE', ['out' => "HTTP/1.1 202 Accepted\r\n\r\n"]);
+
+        $this->assertSame(0, Artisan::call('system:image:prewarm'));
+
+        $this->assertStringNotContainsString('removed from the cache registry', Artisan::output());
+        $this->assertSame([], $this->called('httpRequest DELETE'));
+        $this->assertSame([], $this->called('registryGarbageCollect'));
     }
 
     public function test_it_stops_before_an_image_the_reserve_cannot_afford(): void
@@ -305,7 +322,7 @@ class PrewarmImagesCommandTest extends TestCase
         $this->answer('pushQuietly', ['out' => 'connection refused', 'code' => 1]);
         $this->registry(['/v2/_catalog?n=1000' => "HTTP/1.1 500 Internal Server Error\r\n\r\n"]);
 
-        $this->assertSame(0, Artisan::call('system:image:prewarm'));
+        $this->assertSame(0, Artisan::call('system:image:prewarm', ['--refresh' => true]));
 
         $output = Artisan::output();
         $this->assertStringContainsString("Could not publish {$first['ref']}: connection refused", $output);
@@ -320,7 +337,7 @@ class PrewarmImagesCommandTest extends TestCase
         $this->answer('registryStorageKilobytes', ['out' => 'du: not found', 'code' => 1]);
         $this->answer('registryGarbageCollect', ['out' => 'storage locked', 'code' => 1]);
 
-        $this->assertSame(0, Artisan::call('system:image:prewarm'));
+        $this->assertSame(0, Artisan::call('system:image:prewarm', ['--refresh' => true]));
 
         $this->assertStringContainsString('Cache registry garbage-collect failed: storage locked', Artisan::output());
     }

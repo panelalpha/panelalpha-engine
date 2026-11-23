@@ -704,7 +704,9 @@ one sharing a digest with a kept tag) and runs `garbage-collect
 re-pushed tag. Both hold `/run/panelalpha/cache-registry.lock` (the root
 broker's, shared with core) exclusive; every deploy-time push holds it shared, because a GC during an
 upload deletes that upload's layers. `--runtimes=` skips the trim, since a
-subset of the catalogue would delete the rest.
+subset of the catalogue would delete the rest, and so does a run without
+`--refresh`, such as the one an install or an update starts: it would delete
+every image deploys pushed.
 
 On registry 3.1.1, `garbage-collect --delete-untagged` keeps an OCI index's
 platform manifest and attestation, and the image still pulls and runs. The

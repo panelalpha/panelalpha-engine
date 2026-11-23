@@ -55,6 +55,7 @@ docker() {
         image=$(image_of "$service")
         case " ${args[*]} " in
         *" config --format json "*)
+            cp "$SRC/docker-compose.yml-webserver" "$TMP/webserver-read"
             while IFS=$'\t' read -r s f; do
                 printf '"%s":{"image":"%s","build":{"context":"%s","dockerfile":"%s"}}\n' "$s" "$(image_of "$s")" "$SRC/dockerfiles" "$f"
             done <<<"$SERVICES" | paste -sd, | sed 's/^/{"name":"shared-hosting","services":{"sites-dns-plain":{"image":"x"},/; s/$/}}/'
@@ -206,6 +207,19 @@ host
 rm "$SRC/dockerfiles/Dockerfile-exim"
 out=$(prepare_engine_images 2>/dev/null)
 check "a release missing a Dockerfile stops the update" "101|error:Could not read the mail image's sources from the new release" "$?|$out"
+release
+
+host
+all_local
+mkdir -p "$SRC/scripts"
+cp "$SCRIPT_DIR/refresh-webserver-image.sh" "$SRC/scripts/"
+printf '%s\n' 'services:' '  sites-http:' '    image: ghcr.io/panelalpha/app-nginx:v2.4.0' '    labels:' '      - com.panelalpha.webserver=nginx-proxy' >"$SRC/docker-compose.yml-nginx-proxy"
+printf '%s\n' 'services:' '  sites-http:' '    image: ghcr.io/panelalpha/app-nginx:v2.3.1' '    labels:' '      - com.panelalpha.webserver=nginx-proxy' >"$PANELALPHA_DIR/shared-hosting/docker-compose.yml-webserver"
+out=$(prepare_engine_images)
+check "the webserver image is prepared under the release's tag, not the one the host's copy still names" \
+    "0|    image: ghcr.io/panelalpha/app-nginx:v2.4.0" "$?|$(grep '^    image:' "$TMP/webserver-read")"
+check "and the host's copy is left for the update to refresh" "    image: ghcr.io/panelalpha/app-nginx:v2.3.1" \
+    "$(grep '^    image:' "$PANELALPHA_DIR/shared-hosting/docker-compose.yml-webserver")"
 release
 
 moved() { # <file under dockerfiles> -- whether each image's hash moves when the file changes, "<core> <broker>"

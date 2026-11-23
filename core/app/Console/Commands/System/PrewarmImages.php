@@ -28,8 +28,9 @@ use Illuminate\Support\Str;
  *
  * `--refresh` (the weekly schedule) also rebuilds or re-pulls what is already
  * here, one image at a time, so the registry never holds anything older than a
- * week. The registry keeps only the catalogue and operator images ({@see OperatorImage});
+ * week, and then keeps only the catalogue and operator images ({@see OperatorImage}):
  * other tags are removed and garbage-collected under a lock deploy-time pushes also take.
+ * A run without it, such as the one an install or an update starts, removes nothing.
  *
  * What may be warmed and in what order comes from `config/core/images.yaml`;
  * what is, from `DEPLOY_PREWARM_IMAGES` (`pae configure prewarm`, empty by
@@ -141,8 +142,7 @@ class PrewarmImages extends Command
             : "Warmed {$built} image(s)".($failed > 0 ? ", {$failed} failed" : ''));
 
         $this->publish($system, $catalog);
-        // Trimming to a subset of the catalogue would delete everything else.
-        if ($runtimes === []) {
+        if ($this->trimsRegistry($runtimes)) {
             $this->trimRegistry($system, $catalog);
         }
 
@@ -264,6 +264,17 @@ class PrewarmImages extends Command
         }
 
         $this->info("Published {$published} image(s) to the cache registry");
+    }
+
+    /**
+     * Only the weekly refresh trims, and never to a subset of the catalogue: an install's or an update's run would
+     * delete every image deploys pushed, and a subset everything else.
+     *
+     * @param  list<string>  $runtimes
+     */
+    private function trimsRegistry(array $runtimes): bool
+    {
+        return $runtimes === [] && (bool) $this->option('refresh');
     }
 
     /**
