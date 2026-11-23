@@ -109,6 +109,16 @@ class ComposeUsableProbeTest extends ProbeTestCase
         $this->assertIsArray($this->probe()->evaluate($this->context()));
     }
 
+    /** Harbor's root compose.yml holds only `networks:`; its CLI merges the services from other files. */
+    public function test_a_file_without_any_service_starts_nothing(): void
+    {
+        $this->write('compose.yml', "networks:\n  harbor-network:\n    external: false\n");
+        $this->assertFalse($this->probe()->evaluate($this->context()));
+
+        $this->write('compose.yml', "services: {}\n");
+        $this->assertFalse($this->probe()->evaluate($this->context()));
+    }
+
     public function test_the_modern_filename_is_preferred(): void
     {
         // Repos mid-rename carry both. compose.yaml is the current spelling

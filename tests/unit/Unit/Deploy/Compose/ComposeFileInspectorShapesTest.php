@@ -32,6 +32,18 @@ class ComposeFileInspectorShapesTest extends TestCase
         );
     }
 
+    public function test_a_file_without_any_service_starts_nothing(): void
+    {
+        $this->assertSame('defines no services', ComposeFileInspector::startsNothingReasonYaml("networks:\n  harbor-network:\n    external: false\n"));
+        $this->assertSame('defines no services', ComposeFileInspector::startsNothingReasonYaml("services: {}\n"));
+        $this->assertSame('defines no services', ComposeFileInspector::startsNothingReasonYaml("services:\nvolumes:\n  data: {}\n"));
+    }
+
+    public function test_an_include_without_services_of_its_own_still_starts_something(): void
+    {
+        $this->assertNull(ComposeFileInspector::startsNothingReasonYaml("include:\n  - stack/compose.yaml\n"));
+    }
+
     public function test_a_service_that_is_not_a_map_does_not_count_as_a_datastore(): void
     {
         $this->assertTrue(ComposeFileInspector::isSidecarsOnlyComposeYaml("services:\n  junk: hello\n  db:\n    image: postgres:16\n"));

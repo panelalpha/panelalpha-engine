@@ -702,6 +702,8 @@ YAML
             'the old static bootstrap' => ["services:\n  app:\n    image: nginx:alpine\n    volumes:\n      - ./:/usr/share/nginx/html:ro\n", "reads as one the engine generated, not the project's own"],
             'a workstation dev compose' => ["services:\n  app:\n    build: .\n    volumes:\n      - .:/var/www/html\n", 'looks like a workstation dev compose (service `app` mounts the project root)'],
             'the v1 layout' => ["web:\n  image: nginx\n", 'uses the v1 layout (no `services:`), which Docker Compose v2 refuses'],
+            'a file without services' => ["networks:\n  harbor-network:\n    external: false\n", 'starts nothing as written (defines no services)'],
+            'a file whose every service is profiled' => ["services:\n  web:\n    image: myorg/app\n    profiles: [dev]\n", 'starts nothing as written (every service is behind a profile)'],
             'a client stack' => ["services:\n  web:\n    image: myorg/app\n", null],
         ];
     }

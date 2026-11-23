@@ -238,12 +238,23 @@ class DetectProjectStrategyTest extends TestCase
 
     public function test_compose_candidate_priority(): void
     {
-        $this->writeFile('docker-compose.yml', "services: {}\n");
-        $this->writeFile('compose.yml', "services: {}\n");
+        $this->writeFile('docker-compose.yml', "services:\n  web:\n    image: myorg/app\n");
+        $this->writeFile('compose.yml', "services:\n  web:\n    image: myorg/app\n");
 
         $result = $this->detect();
 
         $this->assertSame($this->tmpDir . '/compose.yml', $result['compose_path']);
+    }
+
+    public function test_a_compose_file_without_services_leaves_the_repository_to_the_next_strategy(): void
+    {
+        $this->writeFile('compose.yml', "networks:\n  harbor-network:\n    external: false\n");
+        $this->writeFile('Dockerfile', "FROM node:20\nEXPOSE 3000\nCMD node index.js\n");
+
+        $result = $this->detect();
+
+        $this->assertNotSame(Strategies::COMPOSE, $result['strategy']);
+        $this->assertNull($result['compose_path'] ?? null);
     }
 
     public function test_dockerfile_wins_over_railpack_manifest(): void

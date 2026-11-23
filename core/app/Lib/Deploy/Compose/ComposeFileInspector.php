@@ -283,17 +283,20 @@ class ComposeFileInspector
     }
 
     /**
-     * Why `docker compose up` starts nothing from this file: every service is behind an inactive
-     * profile, or one has neither image nor build and Compose rejects the project. Null otherwise.
+     * Why `docker compose up` starts nothing from this file: it defines no service, every service is behind an
+     * inactive profile, or one has neither image nor build and Compose rejects the project. Null otherwise.
      *
      * @param  list<string>  $activeProfiles  COMPOSE_PROFILES the repository sets
      */
     public static function startsNothingReasonYaml(string $raw, array $activeProfiles = []): ?string
     {
         $parsed = self::parseOrNull($raw);
-        $services = self::servicesOf($parsed);
-        if ($services === null || isset($parsed['include'])) {
+        if ($parsed === null || isset($parsed['include'])) {
             return null;
+        }
+        $services = self::servicesOf($parsed);
+        if ($services === null || $services === []) {
+            return 'defines no services';
         }
 
         $startable = false;
@@ -310,7 +313,7 @@ class ComposeFileInspector
             }
         }
 
-        return $startable || $services === [] ? null : 'every service is behind a profile';
+        return $startable ? null : 'every service is behind a profile';
     }
 
     /**
@@ -619,7 +622,8 @@ class ComposeFileInspector
 
     /**
      * Why detection passes over the compose file at $composePath, worded for the deploy log: it cannot be read, it
-     * reads as the engine's own, it is a workstation dev compose, or it has the v1 layout. Null when none applies.
+     * reads as the engine's own, it is a workstation dev compose, it has the v1 layout, or it starts nothing.
+     * Null when none applies.
      */
     public static function ignoredReason(string $composePath): ?string
     {
@@ -636,8 +640,21 @@ class ComposeFileInspector
         if (self::isLegacyV1Compose($composePath)) {
             return 'uses the v1 layout (no `services:`), which Docker Compose v2 refuses';
         }
+        $startsNothing = self::startsNothingReason($composePath);
+        if ($startsNothing !== null) {
+            return "starts nothing as written ({$startsNothing})";
+        }
 
         return null;
+    }
+
+    /** {@see startsNothingReasonYaml()} for a file on disk, with the profiles its directory's `.env` activates. */
+    private static function startsNothingReason(string $composePath): ?string
+    {
+        $raw = self::readNonEmpty($composePath);
+        $profiles = self::profilesFromEnvFile(self::readNonEmpty(dirname($composePath).'/.env'));
+
+        return $raw === null ? null : self::startsNothingReasonYaml($raw, $profiles);
     }
 
     /**

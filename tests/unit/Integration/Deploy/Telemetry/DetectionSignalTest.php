@@ -87,7 +87,7 @@ class DetectionSignalTest extends TestCase
 
     public function test_a_repository_that_brought_its_own_compose_raises_nothing(): void
     {
-        $this->writeFile('docker-compose.yml', "services: {}\n");
+        $this->writeFile('docker-compose.yml', "services:\n  web:\n    image: myorg/app\n");
         $decision = DetectProjectStrategy::detect($this->tmpDir);
 
         $this->assertSame(Strategies::COMPOSE, $decision['strategy']);
