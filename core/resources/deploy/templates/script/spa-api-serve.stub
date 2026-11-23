@@ -1,0 +1,183 @@
+import { createServer, request } from 'node:http'
+import { connect } from 'node:net'
+import { createReadStream, readFileSync, statSync } from 'node:fs'
+import { extname, join, normalize, resolve, sep } from 'node:path'
+import { spawn } from 'node:child_process'
+
+const PORT = Number(process.env.PORT || 3000)
+const HOST = process.env.HOST || '0.0.0.0'
+const SERVER_PORT = {{ server_port }}
+const SERVER_COMMAND = {{ server_command }}
+const API_PREFIXES = {{ api_prefixes }}
+const OUTPUT = resolve(process.cwd(), {{ output }})
+
+const MIME = {
+  '.css': 'text/css; charset=utf-8',
+  '.gif': 'image/gif',
+  '.html': 'text/html; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.mp3': 'audio/mpeg',
+  '.mp4': 'video/mp4',
+  '.pdf': 'application/pdf',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.txt': 'text/plain; charset=utf-8',
+  '.wasm': 'application/wasm',
+  '.webm': 'video/webm',
+  '.webmanifest': 'application/manifest+json',
+  '.webp': 'image/webp',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.xml': 'application/xml; charset=utf-8',
+}
+
+let stopping = false
+const server = spawn('sh', ['-c', SERVER_COMMAND], {
+  stdio: 'inherit',
+  env: { ...process.env, PORT: String(SERVER_PORT) },
+})
+server.on('exit', (code, signal) => {
+  if (!stopping) {
+    console.error(`[panelalpha] the application server exited (${signal || code}); stopping`)
+  }
+  process.exit(stopping ? 0 : code || 1)
+})
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, () => {
+    stopping = true
+    server.kill(signal)
+    setTimeout(() => process.exit(0), 10000).unref()
+  })
+}
+
+let upstreamPort = SERVER_PORT
+
+function listeningPorts() {
+  const ports = new Set()
+  for (const table of ['/proc/net/tcp', '/proc/net/tcp6']) {
+    let lines = []
+    try {
+      lines = readFileSync(table, 'utf8').split('\n').slice(1)
+    } catch {}
+    for (const line of lines) {
+      const fields = line.trim().split(/\s+/)
+      if (fields[3] === '0A' && fields[1]) {
+        ports.add(parseInt(fields[1].split(':').pop(), 16))
+      }
+    }
+  }
+  ports.delete(PORT)
+  return ports
+}
+
+function findServer() {
+  const ports = listeningPorts()
+  if (ports.size === 0 || ports.has(upstreamPort)) {
+    return
+  }
+  upstreamPort = ports.has(SERVER_PORT) ? SERVER_PORT : Math.min(...ports)
+  console.log(`[panelalpha] the application server listens on ${upstreamPort}`)
+}
+setInterval(findServer, 1000).unref()
+
+function isApi(pathname) {
+  return API_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(prefix.replace(/\/$/, '') + '/'))
+}
+
+function builtFile(pathname) {
+  let decoded
+  try {
+    decoded = decodeURIComponent(pathname)
+  } catch {
+    return null
+  }
+  const file = resolve(OUTPUT, '.' + normalize('/' + decoded))
+  if (file !== OUTPUT && !file.startsWith(OUTPUT + sep)) {
+    return null
+  }
+  for (const candidate of [file, join(file, 'index.html')]) {
+    try {
+      if (statSync(candidate).isFile()) {
+        return candidate
+      }
+    } catch {}
+  }
+  return null
+}
+
+function wantsPage(req) {
+  return String(req.headers.accept || '').includes('text/html')
+}
+
+function sendBuilt(req, res, file) {
+  const type = MIME[extname(file).toLowerCase()] || 'application/octet-stream'
+  const headers = { 'content-type': type, 'content-length': statSync(file).size }
+  headers['cache-control'] = file.endsWith('.html') ? 'no-cache' : 'public, max-age=3600'
+  res.writeHead(200, headers)
+  if (req.method === 'HEAD') {
+    res.end()
+    return
+  }
+  createReadStream(file).pipe(res)
+}
+
+function proxy(req, res) {
+  const upstream = request(
+    { host: '127.0.0.1', port: upstreamPort, method: req.method, path: req.url, headers: req.headers },
+    (answer) => {
+      res.writeHead(answer.statusCode || 502, answer.rawHeaders)
+      answer.pipe(res)
+    },
+  )
+  upstream.on('error', () => {
+    if (!res.headersSent) {
+      res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })
+    }
+    res.end('The application server did not answer.\n')
+  })
+  req.pipe(upstream)
+}
+
+const front = createServer((req, res) => {
+  const pathname = (req.url || '/').split('?')[0]
+  if ((req.method === 'GET' || req.method === 'HEAD') && !isApi(pathname)) {
+    const file = builtFile(pathname)
+    if (file) {
+      sendBuilt(req, res, file)
+      return
+    }
+    const index = wantsPage(req) ? builtFile('/index.html') : null
+    if (index) {
+      sendBuilt(req, res, index)
+      return
+    }
+  }
+  proxy(req, res)
+})
+
+front.on('upgrade', (req, socket, head) => {
+  const upstream = connect(upstreamPort, '127.0.0.1', () => {
+    const lines = [`${req.method} ${req.url} HTTP/${req.httpVersion}`]
+    for (let i = 0; i < req.rawHeaders.length; i += 2) {
+      lines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`)
+    }
+    upstream.write(lines.join('\r\n') + '\r\n\r\n')
+    if (head && head.length) {
+      upstream.write(head)
+    }
+    upstream.pipe(socket)
+    socket.pipe(upstream)
+  })
+  upstream.on('error', () => socket.destroy())
+  socket.on('error', () => upstream.destroy())
+})
+
+front.listen(PORT, HOST, () => {
+  console.log(`[panelalpha] serving ${OUTPUT} on ${HOST}:${PORT}; ${API_PREFIXES.join(', ')} and anything not built go to the application server (PORT=${SERVER_PORT})`)
+})

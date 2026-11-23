@@ -32,7 +32,7 @@ PHP and Laravel run Apache **inside the project's container**. The VPS still ser
 | Rust | `Cargo.toml` | `cargo build --release` |
 | Java | `pom.xml`, or `build.gradle` / `build.gradle.kts` | The packaged jar |
 | .NET | A `.csproj` or `.sln` file (it may sit one or two folders down) | The published application |
-| Next.js, Nuxt, Nest, Remix, Express, Fastify | The framework in your dependencies, or its config file | The `start` script from `package.json` when there is one |
+| Next.js, Nuxt, Nest, Remix, Express, Fastify | The framework in your dependencies, or its config file | The `start` script from `package.json` when there is one. Without one, an Express server in `server.js`, `server.ts`, `server/index.js` or `server/index.ts` ([A server beside a Vite site](#a-server-beside-a-vite-site)) |
 | A Node app with no framework | `package.json`, plus a `start` script or a file such as `index.js` or `server.js` | The `start` script, or that file |
 | Vite, Angular, CRA, Astro static, Next.js export | The framework's own markers | nginx serving the built files |
 | Static site | An `index.html` or `index.htm`, and **none** of the language files above | nginx |
@@ -84,6 +84,16 @@ A `bun.lock` or `bun.lockb` next to a `package-lock.json` is installed with npm,
 The engine never puts one in your repository. A lockfile its own install generates, because none was committed, is kept out of the project's changes on the server and is never pushed. That holds for a PHP project's `composer.lock` too.
 
 A `start` script in your `package.json` takes precedence over the default the engine would use.
+
+## A server beside a Vite site
+
+Apps made with Lovable and similar tools often pair a Vite site with a small Express server in `server/`, and leave out a `start` script. With no `start` script, the engine looks for that server in `server.js`, `server.ts`, `server/index.js` and `server/index.ts`, in that order. A TypeScript server runs with `tsx` when `package.json` lists it.
+
+If the server serves the built site itself (`express.static` or `sendFile`), it is all that runs. If it only answers API calls, the engine serves the built site from `dist/` and passes everything else to your server: the paths under `/api` and the paths your `vite.config` proxies, any request that is not a page, and WebSocket connections. Your server gets its own `PORT`. If it listens on a port of its own choosing instead, the engine finds that port. If the server stops, the whole app restarts, so the deploy log shows the error.
+
+A Vite site bakes its `VITE_` values in when it is built. When your code falls back to a local address, as in `import.meta.env.VITE_API_URL || "http://localhost:3001"`, the engine sets that variable to the app's own address for the build, keeping the path. A value you set yourself, or that your `.env` gives, is used instead.
+
+A server that needs a signing secret, such as `JWT_SECRET` or `SESSION_SECRET`, gets a generated one when your `.env.example` names it and the repository's own `.env` leaves it out, or when the example only has a placeholder like `change-this-to-a-secure-random-string`. Other keys in `.env.example`, and credentials for other services such as `STRIPE_SECRET_KEY`, are never filled in for you. See [Environment variables](../05-capabilities/projects.md#environment-variables).
 
 ## Git submodules
 

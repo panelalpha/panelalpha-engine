@@ -742,6 +742,30 @@ YAML);
         $this->assertFalse(ComposePlaceholders::isPublishedSecret('LICENSE_KEY', 'changeme'));
     }
 
+    public function test_an_own_secret_key_is_never_a_third_partys_credential(): void
+    {
+        foreach (['JWT_SECRET', 'JWT_REFRESH_SECRET', 'SESSION_SECRET', 'APP_KEY', 'COOKIE_KEY', 'ENCRYPTION_KEY', 'PASSWORD_SALT', 'SECRET_KEY', 'SECRET_KEY_BASE', 'NEXTAUTH_SECRET', 'ACCESS_TOKEN_SECRET'] as $key) {
+            $this->assertTrue(ComposePlaceholders::isOwnSecretKey($key), $key);
+        }
+        foreach (['STRIPE_SECRET_KEY', 'GITHUB_SECRET', 'OPENAI_API_KEY', 'AWS_SECRET_ACCESS_KEY', 'GOOGLE_CLIENT_SECRET', 'DATABASE_URL', 'PORT', 'SESSION_DRIVER', 'SESSION_LIFETIME', 'COOKIE_DOMAIN', 'JWT_EXPIRES_IN', 'AUTH_TOKEN'] as $key) {
+            $this->assertFalse(ComposePlaceholders::isOwnSecretKey($key), $key);
+        }
+    }
+
+    public function test_an_instruction_in_place_of_the_secret_is_a_placeholder(): void
+    {
+        foreach ([
+            'change-this-to-a-secure-random-string', 'CHANGE_THIS_IN_PRODUCTION', 'change me please',
+            'replace-with-a-long-random-string', 'your-jwt-secret-here', 'your_super_secret_key',
+            'generate-a-random-secret',
+        ] as $value) {
+            $this->assertTrue(ComposePlaceholders::isPublishedSecret('JWT_SECRET', $value), $value);
+        }
+        foreach (['changemeplease', 'yourcompanysecret', 'b3f1c9e2-change-this', 'your'] as $value) {
+            $this->assertFalse(ComposePlaceholders::isPublishedSecret('JWT_SECRET', $value), $value);
+        }
+    }
+
     /** A long one-character placeholder is a fixed length; shorter ones keep the 48 default. */
     public function test_a_published_secret_keeps_a_fixed_length_placeholders_length(): void
     {

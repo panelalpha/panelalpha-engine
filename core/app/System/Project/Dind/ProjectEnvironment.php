@@ -75,6 +75,9 @@ class ProjectEnvironment
         [$baseContents, $source, $removed] = $this->baseEnv($user, $projectDir, $exampleName, $values, $logger);
         [$baseContents, $keyAdded] = $this->withLaravelAppKey($user, $baseContents, $source, $values, $logger);
         [$baseContents, $requiredUrls, $generated] = $this->withComposeRequiredValues($baseContents, $values, $logger);
+        if ($source === 'after-clone') {
+            $generated += $this->secretsTheEnvLacks((string) $baseContents, "{$projectDir}/{$exampleName}", $exampleName, $values, $logger);
+        }
         if ($baseContents !== null) {
             $fs->writeFileReplacingPath($defaultPath, $baseContents, $chown, self::OWNER_ONLY);
         }
@@ -193,6 +196,43 @@ class ProjectEnvironment
         }
 
         return [null, 'none', []];
+    }
+
+    /**
+     * The app's own secrets the template names and a committed `.env` lacks, generated; not for a project's own compose file.
+     *
+     * @param  array<string, string>  $overrides
+     * @return array<string, string>
+     */
+    private function secretsTheEnvLacks(string $contents, string $examplePath, string $exampleName, array $overrides, ?DeployLogger $logger): array
+    {
+        $fs = $this->dind->system()->filesystem();
+        if ($this->usesComposeStrategy() || ! $fs->fileExists($examplePath)) {
+            return [];
+        }
+        $example = EnvFile::asUtf8((string) $fs->fileGetContents($examplePath));
+        if ($example === null) {
+            return [];
+        }
+
+        $present = $overrides;
+        foreach (EnvFile::parse($contents) as $row) {
+            $present[self::variableKey($row)] = '';
+        }
+        $seed = $this->secretSeed();
+        $secrets = [];
+        foreach (EnvFile::parse($example) as $row) {
+            $key = self::variableKey($row);
+            if ($key === '' || $key === 'APP_KEY' || array_key_exists($key, $present) || ! ComposePlaceholders::isOwnSecretKey($key)) {
+                continue;
+            }
+            $secrets[$key] = ComposePlaceholders::publishedSecret($key, $seed, (string) ($row['value'] ?? ''));
+        }
+        if ($secrets !== []) {
+            $logger?->info("Generated what {$exampleName} names as a secret and the committed .env leaves out: ".implode(', ', array_keys($secrets)));
+        }
+
+        return $secrets;
     }
 
     /**

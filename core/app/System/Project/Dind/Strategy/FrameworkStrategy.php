@@ -13,6 +13,7 @@ use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
 use App\Lib\Deploy\Platform\Runtime\HostRunProject;
 use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
+use App\Lib\Deploy\Platform\Runtime\SpaApiServe;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 use App\Lib\Deploy\Platform\StageScript;
 use App\System;
@@ -91,6 +92,10 @@ class FrameworkStrategy
         if (DeployCompose::isStandaloneNodeOutput($decision)) {
             $this->writeStandaloneServe($system, $projectDir, $chown);
         }
+        $spaApi = SpaApiServe::fromDecision($decision);
+        if ($spaApi !== null) {
+            $this->writeSpaApiServe($system, AppRoot::path($projectDir, $decision), $spaApi, $decision, $chown);
+        }
 
         if ($this->dind->strategy()->entrypoint()->write($decision, $projectDir, $chown, [], $appConfig)) {
             $decision['entrypoint'] = StageScript::FILENAME;
@@ -142,6 +147,22 @@ class FrameworkStrategy
         $system->filesystem()->writeFileReplacingPath(
             $projectDir.'/'.StandaloneNodeServe::FILENAME,
             StandaloneNodeServe::script(),
+            $chown,
+            '644'
+        );
+    }
+
+    /**
+     * Into the app root, which the app service mounts at /app.
+     *
+     * @param  array{server: string, api_prefixes: list<string>}  $spaApi
+     * @param  array<string, mixed>  $decision
+     */
+    private function writeSpaApiServe(System $system, string $appDir, array $spaApi, array $decision, ?string $chown): void
+    {
+        $system->filesystem()->writeFileReplacingPath(
+            $appDir.'/'.SpaApiServe::FILENAME,
+            SpaApiServe::script($spaApi['server'], $spaApi['api_prefixes'], (string) ($decision['output_directory'] ?? 'dist')),
             $chown,
             '644'
         );

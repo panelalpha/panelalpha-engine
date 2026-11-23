@@ -31,6 +31,8 @@ final class NodeRuntime implements Runtime
      */
     public const FALLBACK_START = 'node index.js';
 
+    private const SERVER_ENTRIES = ['server.js', 'server.ts', 'server/index.js', 'server/index.ts'];
+
     /**
      * What `npm run` would have put on PATH, for a build script run without
      * it (see {@see nginxAssetBuildCommand()}).
@@ -906,7 +908,7 @@ final class NodeRuntime implements Runtime
 
     /**
      * A recipe's `node index.js` default pointed at the declared entry point (CNCjs), but only when no index.js
-     * exists: a stale library `main` beside a real index.js got MODULE_NOT_FOUND.
+     * exists: a stale library `main` beside a real index.js got MODULE_NOT_FOUND. {@see SpaApiServe} fronts an API-only server.
      *
      * @param  array<string, mixed>  $resolved  the decision `finalizeWith` produced
      * @param  array<string, mixed>  $package  parsed package.json
@@ -925,16 +927,41 @@ final class NodeRuntime implements Runtime
         }
 
         $main = self::entryPoint($package, $context);
-        if ($main !== null) {
-            $resolved['start_command'] = 'node '.$main;
+        if ($main === null) {
+            return $resolved;
         }
+
+        $command = self::entryPointCommand($main, $package);
+        if (! SpaApiServe::applies($context, $main)) {
+            $resolved['start_command'] = $command;
+
+            return $resolved;
+        }
+
+        $resolved['start_command'] = SpaApiServe::startCommand((string) $resolved['package_manager']);
+        $resolved[SpaApiServe::DECISION_KEY] = [
+            'server' => $command,
+            'api_prefixes' => SpaApiServe::apiPrefixes($context),
+        ];
 
         return $resolved;
     }
 
     /**
+     * tsx, not node: Node strips types but does not resolve `./x.js` imports of x.ts.
+     *
+     * @param  array<string, mixed>  $package
+     */
+    private static function entryPointCommand(string $entry, array $package): string
+    {
+        $typescript = preg_match('/\.[cm]?ts$/', $entry) === 1;
+
+        return ($typescript && ProjectContext::packageHasDep($package, 'tsx') ? 'npx tsx ' : 'node ').$entry;
+    }
+
+    /**
      * `bin` (a program you run; CNCjs's `main` only exports), else `main`, both possibly built later, so only
-     * their shape is checked; else a root `server.js` that exists.
+     * their shape is checked; else a server file that exists.
      */
     private static function entryPoint(array $package, ProjectContext $context): ?string
     {
@@ -944,7 +971,13 @@ final class NodeRuntime implements Runtime
             }
         }
 
-        return $context->isFile('server.js') ? 'server.js' : null;
+        foreach (self::SERVER_ENTRIES as $entry) {
+            if ($context->isFile($entry)) {
+                return $entry;
+            }
+        }
+
+        return null;
     }
 
     /**

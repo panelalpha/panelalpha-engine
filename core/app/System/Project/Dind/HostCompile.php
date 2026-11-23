@@ -15,6 +15,7 @@ use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Dind\HostBuildSlot;
 use App\Lib\Deploy\Engine\BuildMemory;
 use App\Lib\Deploy\Engine\HostBuilder;
+use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Platform\ProjectContext;
@@ -37,6 +38,7 @@ use App\Lib\Deploy\Platform\Runtime\RustBuildTools;
 use App\Lib\Deploy\Platform\Runtime\RustRuntime;
 use App\Lib\Deploy\Platform\Runtime\RustRuntimeLibraries;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
+use App\Lib\Deploy\Platform\Runtime\ViteOwnUrlEnv;
 use App\Lib\Deploy\Platform\Strategies;
 use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
@@ -147,6 +149,7 @@ class HostCompile
     ): string {
         $nodeImage = Images::nodeImage($appDir);
         $image = $this->compileImage($decision, $projectDir, $appDir, $install, $nodeImage, $isNode, $shipsNodeModules);
+        $decision = $this->withOwnAddressBuildEnv($logger, $decision, $appDir);
         $mayRetryOnNode = $isNode && ! $shipsNodeModules && $image !== $nodeImage;
         $this->prepareSources($decision, $projectDir, $appDir, $isNitro, $cached);
         $this->compileWithFallbacks(
@@ -164,6 +167,52 @@ class HostCompile
         );
 
         return $image;
+    }
+
+    /**
+     * {@see ViteOwnUrlEnv} for a Node server's frontend.
+     *
+     * @param  array<string, mixed>  $decision
+     * @return array<string, mixed>
+     */
+    private function withOwnAddressBuildEnv(?DeployLogger $logger, array $decision, string $appDir): array
+    {
+        if (($decision['runtime'] ?? null) !== PlatformManifest::RUNTIME_NODE) {
+            return $decision;
+        }
+        $env = is_array($decision['env'] ?? null) ? $decision['env'] : [];
+        $set = ViteOwnUrlEnv::values($appDir, $this->project->publicAppUrl(), $env + $this->buildDotEnv($appDir));
+        if ($set === []) {
+            return $decision;
+        }
+        $logger?->info('Building the frontend against this app\'s own address instead of localhost: '.implode(', ', array_keys($set)));
+        $decision['env'] = $set + $env;
+
+        return $decision;
+    }
+
+    /**
+     * The files Vite reads in a production build.
+     *
+     * @return array<string, string>
+     */
+    private function buildDotEnv(string $appDir): array
+    {
+        $fs = $this->project->system()->filesystem();
+        $values = [];
+        foreach (['.env', '.env.production'] as $name) {
+            $path = $appDir.'/'.$name;
+            if (! $fs->fileExists($path)) {
+                continue;
+            }
+            foreach (EnvFile::parse((string) $fs->fileGetContents($path)) as $row) {
+                if (is_string($row['key'] ?? null) && $row['key'] !== '') {
+                    $values[$row['key']] = (string) ($row['value'] ?? '');
+                }
+            }
+        }
+
+        return $values;
     }
 
     /**

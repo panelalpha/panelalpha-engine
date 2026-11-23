@@ -110,6 +110,44 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertSame('base64:account', $this->vars((string) file_get_contents($this->projectDir . '/.env'))['APP_KEY']);
     }
 
+    /** Lovable apps commit a .env with their VITE_ keys only; the server's JWT_SECRET is in .env.example alone. */
+    public function test_the_secrets_a_committed_env_leaves_out_are_generated(): void
+    {
+        $committed = "VITE_SUPABASE_URL=https://abc.supabase.co\n";
+        $example = "PORT=3000\nJWT_SECRET=change-this-to-a-secure-random-string\nSESSION_SECRET=s3cr3t-from-the-readme\n"
+            . "STRIPE_SECRET_KEY=sk_test_x\nDATABASE_URL=postgres://localhost/app\nVITE_SUPABASE_URL=\nNODE_ENV=production\n";
+        foreach ([false, true] as $tracked) {
+            file_put_contents($this->projectDir . '/.env', $committed);
+            file_put_contents($this->projectDir . '/.env.example', $example);
+            @unlink($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES);
+
+            $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'express']), $tracked)->apply();
+            $added = $this->vars((string) file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES));
+
+            $this->assertSame($committed, file_get_contents($this->projectDir . '/.env'));
+            $this->assertSame(['JWT_SECRET', 'SESSION_SECRET'], array_keys($added));
+            $this->assertMatchesRegularExpression('/^[0-9a-f]{32,}$/', $added['JWT_SECRET']);
+            $this->assertNotSame('s3cr3t-from-the-readme', $added['SESSION_SECRET']);
+        }
+
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'express']), false)->apply();
+        $this->assertSame($added['JWT_SECRET'], $this->vars((string) file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES))['JWT_SECRET']);
+    }
+
+    public function test_the_account_and_a_projects_own_compose_file_keep_their_env(): void
+    {
+        file_put_contents($this->projectDir . '/.env', "A=1\n");
+        file_put_contents($this->projectDir . '/.env.example', "A=1\nJWT_SECRET=changeme\n");
+
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'express', 'env_vars' => ['JWT_SECRET' => 'mine']]), false)->apply();
+        $this->assertSame('mine', $this->vars((string) file_get_contents($this->projectDir . '/.env'))['JWT_SECRET']);
+        $this->assertFileDoesNotExist($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES);
+
+        file_put_contents($this->projectDir . '/.env', "A=1\n");
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'compose']), false)->apply();
+        $this->assertFileDoesNotExist($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES);
+    }
+
     public function test_a_utf16_example_is_read_as_text(): void
     {
         // DumbPad ships .env.example as UTF-16LE with a BOM and CRLF; copied

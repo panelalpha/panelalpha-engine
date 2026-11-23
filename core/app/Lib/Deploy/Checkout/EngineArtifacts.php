@@ -7,6 +7,7 @@ use App\Lib\Deploy\Platform\Dockerfile\BuildContextIgnore;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Platform\DockerfileBuilder;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
+use App\Lib\Deploy\Platform\Runtime\SpaApiServe;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 use App\Lib\Deploy\Platform\StageScript;
 
@@ -66,6 +67,7 @@ final class EngineArtifacts
             BuildContextIgnore::pathFor(DockerfileBuilder::FILENAME),
             NginxConfig::FILENAME,
             StandaloneNodeServe::FILENAME,
+            SpaApiServe::FILENAME,
             StageScript::FILENAME,
             PaemdPage::SETUP_SCRIPT,
             PaemdPage::APP_SCRIPT,

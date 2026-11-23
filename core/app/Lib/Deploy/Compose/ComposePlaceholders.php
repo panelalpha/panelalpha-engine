@@ -34,7 +34,14 @@ class ComposePlaceholders
     private const PUBLISHED_SECRET_KEY_PATTERN =
         '/SECRET|SALT|PEPPER|SIGNING|ENCRYPTION|^(?=.*(APP_|JWT|SESSION|COOKIE)).*_KEY$/i';
 
+    private const OWN_SECRET_KEY_PATTERN =
+        '/^(?:\w+_)?(?:JWT|SESSION|COOKIE|CSRF|SIGNING|ENCRYPTION|TOKEN|AUTH|APP|NEXTAUTH)_(?:SECRET|KEY|SECRET_KEY)$'
+        .'|^(?:\w+_)?(?:SALT|PEPPER)$|^SECRET(?:_KEY(?:_BASE)?)?$|^JWT_\w*SECRET$/i';
+
     private const THIRD_PARTY_KEY_PATTERN = '/API_?KEY|PUBLIC_KEY|ACCESS_KEY|CLIENT_SECRET/i';
+
+    /** change-this-to-a-secure-random-string, your-jwt-secret-here. */
+    private const PUBLISHED_SECRET_PHRASE = '/^(?:(?:change|replace)[-_ ]?(?:this|me|it)[-_ ]|replace[-_ ]with[-_ ]|your[-_ ].*[-_ ](?:here|secret|key)$|generate[-_ ])/';
 
     /** Well-known repo placeholders (Planka's notsecretkey, Saleor's changeme). */
     private const PUBLISHED_SECRET_VALUES = [
@@ -331,6 +338,13 @@ class ComposePlaceholders
         return false;
     }
 
+    /** Signing material only: a vendor's `STRIPE_SECRET_KEY` invented is worse than missing. */
+    public static function isOwnSecretKey(string $key): bool
+    {
+        return preg_match(self::OWN_SECRET_KEY_PATTERN, $key) === 1
+            && preg_match(self::THIRD_PARTY_KEY_PATTERN, $key) !== 1;
+    }
+
     /**
      * A signing/encryption key still set to a placeholder everyone can read; one character repeated is
      * a fixed-length template value (Homarr's 64 zeroes), never a real secret.
@@ -345,6 +359,7 @@ class ComposePlaceholders
         $value = strtolower(trim(trim($value), '"\''));
 
         return in_array($value, self::PUBLISHED_SECRET_VALUES, true)
+            || preg_match(self::PUBLISHED_SECRET_PHRASE, $value) === 1
             || preg_match('/^x{3,}$/', $value) === 1
             || preg_match('/^(django-)?insecure/', $value) === 1
             || preg_match('/^(.)\1{7,}$/', $value) === 1;
