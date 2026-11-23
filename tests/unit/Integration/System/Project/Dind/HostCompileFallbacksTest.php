@@ -92,6 +92,34 @@ class HostCompileFallbacksTest extends TestCase
         }
     }
 
+    public function test_a_lockfile_the_frozen_install_refuses_is_installed_from_package_json(): void
+    {
+        $this->deploy = DeployLogger::start($this->username);
+        $this->siteProject(['package-lock.json' => '{}']);
+
+        $system = $this->compile([
+            'exits' => [[1, 'npm error `npm ci` can only install packages when your package.json and package-lock.json are in sync.'], [0, '']],
+            'onBuild' => fn (int $n) => $n === 2 ? $this->write('dist/index.html', '<!doctype html>') : null,
+        ]);
+
+        $this->assertCount(2, $system->builds);
+        $this->assertStringContainsString('npm install', $system->builds[1][3]);
+    }
+
+    /** A build script's own `npm ci` in a subdirectory refused its lockfile: unfreezing the project's install changes nothing. */
+    public function test_a_lockfile_refusal_after_the_install_finished_is_not_retried(): void
+    {
+        $this->siteProject(['package-lock.json' => '{}']);
+        $refusal = 'npm error `npm ci` can only install packages when your package.json and package-lock.json are in sync.';
+
+        try {
+            $this->compile(['exits' => [[1, $refusal, HostNodeBuild::INSTALLED_MARKER."\n"]]]);
+            $this->fail('the failed build must surface');
+        } catch (\Exception $e) {
+            $this->assertSame($refusal, $e->getMessage());
+        }
+    }
+
     public function test_a_base_image_the_host_cannot_refresh_is_built_with_the_copy_it_has(): void
     {
         $this->deploy = DeployLogger::start($this->username);
@@ -276,16 +304,16 @@ class HostCompileFallbacksTest extends TestCase
         $this->write('pom.xml', '<project><modelVersion>4.0.0</modelVersion><groupId>a</groupId><artifactId>app</artifactId><version>1</version>'
             .'<properties><maven.compiler.release>21</maven.compiler.release></properties></project>');
         $writer = $this->createMock(ComposeWriter::class);
-        $writer->expects($this->once())->method('replaceAppImage')->with('maven:3-eclipse-temurin-21', 'maven:3-eclipse-temurin-25', '1001:1001');
+        $writer->expects($this->once())->method('replaceAppImage')->with('maven:3.9-eclipse-temurin-21', 'maven:3.9-eclipse-temurin-25', '1001:1001');
 
         $system = $this->compile([
             'exits' => [[1, 'Fatal error compiling: error: release version 25 not supported -> [Help 1]'], [0, '']],
             'composeWriter' => $writer,
         ]);
 
-        $this->assertSame(['maven:3-eclipse-temurin-21', 'maven:3-eclipse-temurin-25'], array_column($system->builds, 2));
-        $this->assertContains('The JDK in maven:3-eclipse-temurin-21 cannot compile the Java release this project targets;'
-            .' compiling again with maven:3-eclipse-temurin-25', $this->lines());
+        $this->assertSame(['maven:3.9-eclipse-temurin-21', 'maven:3.9-eclipse-temurin-25'], array_column($system->builds, 2));
+        $this->assertContains('The build refused the JDK in maven:3.9-eclipse-temurin-21; compiling again with'
+            .' maven:3.9-eclipse-temurin-25, the JDK it asked for', $this->lines());
     }
 
     public function test_a_php_project_without_a_package_json_has_no_frontend_to_build(): void
@@ -400,7 +428,7 @@ class HostCompileFallbacksTest extends TestCase
     }
 
     /**
-     * @param  array{exits?: list<array{int, string}>, onBuild?: callable(int): mixed, failingExec?: list<list<string>>, onExec?: callable(list<string>): mixed, accountHome?: string, ids?: bool, call?: callable(HostCompile): mixed, composeWriter?: ComposeWriter}  $behaviour
+     * @param  array{exits?: list<array{0: int, 1: string, 2?: string}>, onBuild?: callable(int): mixed, failingExec?: list<list<string>>, onExec?: callable(list<string>): mixed, accountHome?: string, ids?: bool, call?: callable(HostCompile): mixed, composeWriter?: ComposeWriter}  $behaviour
      */
     private function compile(array $behaviour): object
     {
@@ -414,7 +442,7 @@ class HostCompileFallbacksTest extends TestCase
 
             public mixed $result = null;
 
-            /** @param  array{exits?: list<array{int, string}>, onBuild?: callable(int): mixed, failingExec?: list<list<string>>}  $behaviour */
+            /** @param  array{exits?: list<array{0: int, 1: string, 2?: string}>, onBuild?: callable(int): mixed, failingExec?: list<list<string>>}  $behaviour */
             public function __construct(private array $behaviour) {}
 
             public function filesystem(): SystemFilesystem
@@ -479,9 +507,9 @@ class HostCompileFallbacksTest extends TestCase
                 if (isset($this->behaviour['onBuild'])) {
                     ($this->behaviour['onBuild'])(count($this->builds));
                 }
-                [$code, $stderr] = $this->behaviour['exits'][count($this->builds) - 1] ?? [0, ''];
+                [$code, $stderr, $stdout] = ($this->behaviour['exits'][count($this->builds) - 1] ?? [0, '']) + [2 => ''];
 
-                return FakeProcess::of($code, '', $stderr);
+                return FakeProcess::of($code, $stdout, $stderr);
             }
         };
 

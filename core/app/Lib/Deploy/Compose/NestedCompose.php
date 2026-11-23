@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use Symfony\Component\Yaml\Tag\TaggedValue;
+
 /**
  * A compose file kept in a subdirectory (`docker/compose.yml`), run from the project root, with its
  * relative paths rewritten to mean the same from there (`context: ..` becomes `.`).
@@ -90,73 +92,97 @@ final class NestedCompose
     }
 
     /**
+     * Each relative path of the service rewritten, under a merge tag (`volumes: !override`) too.
+     *
      * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function rebaseService(array $service, string $relativeDir): array
     {
-        $service = self::withBuildRebased($service, $relativeDir);
-
-        if (is_array($service['volumes'] ?? null)) {
-            foreach ($service['volumes'] as $i => $volume) {
-                $service['volumes'][$i] = self::rebaseVolume($volume, $relativeDir);
+        $rebasers = [
+            'build' => self::rebasedBuild(...),
+            'volumes' => self::rebasedVolumes(...),
+            'env_file' => self::rebasedEnvFile(...),
+            'extends' => self::rebasedExtends(...),
+        ];
+        foreach ($rebasers as $key => $rebase) {
+            if (array_key_exists($key, $service)) {
+                $service[$key] = self::underTags($service[$key], static fn (mixed $value): mixed => $rebase($value, $relativeDir));
             }
-        }
-
-        $service = self::withEnvFileRebased($service, $relativeDir);
-
-        if (is_array($service['extends'] ?? null) && is_string($service['extends']['file'] ?? null)) {
-            $service['extends']['file'] = self::path($service['extends']['file'], $relativeDir);
         }
 
         return $service;
     }
 
-    /**
-     * `dockerfile` is relative to the context, so it moves with it.
-     *
-     * @param  array<string, mixed>  $service
-     * @return array<string, mixed>
-     */
-    private static function withBuildRebased(array $service, string $relativeDir): array
+    /** $rebase applied to the value a merge tag holds, the tag kept for the `extends:` merge. */
+    private static function underTags(mixed $value, \Closure $rebase): mixed
     {
-        $build = $service['build'] ?? null;
+        if ($value instanceof TaggedValue) {
+            return new TaggedValue($value->getTag(), self::underTags($value->getValue(), $rebase));
+        }
+
+        return $rebase($value);
+    }
+
+    /** `dockerfile` is relative to the context, so it moves with it. */
+    private static function rebasedBuild(mixed $build, string $relativeDir): mixed
+    {
         if (is_string($build)) {
-            $service['build'] = self::path($build, $relativeDir);
-        } elseif (is_array($build)) {
-            $service['build']['context'] = self::path(is_string($build['context'] ?? null) ? $build['context'] : '.', $relativeDir);
-            if (is_array($build['additional_contexts'] ?? null)) {
-                foreach ($build['additional_contexts'] as $key => $context) {
-                    if (is_string($context)) {
-                        $service['build']['additional_contexts'][$key] = self::path($context, $relativeDir);
-                    }
+            return self::path($build, $relativeDir);
+        }
+        if (! is_array($build)) {
+            return $build;
+        }
+        $build['context'] = self::path(is_string($build['context'] ?? null) ? $build['context'] : '.', $relativeDir);
+        if (is_array($build['additional_contexts'] ?? null)) {
+            foreach ($build['additional_contexts'] as $key => $context) {
+                if (is_string($context)) {
+                    $build['additional_contexts'][$key] = self::path($context, $relativeDir);
                 }
             }
         }
 
-        return $service;
+        return $build;
     }
 
-    /**
-     * @param  array<string, mixed>  $service
-     * @return array<string, mixed>
-     */
-    private static function withEnvFileRebased(array $service, string $relativeDir): array
+    private static function rebasedVolumes(mixed $volumes, string $relativeDir): mixed
     {
-        $envFile = $service['env_file'] ?? null;
+        if (! is_array($volumes)) {
+            return $volumes;
+        }
+        foreach ($volumes as $i => $volume) {
+            $volumes[$i] = self::rebaseVolume($volume, $relativeDir);
+        }
+
+        return $volumes;
+    }
+
+    private static function rebasedEnvFile(mixed $envFile, string $relativeDir): mixed
+    {
         if (is_string($envFile)) {
-            $service['env_file'] = self::path($envFile, $relativeDir);
-        } elseif (is_array($envFile)) {
-            foreach ($envFile as $i => $entry) {
-                if (is_string($entry)) {
-                    $service['env_file'][$i] = self::path($entry, $relativeDir);
-                } elseif (is_array($entry) && is_string($entry['path'] ?? null)) {
-                    $service['env_file'][$i]['path'] = self::path($entry['path'], $relativeDir);
-                }
+            return self::path($envFile, $relativeDir);
+        }
+        if (! is_array($envFile)) {
+            return $envFile;
+        }
+        foreach ($envFile as $i => $entry) {
+            if (is_string($entry)) {
+                $envFile[$i] = self::path($entry, $relativeDir);
+            } elseif (is_array($entry) && is_string($entry['path'] ?? null)) {
+                $envFile[$i]['path'] = self::path($entry['path'], $relativeDir);
             }
         }
 
-        return $service;
+        return $envFile;
+    }
+
+    private static function rebasedExtends(mixed $extends, string $relativeDir): mixed
+    {
+        if (is_array($extends) && is_string($extends['file'] ?? null)) {
+            $extends['file'] = self::path($extends['file'], $relativeDir);
+        }
+
+        return $extends;
     }
 
     /** Only a bind whose source starts with `.` is relative; anything else means the same from anywhere. */

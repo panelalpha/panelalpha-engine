@@ -117,6 +117,19 @@ class HostCompileOtherJdkTest extends TestCase
         $this->assertSame('maven:3.9-eclipse-temurin-17', HostCompile::retryJdkImage(self::decision(), $lombok), 'no declared release: the newest older JDK');
     }
 
+    /** javac 21 dropped release 7: the oldest catalogued JDK that still compiles it. */
+    public function test_a_release_the_jdk_no_longer_supports_picks_an_older_jdk(): void
+    {
+        $this->assertSame('maven:3.9-eclipse-temurin-8', HostCompile::retryJdkImage(
+            self::decision(),
+            '[ERROR] COMPILATION ERROR : [ERROR] Source option 7 is no longer supported. Use 8 or later.'
+        ));
+        $this->assertSame('maven:3.9-eclipse-temurin-8', HostCompile::retryJdkImage(
+            self::decision(),
+            '[ERROR] Target option 7 is no longer supported. Use 8 or later.'
+        ));
+    }
+
     /** A recipe that named its own image chose it; the engine does not swap it. */
     public function test_a_recipes_own_image_is_kept(): void
     {

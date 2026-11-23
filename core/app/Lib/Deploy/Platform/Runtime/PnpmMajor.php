@@ -174,9 +174,10 @@ final class PnpmMajor
         ));
     }
 
+    /** Space-separated comparators, all of which must hold; `>= 8` is one comparator, its operator spaced from its version. */
     private static function satisfiesAlternative(int $major, string $alternative): bool
     {
-        $alternative = trim($alternative);
+        $alternative = (string) preg_replace('/(\^|~|>=|<=|>|<|=)\s+(?=v?\d|x|\*)/i', '$1', trim($alternative));
         if (preg_match('/^v?(\d+)\S*\s+-\s+v?(\d+)/', $alternative, $m) === 1) {
             return $major >= (int) $m[1] && $major <= (int) $m[2];
         }

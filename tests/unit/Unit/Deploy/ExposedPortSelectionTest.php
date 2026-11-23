@@ -89,6 +89,14 @@ class ExposedPortSelectionTest extends TestCase
         $this->assertSame(8080, DockerfileFinder::exposedPortIn($dockerfile));
     }
 
+    /** Keycloak: the UI on 8080 is exposed first, and the health check fetches the management port. */
+    public function test_a_health_check_of_another_port_does_not_outrank_a_conventional_web_port_exposed_first(): void
+    {
+        $dockerfile = "EXPOSE 8080 9000\nHEALTHCHECK CMD curl -f http://localhost:9000/health/ready\n";
+
+        $this->assertSame(8080, DockerfileFinder::exposedPortIn($dockerfile));
+    }
+
     /** A probe of a port the image does not expose, or of another host, says nothing about the front door. */
     public function test_a_health_check_of_a_port_not_exposed_or_not_local_changes_nothing(): void
     {

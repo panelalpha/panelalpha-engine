@@ -11,6 +11,9 @@ use App\Lib\Deploy\SafeName;
  */
 class HostNodeBuild
 {
+    /** Printed between the install and the build, so a failure after it is the build's. */
+    public const INSTALLED_MARKER = 'node_modules installed, building';
+
     public const BUN_IMAGE = 'oven/bun:1';
 
     /** Where the checkout's manifest waits while the stripped copy is installed: no file of the client's own. */
@@ -232,6 +235,9 @@ class HostNodeBuild
         }
         if ($install !== '') {
             $parts[] = self::installStep($install, $dir);
+        }
+        if ($install !== '' && $build !== '') {
+            $parts[] = 'echo "'.self::INSTALLED_MARKER.'"';
         }
         if ($build !== '') {
             $parts[] = $build;

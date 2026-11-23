@@ -103,6 +103,28 @@ class SelfBuiltImageTagTest extends TestCase
     /**
      * @return array<string, array{0: string}>
      */
+    public static function officialImageNames(): array
+    {
+        return [
+            'a runtime' => ['node:20'],
+            'a runtime untagged' => ['python'],
+            'a web server' => ['nginx:alpine'],
+            'a datastore' => ['postgres:16'],
+        ];
+    }
+
+    /** An official image's name is refused: the build would shadow that image for every later build and service in the account. */
+    #[DataProvider('officialImageNames')]
+    public function test_an_official_images_name_is_not_given_to_the_build(string $declared): void
+    {
+        $service = $this->app(DeployCompose::dockerfile('Dockerfile', 8000, ['build_image' => $declared]));
+
+        $this->assertArrayNotHasKey('image', $service, "'{$declared}' names an official image");
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
     public static function localBuildTags(): array
     {
         return [

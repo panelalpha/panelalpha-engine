@@ -54,19 +54,20 @@ def unquoted(value):
 
 
 def current(lines, key):
-    """The value a live line sets `key` to, None when none does."""
-    for line in lines:
+    """The value the last live line sets `key` to, as compose reads it; None when none does."""
+    for line in reversed(lines):
         if key_of(line) == key:
             return unquoted(line[line.index('=') + 1:])
     return None
 
 
 def applied(lines, key, value):
-    """`key=value` over the live line, else over the commented placeholder, else appended after one blank line."""
+    """`key=value` over the last live line, the one compose reads, else over the last commented placeholder, else
+    appended after one blank line."""
     entry = f'{key}={value}'
     for finder in (key_of, commented_key_of):
-        for index, line in enumerate(lines):
-            if finder(line) == key:
+        for index in reversed(range(len(lines))):
+            if finder(lines[index]) == key:
                 return lines[:index] + [entry] + lines[index + 1:]
     while lines and lines[-1].strip() == '':
         lines = lines[:-1]

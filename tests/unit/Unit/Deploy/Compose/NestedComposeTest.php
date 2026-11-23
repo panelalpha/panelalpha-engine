@@ -2,9 +2,11 @@
 
 namespace Tests\Unit\Deploy\Compose;
 
+use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\NestedCompose;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Yaml\Tag\TaggedValue;
 
 /**
  * A compose file under docker/ run from the project root keeps meaning what
@@ -82,6 +84,34 @@ class NestedComposeTest extends TestCase
         $this->assertSame('data', $app['volumes'][3]['source']);
         $this->assertSame('./deploy/.env', $rebased['services']['web']['env_file']);
         $this->assertSame('./deploy/nginx.conf', $rebased['configs']['nginx']['file']);
+    }
+
+    /** The tag stays for the `extends:` merge, and the paths under it are rewritten like any other. */
+    public function test_paths_under_a_merge_tag_move_with_the_file(): void
+    {
+        $parsed = ComposeYaml::parseKeepingMergeTags(<<<'YAML'
+            services:
+              app:
+                extends:
+                  file: base.yml
+                  service: app
+                build: !override
+                  context: ..
+                volumes: !override
+                  - ./data:/data
+                env_file: !override
+                  - app.env
+            YAML);
+
+        $app = NestedCompose::rebase((array) $parsed, 'docker')['services']['app'];
+
+        $this->assertInstanceOf(TaggedValue::class, $app['volumes']);
+        $this->assertSame(ComposeYaml::OVERRIDE_TAG, $app['volumes']->getTag());
+        $untagged = ComposeYaml::withoutMergeTags($app);
+        $this->assertSame(['context' => '.'], $untagged['build']);
+        $this->assertSame(['./docker/data:/data'], $untagged['volumes']);
+        $this->assertSame(['./docker/app.env'], $untagged['env_file']);
+        $this->assertSame('./docker/base.yml', $untagged['extends']['file']);
     }
 
     public function test_a_root_file_has_no_nested_directory(): void

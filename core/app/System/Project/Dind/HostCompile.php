@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Exceptions\BuildFailedAfterInstallException;
 use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\Compose\AppRoot;
@@ -328,10 +329,15 @@ class HostCompile
         }
     }
 
-    /** The install without its lockfile freeze when the frozen one refused a lockfile package.json has moved past. */
+    /**
+     * The install without its lockfile freeze when the frozen one refused a lockfile package.json has moved past; a build
+     * script's own `npm ci` refusing after the install finished is not the install's.
+     */
     private static function unfrozenInstallAfter(\Exception $failure, string $install): ?string
     {
-        if ($failure instanceof DeployCancelledException || ! StaleLockfile::refusedBy($failure->getMessage())) {
+        if ($failure instanceof DeployCancelledException || $failure instanceof BuildFailedAfterInstallException
+            || ! StaleLockfile::refusedBy($failure->getMessage())
+        ) {
             return null;
         }
 
@@ -1428,8 +1434,18 @@ class HostCompile
         );
 
         if (! $process->isSuccessful()) {
-            throw $this->hostBuildFailure($process, 'Host static asset compile failed');
+            throw $this->afterInstall($process, $this->hostBuildFailure($process, 'Host static asset compile failed'));
         }
+    }
+
+    /** $failure as the build's when the output says the install had finished before it. */
+    private function afterInstall(Process $process, \Exception $failure): \Exception
+    {
+        $output = $process->getOutput()."\n".$process->getErrorOutput();
+
+        return str_contains($output, HostNodeBuild::INSTALLED_MARKER)
+            ? new BuildFailedAfterInstallException($failure->getMessage())
+            : $failure;
     }
 
     /**

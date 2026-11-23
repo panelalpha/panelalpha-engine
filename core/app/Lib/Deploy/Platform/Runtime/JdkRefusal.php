@@ -4,12 +4,14 @@ namespace App\Lib\Deploy\Platform\Runtime;
 
 /**
  * The JDKs a failed Java build says it would build on, read from its own output: javac refusing a release
- * newer than itself, a Maven enforcer's Java range, or a compiler plugin (an old Lombok) that cannot load on
- * a JDK newer than the one the project declares.
+ * newer than itself or one it no longer supports, a Maven enforcer's Java range, or a compiler plugin (an old
+ * Lombok) that cannot load on a JDK newer than the one the project declares.
  */
 final class JdkRefusal
 {
     private const NEWER_RELEASE = '/release version (\d+) not supported|invalid target release: (\d+)/i';
+
+    private const DROPPED_RELEASE = '/(?:Source|Target) option (?:1\.)?(\d+) is no longer supported/i';
 
     private const ENFORCED_RANGE = '/Detected JDK \S+ is version \S+ which is not in the allowed range ([\[(])\s*([\d._]*)\s*,\s*([\d._]*)\s*([\])])/';
 
@@ -27,6 +29,7 @@ final class JdkRefusal
     public static function wanted(string $failure, int $current, ?int $declared): ?array
     {
         return self::newerRelease($failure)
+            ?? self::droppedRelease($failure, $current)
             ?? self::enforcedRange($failure)
             ?? self::enforcedMinimum($failure)
             ?? self::declaredAfterRefusal($failure, $current, $declared);
@@ -40,6 +43,20 @@ final class JdkRefusal
         }
 
         return self::range((int) ($m[1] !== '' ? $m[1] : $m[2]), PHP_INT_MAX);
+    }
+
+    /**
+     * javac 21's `Source option 7 is no longer supported`: the oldest JDK at that release or above, older than this one.
+     *
+     * @return array{min: int, max: int, newest: bool}|null
+     */
+    private static function droppedRelease(string $failure, int $current): ?array
+    {
+        if (preg_match(self::DROPPED_RELEASE, $failure, $m) !== 1) {
+            return null;
+        }
+
+        return self::range((int) $m[1], $current);
     }
 
     /** `[17,18)`, `[25,)`, `(11,21]`: Maven's version range, a blank bound open. */

@@ -176,6 +176,9 @@ class PnpmMajorTest extends TestCase
         yield 'hyphen' => ['7.0.0 - 8.5.0', 8, true];
         yield 'any' => ['*', 6, true];
         yield 'exact' => ['8.15.4', 8, true];
+        yield 'floor spaced from its version' => ['>= 8', 10, true];
+        yield 'bounded with spaces' => ['>= 7 < 9', 9, false];
+        yield 'caret spaced from its version' => ['^ 8', 8, true];
     }
 
     #[DataProvider('ranges')]

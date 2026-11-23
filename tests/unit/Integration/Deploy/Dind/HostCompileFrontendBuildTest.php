@@ -4,6 +4,7 @@ namespace Tests\Integration\Deploy\Dind;
 
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\Dind\DindHostBuilder;
+use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
 use App\System\Project\Dind\HostCompile;
 use App\System\Project\Dind\Inner\SharedBaseImages;
 use PHPUnit\Framework\TestCase;
@@ -62,7 +63,7 @@ class HostCompileFrontendBuildTest extends TestCase
         $this->assertTrue($ran);
         $this->assertCount(1, $commands);
         $script = LocalRoot::build($commands[0])['script'];
-        $this->assertStringEndsWith('; fi; } && yarn install', $script);
+        $this->assertStringEndsWith('; fi; } && echo "'.HostNodeBuild::INSTALLED_MARKER.'" && yarn install', $script);
         $this->assertStringNotContainsString('run build', $script);
     }
 

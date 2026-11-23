@@ -81,6 +81,20 @@ class EngineSettingsTest(support.Tree):
 
         self.assertFalse(os.path.exists(self.env + '.pae-backup'))
 
+    def test_a_key_set_twice_is_changed_on_the_last_line_compose_reads(self):
+        self.make('engine', '.env', b'SITES_DB_KEY_BUFFER_SIZE=8M\nCOMPOSE_PROFILES=full\nSITES_DB_KEY_BUFFER_SIZE=16M\n')
+
+        self.run_action('compose.engineSetEnv', ['SITES_DB_KEY_BUFFER_SIZE', '8M'])
+
+        self.assertEqual('SITES_DB_KEY_BUFFER_SIZE=8M\nCOMPOSE_PROFILES=full\nSITES_DB_KEY_BUFFER_SIZE=8M\n', self.read('.env'))
+
+    def test_values_of_a_key_set_twice_is_the_last_line(self):
+        self.make('engine', '.env', b'SITES_DB_KEY_BUFFER_SIZE=8M\nSITES_DB_KEY_BUFFER_SIZE=16M\n')
+
+        _, output = self.run_action('compose.engineEnvValues', ['SITES_DB_KEY_BUFFER_SIZE'])
+
+        self.assertEqual(b'SITES_DB_KEY_BUFFER_SIZE=16M\n', output.out)
+
     def test_every_key_but_the_three_sizes_is_refused(self):
         for key in ('APP_URL', 'APP_KEY', 'DIND_RUNTIME', 'COMPOSE_PROFILES', 'CORE_MYSQL_PASSWORD', 'DB_PASSWORD',
                     'QUEUE_WORKERS', 'TELEMETRY_TIER', 'MCP_PERMISSION_MODE'):

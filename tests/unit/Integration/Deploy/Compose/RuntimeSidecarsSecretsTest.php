@@ -104,6 +104,26 @@ class RuntimeSidecarsSecretsTest extends TestCase
         );
     }
 
+    /** An empty file, `external: true` or an `environment:` source holds nothing the engine can read. */
+    public function test_a_secret_that_cannot_be_read_gives_the_database_the_password_the_app_gets(): void
+    {
+        file_put_contents($this->dir.'/docker/secrets/db-password', "\n");
+        $sources = [
+            'an empty file' => self::COMPOSE,
+            'an external secret' => str_replace('file: docker/secrets/db-password', 'external: true', self::COMPOSE),
+            'an environment source' => str_replace('file: docker/secrets/db-password', 'environment: DB_PASSWORD', self::COMPOSE),
+        ];
+
+        foreach ($sources as $source => $compose) {
+            $found = RuntimeSidecars::fromYaml($compose, false, null, 'acme/tracks', 2048, 'seed', null, [], null, $this->dir);
+            $db = $found['services']['db']['environment'];
+
+            $this->assertArrayNotHasKey('MYSQL_PASSWORD_FILE', $db, $source);
+            $this->assertNotSame('', $db['MYSQL_PASSWORD'] ?? '', $source);
+            $this->assertSame($db['MYSQL_PASSWORD'], $found['env']['DB_PASSWORD'] ?? null, $source);
+        }
+    }
+
     public function test_the_generated_file_declares_them_and_mounts_the_apps(): void
     {
         $found = $this->extract();

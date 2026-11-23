@@ -5,6 +5,7 @@ namespace App\Lib\Deploy\Sidecar;
 use App\Lib\Deploy\Compose\ComposeEnvironment;
 use App\Lib\Deploy\Compose\ComposeInterpolation;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
+use App\Lib\Deploy\Compose\SecretFileEnvironment;
 
 /**
  * Connection settings for a compose sidecar (database, cache, search engine), derived from its own service
@@ -99,9 +100,10 @@ class SidecarCredentials
 
     /**
      * The engine's prefixed and init variables resolved as Compose would,
-     * with a password nobody set taken from the account, not `app`. One the
-     * service reads from a file (`POSTGRES_PASSWORD_FILE`) is left unset: the
-     * official images refuse a variable set both ways.
+     * with a password nobody set taken from the account, not `app`. A
+     * `POSTGRES_PASSWORD_FILE` still here is a secret {@see SecretFileEnvironment}
+     * could not read, so it goes: the official images refuse a variable set
+     * both ways, and the app is given the password the engine settles.
      *
      * @param  array<string, string>  $env
      * @return array<string, string>
@@ -115,8 +117,8 @@ class SidecarCredentials
             }
         }
         foreach (SidecarEngine::initVariablesFor($engine) as $variable) {
-            if (self::readFromFile($env, $variable)) {
-                continue;
+            if (! array_key_exists($variable, $env)) {
+                unset($env[$variable.'_FILE']);
             }
             $env[$variable] = self::resolvedComposeValue(
                 (string) ($env[$variable] ?? ''),
@@ -125,12 +127,6 @@ class SidecarCredentials
         }
 
         return $env;
-    }
-
-    /** @param  array<string, string>  $env */
-    private static function readFromFile(array $env, string $variable): bool
-    {
-        return trim((string) ($env[$variable.'_FILE'] ?? '')) !== '' && ! array_key_exists($variable, $env);
     }
 
     /**

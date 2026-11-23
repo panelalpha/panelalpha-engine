@@ -39,6 +39,13 @@ final class DockerfileFinder
 
     private const PORT_TOKEN_PATTERN = '/\b(\d{1,5})(?:\/(tcp|udp))?\b/i';
 
+    /**
+     * Ports a web server is conventionally exposed on, which a health check of another port does not outrank.
+     *
+     * @var list<int>
+     */
+    private const CONVENTIONAL_WEB_PORTS = [80, 443, 3000, 5000, 8000, 8080, 8443];
+
     /** A `HEALTHCHECK` line, after continuations have been joined. */
     private const HEALTHCHECK_LINE_PATTERN = '/^[ \t]*HEALTHCHECK[ \t]+(.+)$/mi';
 
@@ -84,9 +91,10 @@ final class DockerfileFinder
     }
 
     /**
-     * The `EXPOSE`d port the image's own `HEALTHCHECK` probes over HTTP, else the first one, in written order, that could
-     * be a web front door (a `/udp` one cannot serve HTTP), else the first port found, so a Dockerfile exposing only 22
-     * still reports something. evcc exposes EEBus on 4712 before its UI on 7070, which its health check fetches.
+     * The first `EXPOSE`d port, in written order, that could be a web front door (a `/udp` one cannot serve HTTP), unless
+     * it is no conventional web port and the image's own `HEALTHCHECK` probes another exposed one over HTTP; else the
+     * first port found, so a Dockerfile exposing only 22 still reports something. evcc exposes EEBus on 4712 before its
+     * UI on 7070, which its health check fetches; Keycloak exposes its UI on 8080 and is health-checked on 9000.
      */
     public static function exposedPortIn(string $contents): ?int
     {
@@ -96,18 +104,27 @@ final class DockerfileFinder
             return null;
         }
 
+        $first = self::firstWebCandidate($declared);
         $probed = self::healthCheckedPort($contents);
-        if ($probed !== null && (in_array([$probed, 'tcp'], $declared, true) || in_array([$probed, ''], $declared, true))) {
+        if ($probed !== null && ! in_array($first, self::CONVENTIONAL_WEB_PORTS, true)
+            && (in_array([$probed, 'tcp'], $declared, true) || in_array([$probed, ''], $declared, true))
+        ) {
             return $probed;
         }
 
+        return $first ?? $declared[0][0];
+    }
+
+    /** @param  list<array{0: int, 1: string}>  $declared */
+    private static function firstWebCandidate(array $declared): ?int
+    {
         foreach ($declared as [$port, $protocol]) {
             if ($protocol !== 'udp' && InternalPorts::isWebCandidate($port)) {
                 return $port;
             }
         }
 
-        return $declared[0][0];
+        return null;
     }
 
     /** The stage the deploy builds ({@see DockerfileStages}) when it declares a port of its own, else the whole file. */

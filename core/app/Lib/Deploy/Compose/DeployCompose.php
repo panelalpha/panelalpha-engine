@@ -11,6 +11,7 @@ use App\Lib\Deploy\Platform\Runtime\HostRunProject;
 use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 use App\Lib\Deploy\Platform\Strategies;
+use App\Lib\Deploy\Sidecar\ServiceRole;
 use Symfony\Component\Yaml\Yaml;
 
 /**
@@ -207,8 +208,18 @@ class DeployCompose
     }
 
     /**
+     * Docker Hub's official runtime and web server images, beside the datastores {@see ServiceRole} knows.
+     *
+     * @var list<string>
+     */
+    private const OFFICIAL_IMAGES = [
+        'alpine', 'debian', 'ubuntu', 'busybox', 'node', 'python', 'php', 'ruby', 'golang', 'rust', 'openjdk',
+        'eclipse-temurin', 'maven', 'gradle', 'composer', 'nginx', 'httpd', 'caddy', 'traefik',
+    ];
+
+    /**
      * The local tag a repo's own compose gives the image it builds, when its app
-     * service declares one. Only a name with no registry in it. A trailing `:tag`
+     * service declares one. Only a name with no registry in it, and not an official image's. A trailing `:tag`
      * is kept — `image: myapp:latest` beside a `build:` names no registry, since a
      * registry reference needs a `/` — and travels with the name verbatim. A variable is read at its default, as
      * Compose names the image when nothing sets it (`xrk-agt:${XRK_DOCKER_TAG:-latest}` is `xrk-agt:latest`).
@@ -223,11 +234,18 @@ class DeployCompose
         $colon = strrpos($name, ':');
         $repository = $colon === false ? $name : substr($name, 0, $colon);
         $tag = $colon === false ? null : substr($name, $colon + 1);
-        if (! self::isSafeTag($repository) || ($tag !== null && ! self::isSafeTag($tag))) {
+        if (! self::isSafeTag($repository) || ($tag !== null && ! self::isSafeTag($tag)) || self::isOfficialImage($repository)) {
             return null;
         }
 
         return $name;
+    }
+
+    /** An official image the account builds from or runs, which a build tagged with its name would shadow there. */
+    private static function isOfficialImage(string $repository): bool
+    {
+        return in_array(strtolower($repository), self::OFFICIAL_IMAGES, true)
+            || ServiceRole::isKnownDatastore('', ['image' => $repository]);
     }
 
     /** $value interpolated with no variable set, or null when that is not one value. */

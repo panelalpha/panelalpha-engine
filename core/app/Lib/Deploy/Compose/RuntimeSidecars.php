@@ -569,6 +569,7 @@ final class RuntimeSidecars
             $service['environment'] = SidecarCredentials::withRequiredSecrets($service['environment'], $this->placeholderSeed);
         }
         $service = SecretFileEnvironment::inlined(
+            $name,
             $service,
             $this->declaredFiles['secrets'] ?? [],
             $this->readProjectFile(...),
