@@ -139,7 +139,7 @@ class HostCompile
             $this->bundleRustRuntimeLibraries($projectDir, $image, trim((string) ($decision['image'] ?? '')));
         }
 
-        $this->assertBuildProduced($appDir, $output, $isNitro, $isMounted, $isNode);
+        $this->assertBuildProduced($appDir, $output, $isNitro, $isMounted && ! $isNginx, $isNode);
         $this->chownCompiled($appDir, $output, $isMounted, $isNitro, $isNode);
         $logger?->ok($isNginx ? 'Static assets compiled' : 'Application compiled');
     }

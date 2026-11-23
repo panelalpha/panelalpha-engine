@@ -22,3 +22,6 @@ commands:
     stage: build
     run: '{{js.build:npx astro build}}'
     description: "The project's own build script wins over this default when package.json defines one."
+# astro.config's literal outDir under the workspace member holding it, and
+# its client/ half when an adapter is set; `dist` otherwise.
+output_from: astro

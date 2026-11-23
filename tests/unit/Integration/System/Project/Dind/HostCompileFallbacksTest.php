@@ -237,6 +237,27 @@ class HostCompileFallbacksTest extends TestCase
         $this->assertContains('Static assets compiled', $this->lines());
     }
 
+    /** Astro runs mounted when it is a server; its static recipe is served by nginx, so its page is checked for. */
+    public function test_a_static_astro_build_without_its_page_fails_rather_than_serving_an_empty_directory(): void
+    {
+        $this->astroProject("export default {};\n");
+
+        $this->expectExceptionMessage('Static build finished but dist/index.html is missing');
+
+        $this->compile([]);
+    }
+
+    public function test_a_static_astro_page_written_elsewhere_is_moved_to_the_served_directory(): void
+    {
+        $this->deploy = DeployLogger::start($this->username);
+        $this->astroProject("export default { adapter: node({ mode: 'standalone' }), output: 'static' };\n");
+
+        $this->compile(['onBuild' => fn (): mixed => $this->write('dist/index.html', '<!doctype html>')]);
+
+        $this->assertContains('The build wrote index.html to dist/, not to dist/client/; moved it to dist/client/, where it is served from', $this->lines());
+        $this->assertContains('Static assets compiled', $this->lines());
+    }
+
     public function test_a_nitro_output_the_last_deploy_moved_up_is_cleared_before_the_build(): void
     {
         $this->nuxtProject();
@@ -371,6 +392,14 @@ class HostCompileFallbacksTest extends TestCase
         } catch (\Exception $e) {
             $this->assertSame('Your requirements could not be resolved', $e->getMessage());
         }
+    }
+
+    private function astroProject(string $config): void
+    {
+        $this->write('package.json', '{"name":"site","private":true,"scripts":{"build":"astro build"},"dependencies":{"astro":"^5.0.0"}}');
+        $this->write('package-lock.json', '{}');
+        $this->write('astro.config.mjs', $config);
+        mkdir($this->home.'/project/node_modules');
     }
 
     private function nuxtProject(): void

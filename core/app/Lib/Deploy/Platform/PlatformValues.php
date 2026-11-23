@@ -5,6 +5,7 @@ namespace App\Lib\Deploy\Platform;
 use App\Lib\Deploy\Compose\AppRoot;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\Probes\AngularOutputProbe;
+use App\Lib\Deploy\Platform\Probes\AstroOutputDir;
 use App\Lib\Deploy\Platform\Probes\BundlerSpaProbe;
 use App\Lib\Deploy\Platform\Probes\NextWorkspaceProbe;
 use App\Lib\Deploy\Platform\Probes\ViteOutputDir;
@@ -413,6 +414,7 @@ final class PlatformValues
 
         return match ($manifest->outputFrom) {
             'angular' => AngularOutputProbe::outputDir($context->projectDir),
+            'astro' => AstroOutputDir::outputDir($context->projectDir, $manifest->outputDirectory ?? 'dist'),
             'webpack' => BundlerSpaProbe::outputDir($context->projectDir, $manifest->outputDirectory ?? 'dist'),
             'vite' => ViteOutputDir::outputDir($context->projectDir, $manifest->outputDirectory ?? 'dist'),
             'next-workspace' => self::prefixWorkspace(

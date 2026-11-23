@@ -89,8 +89,8 @@ final class ViteOutputDir
      */
     private static function splitBuildBlock(string $config): array
     {
-        $build = self::block($config, 'build');
-        $rest = str_replace([$build, self::block($config, 'test')], '', $config);
+        $build = ConfigBlock::of($config, 'build');
+        $rest = str_replace([$build, ConfigBlock::of($config, 'test')], '', $config);
 
         return [$build, $rest];
     }
@@ -297,31 +297,5 @@ final class ViteOutputDir
         }
 
         return $out === [] ? null : implode('/', $out);
-    }
-
-    /** The `{...}` block `$key:` opens in $text, or '' when there is none. */
-    private static function block(string $text, string $key): string
-    {
-        if (preg_match('/\b'.$key.'\s*:\s*\{/', $text, $m, PREG_OFFSET_CAPTURE) !== 1) {
-            return '';
-        }
-
-        return self::braceBlock($text, $m[0][1] + strlen($m[0][0]) - 1);
-    }
-
-    /** The text from the `{` at $open to its matching `}`. */
-    private static function braceBlock(string $text, int $open): string
-    {
-        $depth = 0;
-        $end = min(strlen($text), $open + 8000);
-        for ($i = $open; $i < $end; $i++) {
-            if ($text[$i] === '{') {
-                $depth++;
-            } elseif ($text[$i] === '}' && --$depth === 0) {
-                return substr($text, $open, $i - $open + 1);
-            }
-        }
-
-        return substr($text, $open, $end - $open);
     }
 }
