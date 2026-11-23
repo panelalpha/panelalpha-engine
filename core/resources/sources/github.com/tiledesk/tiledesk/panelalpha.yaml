@@ -10,5 +10,9 @@ description: >-
   same stack and images with only the proxy published, the public URLs
   (EXTERNAL_BASE_URL, wss MQTT endpoint) set to the site, a start period on
   the rabbitmq check, the two unpinned images pinned and one worker per LLM
-  backend (about 2 GB at idle). Sign in with
+  backend (about 2 GB at idle). Upstream's JWT secrets (tokenKey,
+  nodeauthsecret) and pre-signed RabbitMQ/chat21 admin tokens are public, and
+  the chat21-rabbitmq image trusts tokenKey, so hooks/prepare.sh generates the
+  secrets once per account, signs the tokens with them on every deploy and
+  gives rabbitmq a config trusting that key. Sign in with
   upstream's default admin (admin@tiledesk.com / superadmin) and change it.

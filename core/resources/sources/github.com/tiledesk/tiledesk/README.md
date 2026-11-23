@@ -11,9 +11,12 @@ containers). No project environment variables are needed; set `EMAIL_*`,
 Open the site (it redirects to `/dashboard/`) and sign in with upstream's
 default admin `admin@tiledesk.com` / `superadmin`, then change it.
 
-Upstream's compose ships fixed JWT secrets (`tokenKey`) and pre-signed
-RabbitMQ tokens that match its chat21-rabbitmq image; the recipe keeps them
-as upstream does.
+Upstream's compose signs everything with published secrets: the chat21 JWT
+key `tokenKey`, which its chat21-rabbitmq image also trusts (so anyone could
+sign a RabbitMQ admin token for the public `/mqws` endpoint), the server's
+`GLOBAL_SECRET` default `nodeauthsecret` (every dashboard login token) and
+pre-signed RabbitMQ and chat21 admin tokens. Each install gets its own (see
+below). On an install deployed before, everyone is signed out once.
 
 ## What the recipe does
 
@@ -31,6 +34,15 @@ as upstream does.
   `latest` tag, 2021-08-03) by digest. Qdrant storage moved from a `./` bind
   to a named volume; MongoDB keeps upstream's named volume.
 - The two LLM backends run `WORKERS=1` instead of 3 (1.25 GB each at 3).
+- `hooks/prepare.sh` generates `CHAT21_SECRET`, `GLOBAL_SECRET`, `LLM_SECRET`
+  and the push webhook token once into `~/.panelalpha/tiledesk/secrets.env`.
+  On every deploy it signs the RabbitMQ/chat21 admin and observer tokens
+  (upstream's claims, HS256 with `CHAT21_SECRET`) and writes them, with the
+  secrets each service reads, to `server.env`, `chatbot.env`, `llm.env`,
+  `chat21-http.env` and `chat21-server.env` beside it, which the services
+  load as `env_file`. `rabbitmq-advanced.config` is the image's own
+  `advanced.config` with `CHAT21_SECRET` in place of `tokenKey`, mounted
+  over it.
 
 The `*.panelalpha.online` test front strips websocket upgrades; the MQTT
 websocket answers `101` through the host directly.

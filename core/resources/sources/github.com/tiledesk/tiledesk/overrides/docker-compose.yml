@@ -6,6 +6,9 @@
 # unpinned images are pinned (qdrant release, chat21-rabbitmq by digest: it
 # only has `latest`, pushed 2021-08-03). Qdrant storage is a named volume.
 # The two LLM backends run 1 worker instead of 3 (about 1.25 GB each at 3).
+# The JWT secrets and the pre-signed RabbitMQ/chat21 admin tokens upstream
+# publishes come from ~/.panelalpha/tiledesk/*.env, generated and signed per
+# account by hooks/prepare.sh, and rabbitmq trusts that key instead of tokenKey.
 volumes:
   tiledesk-datadb: {}
   tiledesk-qdrant: {}
@@ -132,6 +135,9 @@ services:
   chatbot:
     image: tiledesk/tiledesk-chatbot:2.0.32-rc8
     container_name: chatbot
+    env_file:
+    # Signed with this account's secrets by hooks/prepare.sh, in place of upstream's published ones.
+    - ../.panelalpha/tiledesk/chatbot.env
     environment:
     - API_ENDPOINT=http://server:3000
     - TILEBOT_ENDPOINT=http://chatbot:3000
@@ -142,7 +148,6 @@ services:
     - CACHE_REDIS_PORT=6379
     - TILEBOT_LOG=info
     - FLOW_LOGS_ENABLED=true
-    - AMQP_MANAGER_URL=amqp://ignored:eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI3NjMwYTAwZS0xNTUxLTQ3Y2ItYmEzMC02NGRlNjJmYmNmNGYiLCJzdWIiOiIwMS1PQlNFUlZFUiIsInNjb3BlIjpbInJhYmJpdG1xLnJlYWQ6Ki8qLyoiLCJyYWJiaXRtcS53cml0ZToqLyovKiIsInJhYmJpdG1xLmNvbmZpZ3VyZToqLyovKiJdLCJjbGllbnRfaWQiOiIwMS1PQlNFUlZFUiIsImNpZCI6IjAxLU9CU0VSVkVSIiwiYXpwIjoiMDEtT0JTRVJWRVIiLCJ1c2VyX2lkIjoiMDEtT0JTRVJWRVIiLCJhcHBfaWQiOiJ0aWxlY2hhdCIsImlhdCI6MTY5NjQ5MjI4NywiZXhwIjoyMDA3NTMyMjg3LCJhdWQiOlsicmFiYml0bXEiLCIwMS1PQlNFUlZFUiJdLCJraWQiOiJ0aWxlZGVzay1rZXkiLCJ0aWxlZGVza19hcGlfcm9sZXMiOiJ1c2VyIn0.Lq0MLTYny7tIYVQ-KEDLlL-h7gAqofCfC2IDgI_0TOE@rabbitmq:5672?heartbeat=60
     - AI_ENDPOINT=http://backend-llm-train:8000/api
     - GPTKEY=CHANGEIT
     - KB_ENDPOINT_TRAIN=http://backend-llm-train:8000/api
@@ -151,17 +156,17 @@ services:
     image: tiledesk/tiledesk-server:2.13.23-op1
     container_name: server
     restart: always
+    env_file:
+    # Signed with this account's secrets by hooks/prepare.sh, in place of upstream's published ones.
+    - ../.panelalpha/tiledesk/server.env
     environment:
     - LOG_LEVEL=info
     - CHAT21_ENABLED=true
     - CHAT21_ENGINE=mqtt
     - CHAT21_URL=http://chat21httpserver:8004
-    - CHAT21_JWT_SECRET=tokenKey
     - CHAT21_APPID=tilechat
     - RESTHOOK_ENABLED=true
     - ALLOW_REOPEN_CHAT=true
-    - CHAT21_ADMIN_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIzNDU2MTBkNy03MmYxLTQ5OWUtODQzMS0xMTNhZWJkOWVmOTgiLCJzdWIiOiIxMDAtQVBJQURNSU4iLCJzY29wZSI6WyJyYWJiaXRtcS5yZWFkOiovKi8qIiwicmFiYml0bXEud3JpdGU6Ki8qLyoiLCJyYWJiaXRtcS5jb25maWd1cmU6Ki8qLyoiXSwiY2xpZW50X2lkIjoiMTAwLUFQSUFETUlOIiwiY2lkIjoiMTAwLUFQSUFETUlOIiwiYXpwIjoiMTAwLUFQSUFETUlOIiwidXNlcl9pZCI6IjEwMC1BUElBRE1JTiIsImFwcF9pZCI6InRpbGVjaGF0IiwiaWF0IjoxNjE0OTQzNDkyLCJleHAiOjE5MjU5ODM0OTIsImF1ZCI6WyJyYWJiaXRtcSIsIjEwMC1BUElBRE1JTiJdLCJraWQiOiJ0aWxlZGVzay1rZXkiLCJ0aWxlZGVza19hcGlfcm9sZXMiOiJhZG1pbiJ9.KptGMsTKjd3wUiiP1GGSTYqW1XXK1vjSRJnetC3wjxU
-    - AMQP_MANAGER_URL=amqp://ignored:eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI3NjMwYTAwZS0xNTUxLTQ3Y2ItYmEzMC02NGRlNjJmYmNmNGYiLCJzdWIiOiIwMS1PQlNFUlZFUiIsInNjb3BlIjpbInJhYmJpdG1xLnJlYWQ6Ki8qLyoiLCJyYWJiaXRtcS53cml0ZToqLyovKiIsInJhYmJpdG1xLmNvbmZpZ3VyZToqLyovKiJdLCJjbGllbnRfaWQiOiIwMS1PQlNFUlZFUiIsImNpZCI6IjAxLU9CU0VSVkVSIiwiYXpwIjoiMDEtT0JTRVJWRVIiLCJ1c2VyX2lkIjoiMDEtT0JTRVJWRVIiLCJhcHBfaWQiOiJ0aWxlY2hhdCIsImlhdCI6MTY5NjQ5MjI4NywiZXhwIjoyMDA3NTMyMjg3LCJhdWQiOlsicmFiYml0bXEiLCIwMS1PQlNFUlZFUiJdLCJraWQiOiJ0aWxlZGVzay1rZXkiLCJ0aWxlZGVza19hcGlfcm9sZXMiOiJ1c2VyIn0.Lq0MLTYny7tIYVQ-KEDLlL-h7gAqofCfC2IDgI_0TOE@rabbitmq:5672?heartbeat=60
     - MONGODB_URI=mongodb://mongo/tiledesk
     - EMAIL_ENABLED
     - EMAIL_HOST
@@ -179,7 +184,6 @@ services:
     - CACHE_ENGINE=redis
     - CACHE_REDIS_HOST=redis
     - CACHE_REDIS_PORT=6379
-    - APPS_ACCESS_TOKEN_SECRET=nodeauthsecret
     - BOOT_LOADING=true
     - META_GRAPH_URL=https://graph.facebook.com/v20.0/
     - TELEGRAM_API_URL=https://api.telegram.org/bot
@@ -201,7 +205,6 @@ services:
     - VECTOR_STORE_PORT=6333
     - VECTOR_STORE_DEPLOYMENT=local
     - JOB_TOPIC_EXCHANGE_TRAIN=tiledesk-trainer
-    - JWT_SECRET_KEY=tokenKey
     - COMMUNITY_VERSION=true
     - QUOTES_ENABLED=false
     - TILEBOT_ENDPOINT=http://chatbot:3000
@@ -223,19 +226,18 @@ services:
   chat21httpserver:
     image: chat21/chat21-http-server:0.2.37
     container_name: chat21httpserver
+    env_file:
+    # Signed with this account's secrets by hooks/prepare.sh, in place of upstream's published ones.
+    - ../.panelalpha/tiledesk/chat21-http.env
     environment:
     - LOG_LEVEL=info
     - MONGODB_URI=mongodb://mongo/chat21
-    - JWT_KEY=tokenKey
-    - RABBITMQ_URI=amqp://ignored:eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJiMjM1OTFmZS05N2FhLTRmNWQtOGVlOS0yNjQ2NzljYmM0M2YiLCJzdWIiOiIxMDAtQVBJQURNSU4iLCJzY29wZSI6WyJyYWJiaXRtcS5yZWFkOiovKi8qIiwicmFiYml0bXEud3JpdGU6Ki8qLyoiLCJyYWJiaXRtcS5jb25maWd1cmU6Ki8qLyoiXSwiY2xpZW50X2lkIjoiMTAwLUFQSUFETUlOIiwiY2lkIjoiMTAwLUFQSUFETUlOIiwiYXpwIjoiMTAwLUFQSUFETUlOIiwidXNlcl9pZCI6IjEwMC1BUElBRE1JTiIsImFwcF9pZCI6InRpbGVjaGF0IiwiaWF0IjoxNjk2NDkyMjg3LCJleHAiOjIwMDc1MzIyODcsImF1ZCI6WyJyYWJiaXRtcSIsIjEwMC1BUElBRE1JTiJdLCJraWQiOiJ0aWxlZGVzay1rZXkiLCJ0aWxlZGVza19hcGlfcm9sZXMiOiJhZG1pbiJ9.Ee-TpAPsoC7Dm7qsbUojeHud3E4OCtJZkpupu_R0Aic@rabbitmq:5672?heartbeat=60
     - PUSH_ENABLED=true
     - FIREBASE_PRIVATE_KEY
     - FIREBASE_APIKEY
     - FIREBASE_PROJECT_ID
     - FIREBASE_CLIENT_EMAIL
-    - PUSH_WH_CHAT21_API_ADMIN_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI5NGFjNjNmNy1hOGM3LTRkZGMtYjJkNS01MWE2MjBmNTdhNmIiLCJzdWIiOiIxMDAtQVBJQURNSU4iLCJzY29wZSI6WyJyYWJiaXRtcS5yZWFkOiovKi8qIiwicmFiYml0bXEud3JpdGU6Ki8qLyoiLCJyYWJiaXRtcS5jb25maWd1cmU6Ki8qLyoiXSwiY2xpZW50X2lkIjoiMTAwLUFQSUFETUlOIiwiY2lkIjoiMTAwLUFQSUFETUlOIiwiYXpwIjoiMTAwLUFQSUFETUlOIiwidXNlcl9pZCI6IjEwMC1BUElBRE1JTiIsImFwcF9pZCI6InRpbGVjaGF0IiwiaWF0IjoxNjM3NzYxNDM0LCJleHAiOjE5NDg4MDE0MzQsImF1ZCI6WyJyYWJiaXRtcSIsIjEwMC1BUElBRE1JTiJdLCJraWQiOiJ0aWxlZGVzay1rZXkiLCJ0aWxlZGVza19hcGlfcm9sZXMiOiJhZG1pbiJ9.fLPrGArRlnyC04552oBsUjohf6l_BIpxwB847xWvugo
     - PUSH_WH_NOTIFY_URL=http://localhost:8004/api/tilechat/notify
-    - PUSH_WH_WEBHOOK_TOKEN=WHFyAhecCMkYsvldLFWbSrJt7lAZFAmrp7O5QVMvGQsLVn9SkfT
     - CHAT21HTTP_CACHE_ENABLED=false
     - CONTACTS_LOOKUP_ENDPOINT=http://server:3000/users_util
     depends_on:
@@ -248,14 +250,15 @@ services:
     container_name: chat21server
     # A long-running consumer nothing depends on or names.
     restart: unless-stopped
+    env_file:
+    # Signed with this account's secrets by hooks/prepare.sh, in place of upstream's published ones.
+    - ../.panelalpha/tiledesk/chat21-server.env
     environment:
     - LOG_LEVEL=info
     - MONGODB_URI=mongodb://mongo/chat21
     - APP_ID=tilechat
-    - WEBHOOK_ENDPOINTS=http://server:3000/chat21/requests,http://chat21httpserver:8004/api/tilechat/push/webhook/endpoint/WHFyAhecCMkYsvldLFWbSrJt7lAZFAmrp7O5QVMvGQsLVn9SkfT
     - WEBHOOK_ENABLED=true
     - WEBHOOK_EVENTS=message-sent,message-delivered,conversation-unarchived
-    - RABBITMQ_URI=amqp://ignored:eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI3NjMwYTAwZS0xNTUxLTQ3Y2ItYmEzMC02NGRlNjJmYmNmNGYiLCJzdWIiOiIwMS1PQlNFUlZFUiIsInNjb3BlIjpbInJhYmJpdG1xLnJlYWQ6Ki8qLyoiLCJyYWJiaXRtcS53cml0ZToqLyovKiIsInJhYmJpdG1xLmNvbmZpZ3VyZToqLyovKiJdLCJjbGllbnRfaWQiOiIwMS1PQlNFUlZFUiIsImNpZCI6IjAxLU9CU0VSVkVSIiwiYXpwIjoiMDEtT0JTRVJWRVIiLCJ1c2VyX2lkIjoiMDEtT0JTRVJWRVIiLCJhcHBfaWQiOiJ0aWxlY2hhdCIsImlhdCI6MTY5NjQ5MjI4NywiZXhwIjoyMDA3NTMyMjg3LCJhdWQiOlsicmFiYml0bXEiLCIwMS1PQlNFUlZFUiJdLCJraWQiOiJ0aWxlZGVzay1rZXkiLCJ0aWxlZGVza19hcGlfcm9sZXMiOiJ1c2VyIn0.Lq0MLTYny7tIYVQ-KEDLlL-h7gAqofCfC2IDgI_0TOE@rabbitmq:5672?heartbeat=60
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -266,17 +269,18 @@ services:
   backend-llm-train:
     image: tiledesk/tiledesk-backend-llm:0.5.3-rc1
     container_name: backend-llm-train
+    env_file:
+    # Signed with this account's secrets by hooks/prepare.sh, in place of upstream's published ones.
+    - ../.panelalpha/tiledesk/llm.env
     environment:
     - TIMEOUT=240
     - REDIS_URL=redis://redis:6379
     - TILELLM_ROLE=train
     - WORKERS=1
     - MONGODB_URL=mongodb://mongo/tiledesk
-    - AMQP_MANAGER_URL=amqp://ignored:eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI3NjMwYTAwZS0xNTUxLTQ3Y2ItYmEzMC02NGRlNjJmYmNmNGYiLCJzdWIiOiIwMS1PQlNFUlZFUiIsInNjb3BlIjpbInJhYmJpdG1xLnJlYWQ6Ki8qLyoiLCJyYWJiaXRtcS53cml0ZToqLyovKiIsInJhYmJpdG1xLmNvbmZpZ3VyZToqLyovKiJdLCJjbGllbnRfaWQiOiIwMS1PQlNFUlZFUiIsImNpZCI6IjAxLU9CU0VSVkVSIiwiYXpwIjoiMDEtT0JTRVJWRVIiLCJ1c2VyX2lkIjoiMDEtT0JTRVJWRVIiLCJhcHBfaWQiOiJ0aWxlY2hhdCIsImlhdCI6MTY5NjQ5MjI4NywiZXhwIjoyMDA3NTMyMjg3LCJhdWQiOlsicmFiYml0bXEiLCIwMS1PQlNFUlZFUiJdLCJraWQiOiJ0aWxlZGVzay1rZXkiLCJ0aWxlZGVza19hcGlfcm9sZXMiOiJ1c2VyIn0.Lq0MLTYny7tIYVQ-KEDLlL-h7gAqofCfC2IDgI_0TOE@rabbitmq:5672?heartbeat=60
     - JOB_TOPIC_EXCHANGE_TRAIN=tiledesk-trainer
     - GPTKEY=CHANGEIT
     - TRAIN_PREFETCH=4
-    - JWT_SECRET_KEY=tokenKey
     - TRAINER_LOG=info
     depends_on:
       rabbitmq:
@@ -286,17 +290,18 @@ services:
   backend-llm-qa:
     image: tiledesk/tiledesk-backend-llm:0.5.3-rc1
     container_name: backend-llm-qa
+    env_file:
+    # Signed with this account's secrets by hooks/prepare.sh, in place of upstream's published ones.
+    - ../.panelalpha/tiledesk/llm.env
     environment:
     - TIMEOUT=240
     - REDIS_URL=redis://redis:6379
     - TILELLM_ROLE=qa
     - WORKERS=1
     - MONGODB_URL=mongodb://mongo/tiledesk
-    - AMQP_MANAGER_URL=amqp://ignored:eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI3NjMwYTAwZS0xNTUxLTQ3Y2ItYmEzMC02NGRlNjJmYmNmNGYiLCJzdWIiOiIwMS1PQlNFUlZFUiIsInNjb3BlIjpbInJhYmJpdG1xLnJlYWQ6Ki8qLyoiLCJyYWJiaXRtcS53cml0ZToqLyovKiIsInJhYmJpdG1xLmNvbmZpZ3VyZToqLyovKiJdLCJjbGllbnRfaWQiOiIwMS1PQlNFUlZFUiIsImNpZCI6IjAxLU9CU0VSVkVSIiwiYXpwIjoiMDEtT0JTRVJWRVIiLCJ1c2VyX2lkIjoiMDEtT0JTRVJWRVIiLCJhcHBfaWQiOiJ0aWxlY2hhdCIsImlhdCI6MTY5NjQ5MjI4NywiZXhwIjoyMDA3NTMyMjg3LCJhdWQiOlsicmFiYml0bXEiLCIwMS1PQlNFUlZFUiJdLCJraWQiOiJ0aWxlZGVzay1rZXkiLCJ0aWxlZGVza19hcGlfcm9sZXMiOiJ1c2VyIn0.Lq0MLTYny7tIYVQ-KEDLlL-h7gAqofCfC2IDgI_0TOE@rabbitmq:5672?heartbeat=60
     - JOB_TOPIC_EXCHANGE_TRAIN=tiledesk-trainer
     - GPTKEY=CHANGEIT
     - TRAIN_PREFETCH=4
-    - JWT_SECRET_KEY=tokenKey
     - TRAINER_LOG=info
     depends_on:
       rabbitmq:
@@ -333,6 +338,9 @@ services:
   rabbitmq:
     image: chat21/chat21-rabbitmq@sha256:49fdc43789c1c31f783e0cf8e451cd9322d87281ab71678fdacaec3da847f088
     container_name: rabbitmq
+    volumes:
+    # The image's advanced.config trusts tokens signed with `tokenKey`; this one, the account's key.
+    - ../.panelalpha/tiledesk/rabbitmq-advanced.config:/etc/rabbitmq/advanced.config:ro
     environment:
       RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE}
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
