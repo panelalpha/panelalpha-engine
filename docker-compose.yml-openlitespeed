@@ -4,7 +4,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-openlitespeed
-    image: ghcr.io/panelalpha/engine-openlitespeed:v2.3.1
+    image: ghcr.io/panelalpha/engine-openlitespeed:v2.3.2
     pull_policy: missing
     # The entrypoint shell ignores SIGTERM as PID 1.
     init: true
