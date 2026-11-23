@@ -108,7 +108,7 @@ A tool has to be in an enabled group (or named in `MCP_TOOLS`), allowed by the p
 
 ### How many tools the assistant loads
 
-The full list is 319 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
+The full list is 320 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
 
 - `search_tools` finds any other tool by what it does, for example `mysql user` or `cron`.
 - `execute_tools` runs the tool it found.
@@ -730,6 +730,7 @@ Moves a WordPress site from another host onto this engine: [Move a WordPress sit
 | `system_telemetry_set` | Change whether failure reports are sent, what they carry, and whether source code goes with them |
 | `system_test_email_send` | Send a test email via Exim |
 | `system_update` | Starts a background updater on the VPS. Not how you update day to day: [Updating](../02-getting-started/updating.md) |
+| `system_update_check` | Says whether a newer engine release is available, and changes nothing |
 | `system_webserver_change` | Change the active webserver. Not supported: the engine runs nginx-proxy only |
 | `system_webserver_config_set` | Update webserver configuration |
 | `system_webserver_password_reset` | Reset a webserver admin panel password. Not supported on the default nginx-proxy install |

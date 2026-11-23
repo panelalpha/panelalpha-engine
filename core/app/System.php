@@ -7,6 +7,7 @@ use App\Lib\Deploy\DeployLog\StepWatchdog;
 use App\Models\User as ModelsUser;
 use App\System\EnginePaths;
 use App\System\EngineUpdate;
+use App\System\EngineUpdateCheck;
 use App\System\Filesystem;
 use App\System\HostProcess;
 use App\System\Network;
@@ -449,6 +450,11 @@ class System implements ProcessRunner
     public function update(): EngineUpdate
     {
         return new EngineUpdate($this);
+    }
+
+    public function updateCheck(): EngineUpdateCheck
+    {
+        return new EngineUpdateCheck;
     }
 
     /**

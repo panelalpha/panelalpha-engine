@@ -7,6 +7,7 @@ use App\Auth\TokenAbilities;
 use App\Exceptions\DockerErrorException;
 use App\Http\Requests\EximConfigUpdateRequest;
 use App\Http\Requests\EximTestEmailSendRequest;
+use App\Http\Requests\SystemUpdateCheckRequest;
 use App\Lib\Deploy\Telemetry\HostFacts;
 use App\Lib\Domains\DomainAllocator;
 use App\Lib\Domains\DomainPlan;
@@ -446,6 +447,30 @@ class SystemController extends Controller
         }
 
         return $flags;
+    }
+
+    #[OA\Get(
+        path: '/system/update',
+        summary: 'Check whether a newer engine release is available',
+        description: 'Compares the running release with the newest engine release the PanelAlpha Hub publishes, and '
+            .'changes nothing. The Hub\'s answer is kept for up to an hour; `refresh=1` asks again. A Hub that cannot '
+            .'be reached or names no engine release is `status: unknown` with the reason.',
+        security: [['bearerAuth' => []]],
+        tags: ['System'],
+        x: ['mcp-description' => 'Says whether a newer engine release is available: the running and the newest version, when the newest was published and its release notes, and what system_update would do (status update_available, up_to_date, older_available or unknown). Changes nothing. Cached up to an hour; refresh=1 checks again.'],
+        parameters: [
+            new OA\Parameter(name: 'refresh', in: 'query', required: false, description: '1 asks the PanelAlpha Hub again instead of returning the kept answer', schema: new OA\Schema(type: 'boolean')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'The comparison', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', ref: '#/components/schemas/EngineUpdateCheck')],
+            )),
+            new OA\Response(response: 422, description: '`refresh` is not a boolean', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+        ],
+    )]
+    public function updateCheck(SystemUpdateCheckRequest $request): JsonResponse
+    {
+        return new JsonResponse(['data' => app(System::class)->updateCheck()->check($request->refresh())]);
     }
 
     #[OA\Put(

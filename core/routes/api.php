@@ -550,6 +550,7 @@ Route::get('/system/ssl-config', [SystemController::class, 'getSslConfig']);
 Route::put('/system/ssl-config', [SystemController::class, 'updateSslConfig']);
 Route::put('/system/engine-certificate', [SystemController::class, 'requestEngineCertificate']);
 Route::put('/system/network-config', [SystemController::class, 'updateNetworkConfig']);
+Route::get('/system/update', [SystemController::class, 'updateCheck']);
 Route::put('/system/update', [SystemController::class, 'update']);
 Route::put('/system/change-webserver', [SystemController::class, 'changeWebserver']);
 Route::put('/system/reset-webserver-panel-password', [SystemController::class, 'resetWebserverPanelPassword']);

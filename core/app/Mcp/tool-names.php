@@ -358,6 +358,7 @@ return [
     'GET /system/build-caches' => 'system_build_cache_list',
     'POST /system/build-caches' => 'system_build_cache_build',
     'DELETE /system/build-caches' => 'system_build_cache_remove',
+    'GET /system/update' => 'system_update_check',
     'PUT /system/update' => 'system_update',
     'PUT /system/change-webserver' => 'system_webserver_change',
     'PUT /system/webserver-config' => 'system_webserver_config_set',

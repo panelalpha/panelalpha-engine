@@ -87,10 +87,10 @@ Write it down. If anything goes wrong, this is the version you ask PanelAlpha to
 To see whether there is anything newer without changing anything:
 
 ```bash
-bash /opt/panelalpha/shared-hosting/updater.sh --check
+pae system:update --check
 ```
 
-It prints the running version and the newest release, each with its commit, and whether an update is available. `bash /opt/panelalpha/shared-hosting/updater.sh --help` lists every option and starts nothing.
+It prints the running version, the newest release with the day it was published and where its changes are described, and whether an update is available. The newest release is what the PanelAlpha Hub publishes, read from `https://hub.panelalpha.com/api/v1/public/releases`. The answer is kept for an hour; `--refresh` asks again. The same answer is `GET /system/update` in the API and the `system_update_check` tool for your assistant. Without the engine running, `bash /opt/panelalpha/shared-hosting/updater.sh --check` gives it on the server; `bash /opt/panelalpha/shared-hosting/updater.sh --help` lists every option and starts nothing.
 
 ### 2. Run the update
 
@@ -105,6 +105,8 @@ PanelAlpha engine has been successfully updated!
 ```
 
 While it runs, your AI assistant loses its connection for about a minute and reconnects on its own. The websites you host stay up throughout.
+
+`pae system:update` starts the same update from the engine instead. It shows both versions, asks before it starts (`--force` does not), and runs in the background. `pae system:update --status` says how it ended.
 
 ### 3. Check it worked
 
@@ -173,7 +175,15 @@ There is no automatic way back from an update that succeeded, because the update
 
 ## More requests to try
 
-**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Whether a newer release exists is read on the server with `updater.sh --check`, step 1 above.
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Whether a newer release exists is `pae system:update --check`, step 1 above, or the `system_update_check` tool.
+
+**Is there a newer release**
+
+```text
+Is a newer engine release available? Tell me the version running now and the newest one.
+```
+
+Mode: read. Tools: `system_update_check`. Check: the answer gives both versions and whether an update would install anything, and nothing changes.
 
 **What the last update did**
 

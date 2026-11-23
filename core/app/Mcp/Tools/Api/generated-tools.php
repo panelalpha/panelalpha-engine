@@ -300,6 +300,7 @@ return [
     \App\Mcp\Tools\Api\System\SystemSslConfigSetTool::class,
     \App\Mcp\Tools\Api\System\SystemTelemetryGetTool::class,
     \App\Mcp\Tools\Api\System\SystemTelemetrySetTool::class,
+    \App\Mcp\Tools\Api\System\SystemUpdateCheckTool::class,
     \App\Mcp\Tools\Api\System\SystemUpdateTool::class,
     \App\Mcp\Tools\Api\System\SystemWebserverConfigSetTool::class,
     \App\Mcp\Tools\Api\Tasks\TaskListTool::class,

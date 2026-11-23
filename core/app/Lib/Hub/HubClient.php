@@ -10,8 +10,8 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
 
 /**
- * Calls to the Hub: the connect ceremony, then a few signed notices. TLS is always verified and redirects never
- * followed; a network failure is a HubException, a Hub answer is a HubResponse.
+ * Calls to the Hub: the connect ceremony, a few signed notices, and the public release list. TLS is always verified
+ * and redirects never followed; a network failure is a HubException, a Hub answer is a HubResponse.
  */
 class HubClient
 {
@@ -22,6 +22,8 @@ class HubClient
     public const SESSIONS = 'api/engine/v1/connect-sessions';
 
     public const CONNECTION = 'api/engine/v1/connection';
+
+    public const RELEASES = 'api/v1/public/releases';
 
     private string $base;
 
@@ -68,6 +70,16 @@ class HubClient
             $this->post(self::SESSIONS.'/cancel', ['device_code' => $deviceCode, 'reason' => $reason]);
         } catch (\Throwable) {
         }
+    }
+
+    /**
+     * The newest release of every PanelAlpha product, unsigned.
+     *
+     * @throws HubException
+     */
+    public function releases(): HubResponse
+    {
+        return $this->send('GET', self::RELEASES, '', []);
     }
 
     /** @throws HubException */
