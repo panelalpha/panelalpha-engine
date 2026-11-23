@@ -8,7 +8,7 @@ Update when PanelAlpha releases a fix. If a deploy failed for a reason PanelAlph
 
 The update restarts the engine, so a connected assistant will disconnect for about a minute and then reconnect.
 
-An update installs only a newer release than the one running. This holds for an update started from the engine (the API or your assistant) and for the updater on the server.
+An update installs only a newer release than the one running. This holds for an update started from the engine (the API, your assistant or `pae system:update`) and for the updater on the server.
 
 - **The newest release is what you run**, the same version from the same commit: it says `Already up to date` and changes nothing.
 - **A fix published under the same version number** is installed as an update within the release.

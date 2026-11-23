@@ -22,8 +22,8 @@ class PrewarmUpdateRequest extends FormRequest
         return [
             'images' => ['sometimes', 'nullable', 'array', 'max:200'],
             'images.*' => ['string', 'distinct', Rule::in(array_column(app(PrewarmSettings::class)->catalog(), 'id'))],
-            'budget' => ['sometimes', 'nullable', 'string', 'max:32', $this->size('budget')],
-            'reserve' => ['sometimes', 'nullable', 'string', 'max:32', $this->size('reserve')],
+            'budget' => ['bail', 'sometimes', 'nullable', 'string', 'max:32', $this->size('budget')],
+            'reserve' => ['bail', 'sometimes', 'nullable', 'string', 'max:32', $this->size('reserve')],
         ];
     }
 

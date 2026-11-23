@@ -9,7 +9,6 @@ use App\Http\Requests\McpTokenCommandsRequest;
 use App\Http\Requests\McpTokenProjectsRequest;
 use App\Http\Requests\McpTokenStoreRequest;
 use App\Mcp\ToolExposure;
-use App\Models\Admin;
 use App\Models\PersonalAccessToken;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -44,20 +43,12 @@ class McpTokenController extends Controller
     {
         $params = $request->validate(['project' => ['nullable', 'string', 'max:255']]);
 
-        $scope = OperatorTokens::mcp();
+        $project = empty($params['project']) ? null : $params['project'];
 
-        $tokens = Admin::rootAccount()->tokens()
-            ->where(function ($q) use ($params) {
-                $q->whereJsonContains('abilities', TokenAbilities::MCP);
-
-                if (! empty($params['project'])) {
-                    $q->whereJsonContains('abilities', TokenAbilities::PROJECT_PREFIX.$params['project']);
-                }
-            })
-            ->orderByDesc('created_at')
-            ->get()
-            ->filter(fn ($t) => $t instanceof PersonalAccessToken && $scope->covers($t))
-            ->map(fn ($t) => $this->formatToken($t))
+        $tokens = collect(OperatorTokens::mcp()->all())
+            ->filter(fn (PersonalAccessToken $t): bool => $project === null || in_array($project, TokenAbilities::of($t)->projects() ?? [], true))
+            ->reverse()
+            ->map(fn (PersonalAccessToken $t): array => $this->formatToken($t))
             ->values();
 
         return response()->json(['data' => $tokens]);
@@ -295,15 +286,7 @@ class McpTokenController extends Controller
 
     private function findMcpToken(int $id): PersonalAccessToken
     {
-        $root = Admin::rootAccount();
-        $token = $root->tokens()
-            ->where('id', $id)
-            ->whereJsonContains('abilities', TokenAbilities::MCP)
-            ->firstOrFail();
-
-        assert($token instanceof PersonalAccessToken);
-
-        return $token;
+        return OperatorTokens::mcp()->find($id);
     }
 
     private function formatToken(PersonalAccessToken $token): array

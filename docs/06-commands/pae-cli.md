@@ -376,7 +376,7 @@ Context: [Security](../05-capabilities/security.md), [Limits on outbound connect
 | `pae telemetry:bug-report {project}` | Files a bug about one deployed application. |
 | `pae system:version` | Prints the engine version. |
 | `pae system:update --check` | Says whether a newer engine release is available, as the PanelAlpha Hub publishes it, and changes nothing. The answer is kept for an hour; `--refresh` asks again, `--json` prints it for scripts. |
-| `pae system:update` | Updates the engine to the newest release, after asking (`--force` does not ask). `pae system:update --status` says how the last update ended. |
+| `pae system:update` | Updates the engine to the newest release, after asking (`--force` does not ask). It runs the updater whatever `--check` says, as the API does: the updater refuses an older release and changes nothing when the newest is already running. `pae system:update --status` says how the last update ended. |
 | `pae settings:get {name}` / `pae settings:set {name} {value}` | Reads and writes an engine setting. |
 | `pae settings:set default_tunnel none` | A new project created without naming a tunnel is published under the engine's own name (the certificate name, or the base domain if one is set), and nothing is registered with PanelAlpha Online. `panelalpha` is the default: a base domain if there is one, otherwise a free `panelalpha.online` name. Any other value is refused. A tunnel named in the request always wins. |
 

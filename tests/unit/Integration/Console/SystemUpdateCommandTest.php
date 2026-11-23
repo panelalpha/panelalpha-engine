@@ -10,7 +10,8 @@ use Tests\TestCase;
 
 /**
  * pae system:update: --check says what an update would install, and an update starts only after a confirmation or
- * --force, never while one runs and never when there is nothing to install.
+ * --force and never while one runs. Whatever the check says, the updater is what refuses an older release or changes
+ * nothing, as for PUT /system/update.
  */
 class SystemUpdateCommandTest extends TestCase
 {
@@ -63,17 +64,19 @@ class SystemUpdateCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
-    public function test_a_hub_that_fails_fails_the_check_and_starts_nothing(): void
+    public function test_a_hub_that_fails_fails_the_check_and_leaves_the_update_to_the_updater(): void
     {
         HubReleases::fake([null, null]);
 
         $this->artisan('system:update --check')
             ->expectsOutput('Available: unknown')
             ->assertExitCode(1);
-        $this->artisan('system:update --force')
-            ->expectsOutput('The PanelAlpha Hub answered the release list with Server Error.')
-            ->assertExitCode(1);
         $this->assertSame(0, $this->system->started);
+
+        $this->artisan('system:update --force')
+            ->expectsOutput('The PanelAlpha Hub answered the release list with Server Error. The updater reads the newest release itself.')
+            ->assertExitCode(0);
+        $this->assertSame(1, $this->system->started);
     }
 
     public function test_an_update_starts_after_a_confirmation(): void
@@ -114,12 +117,27 @@ class SystemUpdateCommandTest extends TestCase
         $this->assertSame(0, $this->system->started);
     }
 
-    public function test_nothing_to_install_starts_nothing(): void
+    public function test_no_newer_version_still_runs_the_updater_as_the_api_does(): void
     {
         HubReleases::fake(['2.3.1', '2.3.0']);
 
-        $this->artisan('system:update --force')->expectsOutput('Nothing to install.')->assertExitCode(0);
-        $this->artisan('system:update --force')->expectsOutput('Nothing to install.')->assertExitCode(0);
+        $this->artisan('system:update --force')
+            ->expectsOutput('No newer version is published. The updater installs a fix published under the running version, and otherwise changes nothing.')
+            ->assertExitCode(0);
+        $this->artisan('system:update --force')
+            ->expectsOutput('The available release is older than the running one. The updater refuses it and changes nothing.')
+            ->assertExitCode(0);
+        $this->assertSame(2, $this->system->started);
+    }
+
+    public function test_no_newer_version_asks_whether_to_run_the_updater(): void
+    {
+        HubReleases::fake(['2.3.1']);
+
+        $this->artisan('system:update')
+            ->expectsConfirmation('Run the engine updater? The engine restarts only if it installs something; sites keep running.', 'no')
+            ->expectsOutput('Cancelled.')
+            ->assertExitCode(0);
         $this->assertSame(0, $this->system->started);
     }
 

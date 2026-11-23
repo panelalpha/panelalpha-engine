@@ -21,7 +21,7 @@ class SitesDbUpdateRequest extends FormRequest
     {
         $rules = [];
         foreach (SitesDbCaches::CACHES as $key => $cache) {
-            $rules[$cache['variable']] = ['sometimes', 'nullable', 'string', 'max:16', $this->size($key)];
+            $rules[$cache['variable']] = ['bail', 'sometimes', 'nullable', 'string', 'max:16', $this->size($key)];
         }
 
         return $rules;

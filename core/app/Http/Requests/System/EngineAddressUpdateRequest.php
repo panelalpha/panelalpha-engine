@@ -31,8 +31,8 @@ class EngineAddressUpdateRequest extends FormRequest
     {
         return [
             'url' => ['prohibited'],
-            'cert_domain' => ['sometimes', 'present', 'string', 'max:253', $this->check(static fn (string $v): ?string => EngineAddressSettings::badName(strtolower(trim($v))))],
-            'cert_email' => ['sometimes', 'present', 'string', 'max:255', $this->check(static fn (string $v): ?string => trim($v) === '' || filter_var(trim($v), FILTER_VALIDATE_EMAIL) ? null : 'That is not an email address.')],
+            'cert_domain' => ['bail', 'sometimes', 'present', 'string', 'max:253', $this->check(static fn (string $v): ?string => EngineAddressSettings::badName(strtolower(trim($v))))],
+            'cert_email' => ['bail', 'sometimes', 'present', 'string', 'max:255', $this->check(static fn (string $v): ?string => trim($v) === '' || filter_var(trim($v), FILTER_VALIDATE_EMAIL) ? null : 'That is not an email address.')],
             'default_tunnel' => ['sometimes', 'nullable', 'string', Rule::in(DomainPlan::TUNNELS)],
         ];
     }

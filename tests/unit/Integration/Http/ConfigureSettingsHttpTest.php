@@ -8,6 +8,7 @@ use App\Models\Setting;
 use App\System;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\LocalRoot;
@@ -335,5 +336,26 @@ class ConfigureSettingsHttpTest extends TestCase
         $this->putJson('/api/system/sites-db', ['innodb_buffer_pool_size' => '64'])->assertStatus(422)->assertJsonValidationErrors('innodb_buffer_pool_size');
         $this->putJson('/api/system/sites-db', ['innodb_buffer_pool_size' => '4M'])->assertStatus(422)->assertJsonValidationErrors('innodb_buffer_pool_size');
         $this->putJson('/api/system/sites-db', [])->assertStatus(422);
+    }
+
+    /** @return iterable<string, array{string, string}> */
+    public static function stringFields(): iterable
+    {
+        yield 'cert_domain' => ['/api/system/engine-address', 'cert_domain'];
+        yield 'cert_email' => ['/api/system/engine-address', 'cert_email'];
+        yield 'default_tunnel' => ['/api/system/engine-address', 'default_tunnel'];
+        yield 'innodb_buffer_pool_size' => ['/api/system/sites-db', 'innodb_buffer_pool_size'];
+        yield 'key_buffer_size' => ['/api/system/sites-db', 'key_buffer_size'];
+        yield 'budget' => ['/api/system/prewarm', 'budget'];
+        yield 'reserve' => ['/api/system/prewarm', 'reserve'];
+        yield 'tier' => ['/api/system/telemetry', 'tier'];
+        yield 'source_bundle' => ['/api/system/telemetry', 'source_bundle'];
+        yield 'permission_mode' => ['/api/system/mcp-scope', 'permission_mode'];
+    }
+
+    #[DataProvider('stringFields')]
+    public function test_an_array_where_a_string_is_expected_is_a_422(string $uri, string $field): void
+    {
+        $this->putJson($uri, [$field => ['x']])->assertStatus(422)->assertJsonValidationErrors($field);
     }
 }

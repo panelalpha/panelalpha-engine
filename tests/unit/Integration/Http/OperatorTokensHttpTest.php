@@ -105,6 +105,29 @@ class OperatorTokensHttpTest extends TestCase
         $this->putJson("/api/mcp-tokens/{$id}/commands", ['commands' => ['project_get']])->assertOk();
     }
 
+    public function test_a_legacy_token_is_listed_under_mcp_tokens_as_under_api_tokens(): void
+    {
+        $legacy = Admin::rootAccount()->createToken('panel', [TokenAbilities::EVERYTHING])->accessToken;
+
+        $this->getJson('/api/api-tokens')->assertOk()->assertJsonPath('data.0.id', $legacy->id);
+        $this->getJson('/api/mcp-tokens')->assertOk()->assertJsonPath('data.0.id', $legacy->id);
+        $this->getJson('/api/mcp-tokens?project=alice')->assertOk()->assertJsonCount(0, 'data');
+    }
+
+    public function test_a_legacy_token_is_limited_and_revoked_under_mcp_tokens(): void
+    {
+        $legacy = Admin::rootAccount()->createToken('panel', [TokenAbilities::EVERYTHING])->accessToken;
+
+        $this->putJson("/api/mcp-tokens/{$legacy->id}/commands", ['commands' => ['project_get']])
+            ->assertOk()->assertJsonPath('data.commands', ['project_get']);
+        $abilities = TokenAbilities::of(PersonalAccessToken::findOrFail($legacy->id));
+        $this->assertSame(['project_get'], $abilities->commands());
+        $this->assertFalse($abilities->isLegacy());
+
+        $this->putJson("/api/mcp-tokens/{$legacy->id}/revoke")->assertOk();
+        $this->assertNotNull(PersonalAccessToken::findOrFail($legacy->id)->revoked_at);
+    }
+
     /** @param  list<string>  $abilities */
     private function actingAsToken(array $abilities): void
     {

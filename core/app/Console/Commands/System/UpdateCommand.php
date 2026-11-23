@@ -67,14 +67,21 @@ class UpdateCommand extends Command
         return 0;
     }
 
-    /** @param  array{running: array{version: ?string}, available: ?array{version: string, published_at: ?string, url: ?string, notes: ?string}, status: string, update_available: bool, reason: ?string, checked_at: int, cached: bool}  $check */
+    /**
+     * The updater runs whatever the check says, as for PUT /system/update: it refuses an older release, installs a
+     * fix published under the running version and changes nothing when the newest is the running commit.
+     *
+     * @param  array{running: array{version: ?string}, available: ?array{version: string, published_at: ?string, url: ?string, notes: ?string}, status: string, update_available: bool, reason: ?string, checked_at: int, cached: bool}  $check
+     */
     private function update(System $system, array $check): int
     {
         $this->releases($check);
         if (! $check['update_available']) {
-            $this->line($check['status'] === 'unknown' ? (string) $check['reason'] : 'Nothing to install.');
-
-            return $check['status'] === 'unknown' ? 1 : 0;
+            $this->line(match ($check['status']) {
+                'unknown' => $check['reason'].' The updater reads the newest release itself.',
+                'up_to_date' => 'No newer version is published. The updater installs a fix published under the running version, and otherwise changes nothing.',
+                default => 'The available release is older than the running one. The updater refuses it and changes nothing.',
+            });
         }
 
         if ($this->refusedWithoutConfirmation()) {
@@ -82,8 +89,10 @@ class UpdateCommand extends Command
         }
 
         $target = $check['available']['version'] ?? 'the newest release';
-        if (! $this->option('force')
-            && ! $this->confirm("Update the engine to {$target}? The engine restarts, and the API and MCP disconnect for about a minute; sites keep running.")) {
+        $question = $check['update_available']
+            ? "Update the engine to {$target}? The engine restarts, and the API and MCP disconnect for about a minute; sites keep running."
+            : 'Run the engine updater? The engine restarts only if it installs something; sites keep running.';
+        if (! $this->option('force') && ! $this->confirm($question)) {
             $this->info('Cancelled.');
 
             return 0;
