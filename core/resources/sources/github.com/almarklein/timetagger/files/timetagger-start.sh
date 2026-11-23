@@ -1,8 +1,7 @@
 #!/bin/sh
-# Without the customer's own TIMETAGGER_CREDENTIALS, hash the engine's login with the image's bcrypt.
+# The engine's login, hashed with the image's bcrypt, first in TIMETAGGER_CREDENTIALS: the customer's own
+# user:hash pairs come after it, so they still sign in, and one with the same username wins over it.
 set -e
-if [ -z "${TIMETAGGER_CREDENTIALS:-}" ]; then
-    hash=$(python -c 'import bcrypt, os; print(bcrypt.hashpw(os.environ["TIMETAGGER_PASSWORD"].encode(), bcrypt.gensalt()).decode())')
-    export TIMETAGGER_CREDENTIALS="${TIMETAGGER_USERNAME}:${hash}"
-fi
+hash=$(python -c 'import bcrypt, os; print(bcrypt.hashpw(os.environ["TIMETAGGER_PASSWORD"].encode(), bcrypt.gensalt()).decode())')
+export TIMETAGGER_CREDENTIALS="${TIMETAGGER_USERNAME}:${hash}${TIMETAGGER_CREDENTIALS:+,${TIMETAGGER_CREDENTIALS}}"
 exec python -m timetagger

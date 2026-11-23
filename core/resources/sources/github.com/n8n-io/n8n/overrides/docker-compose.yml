@@ -1,6 +1,6 @@
 services:
   n8n:
-    image: docker.n8n.io/n8nio/n8n
+    image: docker.n8n.io/n8nio/n8n:2.48.8
     restart: unless-stopped
     environment:
       - N8N_DIAGNOSTICS_ENABLED=false
@@ -21,7 +21,7 @@ services:
       start_period: 30s
   # No-op gate: `compose up -d` returns only once n8n is ready.
   ready:
-    image: docker.n8n.io/n8nio/n8n
+    image: docker.n8n.io/n8nio/n8n:2.48.8
     restart: "no"
     entrypoint: ["/bin/sh", "-c", "exit 0"]
     depends_on:

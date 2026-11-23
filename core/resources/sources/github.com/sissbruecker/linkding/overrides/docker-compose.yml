@@ -3,7 +3,7 @@
 # the public address as a trusted CSRF origin.
 services:
   linkding:
-    image: sissbruecker/linkding:latest
+    image: sissbruecker/linkding:1.47.0
     restart: unless-stopped
     ports:
       - "9090:9090"

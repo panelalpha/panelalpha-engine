@@ -1,6 +1,7 @@
 # yaml-language-server: $schema=../../../_schema.json
 description: >-
-  n8n on the official image with a named volume for its SQLite database,
+  n8n on the official image of the current release (2.48.8; the gate below
+  runs the same image) with a named volume for its SQLite database,
   replacing the repository's development compose file. User management and
   SSO read that database directly. A `ready` gate holds `compose up -d` until
   /healthz/readiness answers 200, which n8n does only once the editor is

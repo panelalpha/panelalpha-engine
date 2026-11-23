@@ -11,7 +11,8 @@ with `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`).
 ## What the recipe does
 
 - `overrides/docker-compose.yml` is upstream's `docker-compose.yml`
-  (`sissbruecker/linkding:latest` on 9090, the project's `.env`) with:
+  (`sissbruecker/linkding` on 9090, the project's `.env`) with:
+  - the image pinned to the current release, `1.47.0`, in place of `:latest`.
   - the engine's login as a second `env_file`. linkding's `bootstrap.sh` runs
     `manage.py create_initial_superuser`, which creates `LD_SUPERUSER_NAME`
     as a superuser with `LD_SUPERUSER_PASSWORD` only while no user of that

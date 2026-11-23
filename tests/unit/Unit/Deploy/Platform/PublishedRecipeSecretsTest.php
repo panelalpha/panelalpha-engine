@@ -75,6 +75,16 @@ class PublishedRecipeSecretsTest extends TestCase
         panelalpha_vault_key('generated', 0, '', 'supersecretkey');
     }
 
+    public function test_linkding_and_n8n_run_pinned_images(): void
+    {
+        $linkding = Yaml::parse((string) $this->config('sissbruecker/linkding')->compose())['services'];
+        $n8n = Yaml::parse((string) $this->config('n8n-io/n8n')->compose())['services'];
+
+        $this->assertMatchesRegularExpression('#^sissbruecker/linkding:\d+\.\d+\.\d+$#', $linkding['linkding']['image']);
+        $this->assertMatchesRegularExpression('#^docker\.n8n\.io/n8nio/n8n:\d+\.\d+\.\d+$#', $n8n['n8n']['image']);
+        $this->assertSame($n8n['n8n']['image'], $n8n['ready']['image'], 'the gate reuses the image n8n already pulled');
+    }
+
     private function requireVaultKey(): void
     {
         require_once $this->directory('passwordcockpit/passwordcockpit').'/files/panelalpha/passwordcockpit/vault-key.php';

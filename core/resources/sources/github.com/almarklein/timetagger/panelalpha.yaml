@@ -8,8 +8,10 @@ description: >-
   TIMETAGGER_CREDENTIALS (user:bcrypt-hash pairs). The engine generates a login
   (`credentials:` below, returned by GET /projects/{name}/app-credentials) and
   files/timetagger-start.sh hashes its password with the image's own bcrypt
-  into TIMETAGGER_CREDENTIALS on every start; a TIMETAGGER_CREDENTIALS project
-  env var is used as is instead.
+  into TIMETAGGER_CREDENTIALS on every start. A TIMETAGGER_CREDENTIALS project
+  env var (a project made before the engine's login needed one) is kept after
+  it, so its users still sign in and the login the engine reports works too;
+  a pair with the engine's username wins over the engine's password.
 credentials:
   login_path: /timetagger/login
   fields:
