@@ -1,6 +1,7 @@
 #!/bin/bash
 #
-# Every image the engine builds is tagged with the engine's version, so an install pulls the images of its release.
+# Every image the engine builds is tagged with the engine's release, so an install pulls the images of its release.
+# A hotfix's fourth number (2.3.2.1) keeps the images of its release.
 #
 #   bash tests/scripts/engine-image-tags.test.sh
 
@@ -23,6 +24,7 @@ check() {
 
 VERSION="v$(sed -n "s/^ *'version' => '\([^']*\)',.*/\1/p" "$REPO_DIR/core/config/system.php")"
 check "the engine has a version" "yes" "$([[ "$VERSION" =~ ^v[0-9]+\.[0-9]+ ]] && echo yes)"
+RELEASE=$(printf '%s' "$VERSION" | cut -d. -f1-3)
 
 # The image of every service with a build section, as "<file>: <image>".
 built_images() {
@@ -40,11 +42,11 @@ built_images() {
 images=$(built_images)
 check "the compose files build images" "yes" "$([ "$(printf '%s\n' "$images" | grep -c .)" -ge 10 ] && echo yes)"
 while read -r file image; do
-    check "$file $image is tagged $VERSION" "$VERSION" "${image##*:}"
+    check "$file $image is tagged $RELEASE" "$RELEASE" "${image##*:}"
 done <<<"$images"
 
 check "the core database helper runs the release's database image" \
-    "ghcr.io/panelalpha/app-database:$VERSION" \
+    "ghcr.io/panelalpha/app-database:$RELEASE" \
     "$(sed -n 's/^IMAGE="\(.*\)"$/\1/p' "$REPO_DIR/scripts/get-database-core-root-password.sh")"
 check "every build context is in the repository" "" \
     "$(for f in "$REPO_DIR"/docker-compose.yml "$REPO_DIR"/docker-compose.yml-*; do
