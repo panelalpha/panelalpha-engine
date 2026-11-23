@@ -129,6 +129,21 @@ class RewriteTest(unittest.TestCase):
         for line in lines[:9]:
             self.assertNotIn('`root`', line)
 
+    def test_a_definer_written_inside_a_string_never_moves_where_the_string_ends(self):
+        def quoting(text):
+            return [c for c in text if c in '\'"\\']
+
+        own = 'CREATE DEFINER=`alice_wp`@`%` PROCEDURE `p`() '
+        for body in ("SELECT 'DEFINER=`', `c`, ' ; GRANT ALL ON *.* TO evil; SELECT ';",
+                     'SELECT "DEFINER=`", `c`, " ; DROP DATABASE bob_wp; SELECT ";',
+                     "SELECT 'DEFINER=`\\\\', `c`, ' ; GRANT ALL ON *.* TO evil; -- ';",
+                     "SELECT 'DEFINER=`x`@`'', `c`, ' ; GRANT ALL ON *.* TO evil; -- ';"):
+            with self.subTest(body=body):
+                out = self.rewrite(own + body)
+                self.assertTrue(out.startswith('CREATE DEFINER=`bob_wp`@`%` PROCEDURE `p`() '))
+                self.assertEqual(quoting(out), quoting(own + body))
+                self.assertTrue(out.endswith(body.split('`c`', 1)[1]))
+
     def test_a_database_name_is_escaped_for_the_pattern(self):
         script = engineservices.schema_rewrite('alice-wp', 'bob-wp', [], 'bob_no.definer')
         self.assertIn('alice\\-wp', script)

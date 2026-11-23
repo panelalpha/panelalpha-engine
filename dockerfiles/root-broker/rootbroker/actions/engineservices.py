@@ -23,7 +23,9 @@ FTP_PASSWORD = 'PA_FTP_PASSWORD'
 FTP_PASSWORD_PIPE = 'printf \'%s\\n%s\\n\' "$' + FTP_PASSWORD + '" "$' + FTP_PASSWORD + '" | '
 LITESPEED_PASSWORD = 'PA_LITESPEED_ADMIN_PASSWORD'
 SITES_DB_PASSWORD = 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; '
-ANY_DEFINER = r'DEFINER=`\([^`]\|``\)*`\(@`\([^`]\|``\)*`\)\{0,1\}'
+# a definer never spans a quote or a backslash, so rewriting one inside a string cannot move where the string ends
+DEFINER_PART = r'''\([^`'"\\]\|``\)*'''
+ANY_DEFINER = 'DEFINER=`' + DEFINER_PART + '`\\(@`' + DEFINER_PART + '`\\)\\{0,1\\}'
 PREG_SPECIAL = set('.\\+*?[^]$(){}=!<>|:-#/')
 
 MODSECURITY_CHECK_SCRIPT = '''T=$1
@@ -282,7 +284,7 @@ def schema_rewrite(source, target, definers, orphan_user):
         f's/{ANY_DEFINER}/DEFINER={definer(orphan_user)}/g',
         's/DEFINER\\n/DEFINER=/g',
     ]
-    return 'sed' + ''.join(f" -e '/^INSERT INTO /!{{/^(/!{expression}}}'" for expression in expressions)
+    return 'sed' + ''.join(' -e ' + escapeshellarg(f'/^INSERT INTO /!{{/^(/!{expression}}}') for expression in expressions)
 
 
 def sites_db_dump(name, only):

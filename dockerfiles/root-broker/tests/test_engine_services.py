@@ -106,7 +106,7 @@ SITES_DB_COPY = [
     '-e \'/^INSERT INTO /!{/^(/!s/\\balice_wp\\./bob_wp./g}\' '
     '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`alice_wp`@`%`/DEFINER\\n`bob_wp`@`%`/g}\' '
     '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`alice_shop`@`%`/DEFINER\\n`bob_shop`@`%`/g}\' '
-    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`\\([^`]\\|``\\)*`\\(@`\\([^`]\\|``\\)*`\\)\\{0,1\\}/DEFINER=`bob_no.definer`@`%`/g}\' '
+    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`\\([^`\'\\\'\'"\\\\]\\|``\\)*`\\(@`\\([^`\'\\\'\'"\\\\]\\|``\\)*`\\)\\{0,1\\}/DEFINER=`bob_no.definer`@`%`/g}\' '
     '-e \'/^INSERT INTO /!{/^(/!s/DEFINER\\n/DEFINER=/g}\' | mariadb -uroot -- \'bob_wp\'',
 ]
 SITES_DB_RESTORE_COPY = [
@@ -114,7 +114,7 @@ SITES_DB_RESTORE_COPY = [
     '-e \'/^INSERT INTO /!{/^(/!s/`alice_wp`\\./`bob_wp`./g}\' '
     '-e \'/^INSERT INTO /!{/^(/!s/\\balice_wp\\./bob_wp./g}\' '
     '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`alice_wp`@`%`/DEFINER\\n`bob_wp`@`%`/g}\' '
-    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`\\([^`]\\|``\\)*`\\(@`\\([^`]\\|``\\)*`\\)\\{0,1\\}/DEFINER=`bob_no.definer`@`%`/g}\' '
+    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`\\([^`\'\\\'\'"\\\\]\\|``\\)*`\\(@`\\([^`\'\\\'\'"\\\\]\\|``\\)*`\\)\\{0,1\\}/DEFINER=`bob_no.definer`@`%`/g}\' '
     '-e \'/^INSERT INTO /!{/^(/!s/DEFINER\\n/DEFINER=/g}\' | mariadb -uroot -- \'bob_wp\'',
 ]
 # (action, 'file' or 'dir' first value, the rest of the values, on the host, service, Cmd, Env, passing)
