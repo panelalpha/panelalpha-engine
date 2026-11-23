@@ -113,6 +113,14 @@ class SidecarDialectsTest extends TestCase
         $this->assertNull(SidecarDialects::memoryLimitFor('acme-store'));
     }
 
+    /** RabbitMQ blocks every publisher above 40% of its limit, and an idle broker already uses about 100 MiB. */
+    public function test_rabbitmq_is_given_room_above_its_memory_alarm(): void
+    {
+        $limitMib = (int) SidecarDialects::memoryLimitFor('rabbitmq');
+
+        $this->assertGreaterThanOrEqual(150, $limitMib * 0.4);
+    }
+
     public function test_service_overrides_are_read_from_the_catalogue(): void
     {
         // MySQL refuses remote root connections unless told otherwise.

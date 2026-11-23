@@ -184,7 +184,7 @@ return [
     ],
 
     'rabbitmq' => [
-        'mem_limit' => '192m',
+        'mem_limit' => '512m',
         'port' => 5672,
         'scheme' => 'amqp',
         'unambiguous_port' => true,
