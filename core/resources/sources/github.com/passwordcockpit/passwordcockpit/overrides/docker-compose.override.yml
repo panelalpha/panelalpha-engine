@@ -8,9 +8,12 @@ services:
       # login the engine generates. entrypoint.sh sets the password on a new
       # database's admin; panelalpha/passwordcockpit/admin-login.php sets the
       # name, and the whole login on an admin still on Admin123!.
+      # PASSWORDCOCKPIT_VAULT_KEY / PASSWORDCOCKPIT_JWT_SECRET, generated in
+      # place of the compose file's published keys; start.sh hands them over.
       - ../.panelalpha/app-credentials.env
     # panelalpha/passwordcockpit/start.sh: the site's address as
-    # PASSWORDCOCKPIT_BASEHOST, then the image's own entrypoint.sh.
+    # PASSWORDCOCKPIT_BASEHOST, then the image's own entrypoint.sh, then the
+    # login and the keys before Apache.
     entrypoint: ["/bin/sh", "/panelalpha/start.sh"]
     volumes:
       # Named volumes in place of the repository's ./volumes/ binds, which are

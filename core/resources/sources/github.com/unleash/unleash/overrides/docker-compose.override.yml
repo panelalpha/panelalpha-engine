@@ -7,6 +7,12 @@ services:
       # login the engine generates. Unleash creates that admin only while it
       # has no user at all; without them it is admin / unleash4all.
       - ../.panelalpha/app-credentials.env
+    environment:
+      # The repo's demo client tokens (default:development.unleash-insecure-*)
+      # are published in its compose file: none is made at start, the admin
+      # creates them under Admin > API access.
+      INIT_FRONTEND_API_TOKENS: ""
+      INIT_BACKEND_API_TOKENS: ""
 
   db:
     volumes:

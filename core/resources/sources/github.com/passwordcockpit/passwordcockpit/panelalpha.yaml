@@ -21,11 +21,22 @@ description: >-
   (PA_PUBLIC_URL). And the upload directory and the MariaDB data were binds
   under ./volumes, inside the checkout a redeploy re-clones; they are named
   volumes now, so the vault and the admin's password survive a redeploy.
-  Everything else, PASSWORDCOCKPIT_BLOCK_CIPHER_KEY and
-  PASSWORDCOCKPIT_AUTHENTICATION_SECRET_KEY included, is the repository's
-  compose file.
+
+  The compose file also sets the vault's encryption key and the JWT secret to
+  published values (`supersecretkey`, `authenticationsecretkey`), the same on
+  every install, so a leaked database or volume decrypted with them. The
+  engine generates both (PASSWORDCOCKPIT_VAULT_KEY and
+  PASSWORDCOCKPIT_JWT_SECRET below, returned with the login; keep the vault
+  key, without it the vault cannot be decrypted) and the wrapper entrypoint
+  hands them to Passwordcockpit. A vault that already holds an encrypted
+  password or file keeps the published key
+  (files/panelalpha/passwordcockpit/vault-key.php records the choice once, on
+  the upload volume), since a new key would make it unreadable. Everything
+  else is the repository's compose file.
 credentials:
   login_path: /login
   fields:
     PASSWORDCOCKPIT_ADMIN_USERNAME: {kind: username}
     PASSWORDCOCKPIT_ADMIN_PASSWORD: {kind: password}
+    PASSWORDCOCKPIT_VAULT_KEY: {kind: password}
+    PASSWORDCOCKPIT_JWT_SECRET: {kind: password}

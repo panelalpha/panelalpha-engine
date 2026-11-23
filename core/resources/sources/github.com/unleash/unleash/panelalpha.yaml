@@ -14,6 +14,9 @@ description: >-
   admin: Unleash creates it only while it has no user, so a password changed
   in Unleash is never overwritten. The override also puts the database on a
   named volume (the repo's has none), so users and flags survive a redeploy.
+  It sets INIT_FRONTEND_API_TOKENS and INIT_BACKEND_API_TOKENS empty: the
+  demo's client tokens (default:development.unleash-insecure-*) are public,
+  so with them anyone could read any install's flags.
 credentials:
   login_path: /login
   fields:

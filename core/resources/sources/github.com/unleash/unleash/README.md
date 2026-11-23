@@ -24,6 +24,10 @@ labelled "Email" on the login form takes the username.
 - The `db` service gets the named volume `db-data`: the repo's has none, so the
   database lived in an anonymous volume a redeploy leaves behind, and with it
   every flag and a password changed in Unleash.
-- Left as upstream ships it: the demo's `INIT_FRONTEND_API_TOKENS` /
-  `INIT_BACKEND_API_TOKENS` (`default:development.unleash-insecure-...`),
-  client SDK tokens with public values that read the `development` flags.
+- The demo's `INIT_FRONTEND_API_TOKENS` / `INIT_BACKEND_API_TOKENS`
+  (`default:development.unleash-insecure-...`) are set empty: they are client
+  SDK tokens with public values that read the `development` flags of every
+  install. Create the tokens your SDKs use under Admin > API access. Unleash
+  makes the `INIT_*` tokens only in a database without any API token, so a
+  database that already has the demo tokens keeps them until they are
+  deleted there.

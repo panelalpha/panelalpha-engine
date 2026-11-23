@@ -4,10 +4,20 @@
 set -e
 if [ "${1:-}" = "--after-database" ]; then
     # The database is installed or migrated by now: the engine's login on the
-    # built-in admin while it still has the published password, then Apache.
+    # built-in admin while it still has the published password, the vault's
+    # key and the JWT secret, then Apache.
     shift
     php /panelalpha/admin-login.php \
         || echo "[panelalpha] passwordcockpit: could not set the admin login" >&2
+    # The compose file's keys (supersecretkey, authenticationsecretkey) are
+    # the same on every install. vault-key.php keeps the published cipher key
+    # only for a vault already encrypted with it; it fails the start rather
+    # than encrypt with a second key.
+    key="$(php /panelalpha/vault-key.php)"
+    export PASSWORDCOCKPIT_BLOCK_CIPHER_KEY="${key}"
+    if [ -n "${PASSWORDCOCKPIT_JWT_SECRET:-}" ]; then
+        export PASSWORDCOCKPIT_AUTHENTICATION_SECRET_KEY="${PASSWORDCOCKPIT_JWT_SECRET}"
+    fi
     exec "$@"
 fi
 # The frontend is built with PASSWORDCOCKPIT_BASEHOST as the API's address and

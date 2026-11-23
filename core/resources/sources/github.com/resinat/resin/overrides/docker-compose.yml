@@ -8,9 +8,9 @@ services:
     ports:
       - "2260:2260"
     env_file:
-      # RESIN_PROXY_TOKEN, RESIN_PORT and the rest, made from .env.example.
+      # RESIN_PORT and the rest, made from .env.example.
       - .env
-      # RESIN_ADMIN_TOKEN, the token the engine generates; later, so it wins.
+      # RESIN_ADMIN_TOKEN / RESIN_PROXY_TOKEN, the tokens the engine generates; later, so they win.
       - ../.panelalpha/app-credentials.env
     volumes:
       - resin-cache:/var/cache/resin
