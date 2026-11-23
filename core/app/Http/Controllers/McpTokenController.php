@@ -8,6 +8,7 @@ use App\Auth\TokenAbilities;
 use App\Http\Requests\McpTokenCommandsRequest;
 use App\Http\Requests\McpTokenProjectsRequest;
 use App\Http\Requests\McpTokenStoreRequest;
+use App\Mcp\ToolExposure;
 use App\Models\Admin;
 use App\Models\PersonalAccessToken;
 use Illuminate\Http\JsonResponse;
@@ -88,7 +89,7 @@ class McpTokenController extends Controller
                     items: new OA\Items(type: 'string'),
                     description: 'Existing project usernames. Omit for an unscoped token. A project created or cloned after this is not added automatically.',
                 ),
-                new OA\Property(property: 'commands', type: 'array', nullable: true, items: new OA\Items(type: 'string'), example: ['project_list', 'project_get'], description: 'The MCP commands it may call; omit or null for every one.'),
+                new OA\Property(property: 'commands', type: 'array', nullable: true, items: new OA\Items(type: 'string'), example: ['project_list', 'project_get'], description: 'The MCP commands it may call, from GET /mcp-tokens/commands; omit or null for every one.'),
             ],
         )),
         responses: [
@@ -147,6 +148,51 @@ class McpTokenController extends Controller
         $token = OperatorTokens::mcp()->scope($this->findMcpToken($id), array_values($request->validated()['projects']));
 
         return response()->json(['data' => $this->formatToken($token)]);
+    }
+
+    #[OA\Get(
+        path: '/mcp-tokens/commands',
+        summary: 'List the MCP tools a token can be limited to',
+        description: 'Every tool this engine serves now, with what it does to the server: `access` is `read`, '
+            .'`write` or `secret` (a read that hands out a credential), `deletes` marks a DELETE operation, and '
+            .'`project_scoped` says whether a project-scoped token can reach it at all. `toolset` is the group '
+            .'the tool is filed under. Pass names from here as `commands`. Panel-facing; not an MCP tool.',
+        x: ['mcp-hide' => true],
+        security: [['bearerAuth' => []]],
+        tags: ['MCP'],
+        responses: [
+            new OA\Response(response: 200, description: 'MCP tools', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(
+                    properties: [
+                        new OA\Property(property: 'name', type: 'string', example: 'project_get'),
+                        new OA\Property(property: 'toolset', type: 'string', example: 'projects'),
+                        new OA\Property(property: 'access', type: 'string', enum: ['read', 'write', 'secret']),
+                        new OA\Property(property: 'deletes', type: 'boolean'),
+                        new OA\Property(property: 'project_scoped', type: 'boolean'),
+                    ],
+                    type: 'object',
+                ))],
+            )),
+        ],
+    )]
+    public function commands(): JsonResponse
+    {
+        $exposure = ToolExposure::current();
+        $policy = $exposure->policy();
+        $served = $exposure->exposed();
+        $scoped = array_flip(TokenAbilities::fromList([TokenAbilities::MCP, TokenAbilities::PROJECT_SCOPE])->filterTools($served));
+
+        $commands = array_map(fn (string $class): array => [
+            'name' => $policy->nameOf($class),
+            'toolset' => $policy->toolsetOf($class),
+            'access' => $policy->accessOf($class),
+            'deletes' => $policy->verbOf($class) === 'DELETE',
+            'project_scoped' => isset($scoped[$class]),
+        ], $served);
+
+        usort($commands, fn (array $a, array $b): int => $a['name'] <=> $b['name']);
+
+        return response()->json(['data' => $commands]);
     }
 
     #[OA\Put(

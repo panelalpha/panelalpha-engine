@@ -121,6 +121,7 @@ Route::delete('/tokens/current', [TokenController::class, 'destroy']);
 
 Route::get('/mcp-tokens', [McpTokenController::class, 'index']);
 Route::post('/mcp-tokens', [McpTokenController::class, 'store']);
+Route::get('/mcp-tokens/commands', [McpTokenController::class, 'commands']);
 Route::put('/mcp-tokens/{id}/revoke', [McpTokenController::class, 'revoke']);
 Route::put('/mcp-tokens/{id}/projects', [McpTokenController::class, 'updateProjects']);
 Route::put('/mcp-tokens/{id}/commands', [McpTokenController::class, 'updateCommands']);

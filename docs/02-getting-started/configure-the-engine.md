@@ -87,7 +87,7 @@ A panel or a script can read every area, and change most of them. A token limite
 |---|---|---|
 | Address and certificate | `GET /system/engine-address` | `PUT /system/engine-address`: `cert_domain`, `cert_email`, `default_tunnel`. Requesting the certificate is `PUT /system/engine-certificate`. The address itself is not a setting: the engine is bound to it, and the API refuses `url`. |
 | Engine API access | `GET /system/api-access` | `PUT`, `POST …/rotate` and `DELETE /system/api-access/{project}` |
-| MCP tokens | `GET /mcp-tokens`, `GET /system/mcp-scope` | `PUT /system/mcp-scope`: `permission_mode`, `commands`. `POST /mcp-tokens` (with `expires_in`, `projects`, `commands`), `PUT /mcp-tokens/{id}/commands`, `/projects` and `/revoke`, `DELETE /mcp-tokens/{id}` |
+| MCP tokens | `GET /mcp-tokens`, `GET /mcp-tokens/commands`, `GET /system/mcp-scope` | `PUT /system/mcp-scope`: `permission_mode`, `commands`. `POST /mcp-tokens` (with `expires_in`, `projects`, `commands`), `PUT /mcp-tokens/{id}/commands`, `/projects` and `/revoke`, `DELETE /mcp-tokens/{id}` |
 | API tokens | `GET /api-tokens` | `POST /api-tokens` (with `expires_in`, `routes`, `projects`), `PUT /api-tokens/{id}/routes` and `/revoke`, `DELETE /api-tokens/{id}`. These are not MCP tools. |
 | Prewarmed images | `GET /system/prewarm` | `PUT /system/prewarm`: `images`, `budget`, `reserve` |
 | Site database | `GET /system/sites-db` | `PUT /system/sites-db`: `innodb_buffer_pool_size`, `key_buffer_size`, `aria_pagecache_buffer_size`. The database restarts, as from the wizard. |
