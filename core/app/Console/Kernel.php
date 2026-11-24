@@ -4,6 +4,7 @@ namespace App\Console;
 
 use App\Exceptions\Handler;
 use App\Models\AppSsoToken;
+use App\Models\HubConnection;
 use App\Models\MysqlSsoToken;
 use App\Models\TokenRotation;
 use App\Support\RootConsoleOwnership;
@@ -86,7 +87,20 @@ class Kernel extends ConsoleKernel
         $this->scheduleImportedDomainSwitch($schedule);
         $this->scheduleHostDiskUpkeep($schedule);
         $this->scheduleMonitoring($schedule);
+        $this->scheduleHubReports($schedule);
         $this->scheduleAutomaticBackups($schedule);
+    }
+
+    /**
+     * Report to PanelAlpha Connect each minute, in the background: the report waits for this engine's second of the
+     * minute, and nothing else scheduled may wait with it. Once connected, every vhost is rendered with the route its
+     * admin login arrives on.
+     */
+    private function scheduleHubReports(Schedule $schedule): void
+    {
+        $schedule->command('hub:report')->everyMinute()->runInBackground()->when(fn (): bool => HubConnection::isActive());
+        $schedule->command('hub:sso-routes')->everyFiveMinutes()->runInBackground()->withoutOverlapping(self::MUTEX_LONG_RUNNING)
+            ->when(fn (): bool => HubConnection::isActive());
     }
 
     /** The uid commands run as, or -1 when POSIX functions are unavailable. */

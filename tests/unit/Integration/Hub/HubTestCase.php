@@ -108,6 +108,26 @@ abstract class HubTestCase extends TestCase
         ]);
     }
 
+    /** @param array<int, string> $grants */
+    protected function pushConnection(array $grants = [], string $connectionId = 'hc_01J8Z6Q4X9V3K2M7N5P1R0S8T6'): HubConnection
+    {
+        $connection = HubConnection::query()->create([
+            'connection_id' => $connectionId,
+            'hub_url' => self::HUB,
+            'hub_secret' => self::SECRET,
+            'account_id' => '42',
+            'account_name' => 'Acme Ltd',
+            'approved_by' => 'j***@acme.com',
+            'ip' => self::engineIp(),
+            'grants' => $grants,
+            'status' => HubConnection::STATUS_CONNECTED,
+            'connected_at' => now(),
+            'protocol' => HubConnection::PROTOCOL_PUSH,
+        ]);
+
+        return $connection->refresh();
+    }
+
     protected function adminToken(): string
     {
         return Admin::rootAccount()->createToken('admin', ['*'])->plainTextToken;

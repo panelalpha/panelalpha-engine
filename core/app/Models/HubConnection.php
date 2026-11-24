@@ -7,7 +7,9 @@ use Illuminate\Support\Carbon;
 
 /**
  * This engine's connection to a PanelAlpha Connect account. There is at most
- * one: a new connection replaces it, a disconnect deletes it.
+ * one: a new connection replaces it, a disconnect deletes it. A push connection
+ * reports to the Hub; a pull one, made before push existed, is called by it
+ * until it upgrades itself.
  *
  * @property int $id
  * @property ?string $connection_id
@@ -20,16 +22,33 @@ use Illuminate\Support\Carbon;
  * @property ?string $license_name
  * @property string $ip
  * @property ?array<string, string> $caller_ips where PanelAlpha Connect calls this engine from: address => last seen (UTC, ISO 8601)
- * @property string $tls_spki
+ * @property ?string $tls_spki
  * @property ?array<int, string> $grants
  * @property ?int $token_id
  * @property string $status
  * @property ?Carbon $connected_at
  * @property ?Carbon $last_hub_call_at
+ * @property string $protocol
+ * @property ?string $hub_secret_previous
+ * @property ?Carbon $hub_secret_previous_until
+ * @property int $report_interval_seconds
+ * @property ?array<int, string> $report_want
+ * @property ?Carbon $report_not_before
+ * @property ?Carbon $last_report_at
+ * @property ?string $last_sent_at
+ * @property bool $rotate_secret
+ * @property ?Carbon $upgrade_attempted_at
+ * @property ?array<string, mixed> $host_facts
+ * @property ?Carbon $host_facts_at
+ * @property ?array<string, mixed> $last_backfill
  */
 class HubConnection extends Model
 {
     public const STATUS_CONNECTED = 'connected';
+
+    public const PROTOCOL_PUSH = 'push';
+
+    public const PROTOCOL_PULL = 'pull';
 
     protected $fillable = [
         'connection_id',
@@ -46,16 +65,28 @@ class HubConnection extends Model
         'token_id',
         'status',
         'connected_at',
+        'protocol',
     ];
 
-    protected $hidden = ['hub_secret'];
+    protected $hidden = ['hub_secret', 'hub_secret_previous'];
 
     protected $casts = [
         'hub_secret' => 'encrypted',
+        'hub_secret_previous' => 'encrypted',
+        'hub_secret_previous_until' => 'datetime',
         'grants' => 'array',
         'caller_ips' => 'array',
         'connected_at' => 'datetime',
         'last_hub_call_at' => 'datetime',
+        'report_interval_seconds' => 'integer',
+        'report_want' => 'array',
+        'report_not_before' => 'datetime',
+        'last_report_at' => 'datetime',
+        'rotate_secret' => 'boolean',
+        'upgrade_attempted_at' => 'datetime',
+        'host_facts' => 'array',
+        'host_facts_at' => 'datetime',
+        'last_backfill' => 'array',
     ];
 
     public static function active(): ?self
@@ -81,5 +112,36 @@ class HubConnection extends Model
     public function grantList(): array
     {
         return array_values(array_filter($this->grants ?? [], 'is_string'));
+    }
+
+    public function isPush(): bool
+    {
+        return $this->protocol === self::PROTOCOL_PUSH;
+    }
+
+    public function grants(string $grant): bool
+    {
+        return in_array($grant, $this->grantList(), true);
+    }
+
+    /**
+     * The secrets a login ticket may be signed with: the current one, and the one it replaced for a few minutes.
+     *
+     * @return list<string>
+     */
+    public function ticketSecrets(): array
+    {
+        $secrets = [(string) $this->hub_secret];
+        if ($this->hub_secret_previous !== null && $this->hub_secret_previous_until?->isFuture()) {
+            $secrets[] = $this->hub_secret_previous;
+        }
+
+        return array_values(array_filter($secrets, fn (string $secret): bool => $secret !== ''));
+    }
+
+    /** @return list<string> */
+    public function wanted(): array
+    {
+        return array_values(array_filter($this->report_want ?? [], 'is_string'));
     }
 }

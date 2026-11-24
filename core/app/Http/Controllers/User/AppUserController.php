@@ -6,6 +6,7 @@ use App\Exceptions\NotFoundException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AppUserDeleteRequest;
 use App\Lib\Helpers\SafeRedirect;
+use App\Lib\Project\AppSsoLink;
 use App\Lib\Vault\RequestVault;
 use App\Models\AppSsoToken;
 use App\Models\User;
@@ -14,7 +15,6 @@ use App\System\Project\Dind\AppManager;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\Response;
@@ -240,57 +240,10 @@ class AppUserController extends Controller
         return $this->callApp(fn () => $this->ssoResponse($username, $this->appManager($username, 'App single sign-on')->ssoCredentials($userId)));
     }
 
-    /**
-     * The sign-in URL for one of the three answers an app's SSO gives: a ready URL (the app handles
-     * SSO itself, e.g. WordPress's mu-plugin), a path on the project's primary domain, or cookie
-     * credentials the engine sets through /panelalpha-sso before redirecting into the app.
-     *
-     * @param  array<string, mixed>  $result
-     */
+    /** @param array<string, mixed> $result */
     private function ssoResponse(string $username, array $result): JsonResponse
     {
-        if (! empty($result['url'])) {
-            return new JsonResponse(['url' => $result['url']]);
-        }
-
-        if (! empty($result['path'])) {
-            return new JsonResponse(['url' => $this->primaryDomainOrigin($username).$result['path']]);
-        }
-
-        if (empty($result['cookie']) || empty($result['value'])) {
-            throw new \Exception('Invalid SSO response returned by app');
-        }
-
-        return new JsonResponse(['url' => $this->cookieHandoffUrl($username, $result)]);
-    }
-
-    /** @param array<string, mixed> $result */
-    private function cookieHandoffUrl(string $username, array $result): string
-    {
-        $origin = $this->primaryDomainOrigin($username);
-
-        $token = AppSsoToken::create([
-            'token' => Str::random(48),
-            'username' => $username,
-            'cookie_name' => $result['cookie'],
-            'cookie_value' => $result['value'],
-            'redirect' => $result['redirect'] ?? '/',
-            'expires_at' => now()->addSeconds(60),
-        ]);
-
-        return "{$origin}/panelalpha-sso?token={$token->token}";
-    }
-
-    /** @throws \Exception when the project has no primary domain */
-    private function primaryDomainOrigin(string $username): string
-    {
-        $domain = User::findByUsername($username)?->getMainDomain();
-        if (! $domain) {
-            throw new \Exception('No primary domain configured for this user');
-        }
-        $scheme = $domain->sslEnabled() ? 'https' : 'http';
-
-        return "{$scheme}://{$domain->domain}";
+        return new JsonResponse(['url' => AppSsoLink::url($username, $result)]);
     }
 
     #[OA\Get(

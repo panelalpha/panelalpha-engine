@@ -10,8 +10,9 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
 
 /**
- * Calls to the Hub: the connect ceremony, a few signed notices, and the public release list. TLS is always verified
- * and redirects never followed; a network failure is a HubException, a Hub answer is a HubResponse.
+ * Calls to the Hub: the connect ceremony, the minute report and its backfill uploads, a few signed notices, and the
+ * public release list. TLS is always verified and redirects never followed; a network failure is a HubException, a Hub
+ * answer is a HubResponse.
  */
 class HubClient
 {
@@ -24,6 +25,16 @@ class HubClient
     public const CONNECTION = 'api/engine/v1/connection';
 
     public const RELEASES = 'api/v1/public/releases';
+
+    public const REPORT = 'api/engine/v1/report';
+
+    public const METRICS = 'api/engine/v1/metrics';
+
+    /** A report is never retried within its minute, so it gives up well before the next one. */
+    public const REPORT_TIMEOUT = 10;
+
+    /** Bodies above this go gzipped; the Hub accepts either and signs the bytes as sent. */
+    private const GZIP_FROM_BYTES = 262144;
 
     private string $base;
 
@@ -50,17 +61,13 @@ class HubClient
     }
 
     /**
-     * @param  array<string, mixed>  $credential
+     * A push connection hands the Hub nothing: no token, no pin.
      *
      * @throws HubException
      */
-    public function complete(string $deviceCode, array $credential, string $tlsSpki): HubResponse
+    public function complete(string $deviceCode): HubResponse
     {
-        return $this->post(self::SESSIONS.'/complete', [
-            'device_code' => $deviceCode,
-            'credential' => $credential,
-            'tls_spki' => $tlsSpki,
-        ]);
+        return $this->post(self::SESSIONS.'/complete', ['device_code' => $deviceCode]);
     }
 
     /** Best effort: never throws. */
@@ -101,6 +108,38 @@ class HubClient
     }
 
     /**
+     * @param  array<string, mixed>  $report
+     *
+     * @throws HubException
+     */
+    public function report(HubConnection $connection, array $report): HubResponse
+    {
+        return $this->signed($connection, 'POST', self::REPORT, $report, self::REPORT_TIMEOUT);
+    }
+
+    /**
+     * @param  array<string, mixed>  $upload
+     *
+     * @throws HubException
+     */
+    public function metrics(HubConnection $connection, array $upload): HubResponse
+    {
+        return $this->signed($connection, 'POST', self::METRICS, $upload);
+    }
+
+    /** @throws HubException */
+    public function nextSecret(HubConnection $connection): HubResponse
+    {
+        return $this->signed($connection, 'POST', self::CONNECTION.'/secret', null);
+    }
+
+    /** @throws HubException */
+    public function upgrade(HubConnection $connection): HubResponse
+    {
+        return $this->signed($connection, 'POST', self::CONNECTION.'/upgrade', ['protocol' => HubConnection::PROTOCOL_PUSH]);
+    }
+
+    /**
      * @param  array<string, mixed>  $body
      *
      * @throws HubException
@@ -111,14 +150,14 @@ class HubClient
     }
 
     /**
-     * Signs the exact bytes it sends. A 409 is a replay: re-signed with a new
-     * timestamp and sent once more.
+     * Signs the exact bytes it sends. A 409 without a `code` is a replay: re-signed with a new timestamp and sent once
+     * more.
      *
      * @param  array<string, mixed>|null  $body
      *
      * @throws HubException
      */
-    private function signed(HubConnection $connection, string $method, string $path, ?array $body): HubResponse
+    private function signed(HubConnection $connection, string $method, string $path, ?array $body, int $timeout = self::TIMEOUT): HubResponse
     {
         $secret = (string) $connection->hub_secret;
         $id = (string) $connection->connection_id;
@@ -127,11 +166,16 @@ class HubClient
         }
 
         $raw = $body === null ? '' : (string) json_encode($body, JSON_UNESCAPED_SLASHES);
-        $response = $this->send($method, $path, $raw, HubSigner::headers($id, $secret, $method, $path, $raw));
+        $headers = [];
+        if (strlen($raw) >= self::GZIP_FROM_BYTES) {
+            $raw = (string) gzencode($raw);
+            $headers['Content-Encoding'] = 'gzip';
+        }
+        $response = $this->send($method, $path, $raw, $headers + HubSigner::headers($id, $secret, $method, $path, $raw), $timeout);
 
-        if ($response->status === 409) {
+        if ($response->status === 409 && $response->code() === null) {
             Sleep::for(1)->second();
-            $response = $this->send($method, $path, $raw, HubSigner::headers($id, $secret, $method, $path, $raw));
+            $response = $this->send($method, $path, $raw, $headers + HubSigner::headers($id, $secret, $method, $path, $raw), $timeout);
         }
 
         return $response;
@@ -142,9 +186,9 @@ class HubClient
      *
      * @throws HubException
      */
-    private function send(string $method, string $path, string $raw, array $headers): HubResponse
+    private function send(string $method, string $path, string $raw, array $headers, int $timeout = self::TIMEOUT): HubResponse
     {
-        $request = $this->request()->withHeaders($headers);
+        $request = $this->request()->timeout($timeout)->withHeaders($headers);
         if ($raw !== '') {
             $request = $request->withBody($raw, 'application/json');
         }

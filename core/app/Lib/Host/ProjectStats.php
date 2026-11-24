@@ -5,6 +5,7 @@ namespace App\Lib\Host;
 use App\Models\User;
 use App\System;
 use App\System\Privileged;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -363,6 +364,70 @@ class ProjectStats
         }
 
         return ['data' => $data, 'meta' => MetricBuckets::meta($range, $window)];
+    }
+
+    /**
+     * Every project's DinD totals in [from, to), one point per `$step` seconds that has samples: the minute rows for a
+     * step under an hour, the hourly averages otherwise.
+     *
+     * @param  list<string>  $usernames
+     * @return array<string, list<array{period: string, cpu_percent: ?float, memory_bytes: ?int, memory_limit_bytes: ?int}>>
+     */
+    public static function totalsBetween(array $usernames, Carbon $from, Carbon $to, int $step): array
+    {
+        $rows = self::windowQuery(self::table('project_metrics', $step), $usernames, $from, $to, $step)
+            ->selectRaw('username')
+            ->groupBy('username')
+            ->get();
+
+        $totals = [];
+        foreach ($rows as $row) {
+            $totals[(string) $row->username][] = self::point($row);
+        }
+
+        return $totals;
+    }
+
+    /**
+     * Every project's containers in [from, to), keyed by compose service (else name), as totalsBetween() does it.
+     *
+     * @param  list<string>  $usernames
+     * @return array<string, array<string, list<array{period: string, cpu_percent: ?float, memory_bytes: ?int, memory_limit_bytes: ?int}>>>
+     */
+    public static function containersBetween(array $usernames, Carbon $from, Carbon $to, int $step): array
+    {
+        $key = 'COALESCE(service, name, container_id)';
+        $rows = self::windowQuery(self::table('project_container_metrics', $step), $usernames, $from, $to, $step)
+            ->selectRaw("username, {$key} AS container_key")
+            ->groupBy('username')
+            ->groupByRaw($key)
+            ->get();
+
+        $containers = [];
+        foreach ($rows as $row) {
+            $containers[(string) $row->username][(string) $row->container_key][] = self::point($row);
+        }
+
+        return $containers;
+    }
+
+    /** @param  list<string>  $usernames */
+    private static function windowQuery(string $table, array $usernames, Carbon $from, Carbon $to, int $step): Builder
+    {
+        return DB::table($table)
+            ->selectRaw(MetricBuckets::sql($step).' AS bucket, AVG(cpu_percent) AS cpu_percent, '
+                .'AVG(memory_bytes) AS memory_bytes, MAX(memory_limit_bytes) AS memory_limit_bytes')
+            ->whereIn('username', $usernames)
+            ->where('timestamp', '>=', $from->copy()->setTimezone('UTC')->format('Y-m-d H:i:s'))
+            ->where('timestamp', '<', $to->copy()->setTimezone('UTC')->format('Y-m-d H:i:s'))
+            ->groupByRaw('bucket')
+            ->orderBy('bucket');
+    }
+
+    /** @return array{period: string, cpu_percent: ?float, memory_bytes: ?int, memory_limit_bytes: ?int} */
+    private static function point(object $row): array
+    {
+        return ['period' => Carbon::createFromTimestampUTC((int) $row->bucket)->format('Y-m-d H:i:s')] + self::bucketValues($row);
     }
 
     /**

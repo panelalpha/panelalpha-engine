@@ -2,9 +2,6 @@
 
 namespace Tests\Integration\Hub;
 
-use App\Lib\Hub\HubGrants;
-use App\Lib\Hub\HubTokens;
-use App\Lib\Hub\SpkiPin;
 use App\Models\HubConnection;
 use App\Models\PersonalAccessToken;
 use Illuminate\Http\Client\ConnectionException;
@@ -14,7 +11,7 @@ use Illuminate\Support\Sleep;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TestNetwork;
 
-/** `pae hub:connect CODE` against a faked Hub. */
+/** `pae hub:connect CODE` against a faked Hub: a push connection, confirmed by its first report. */
 class HubConnectCommandTest extends HubTestCase
 {
     private const DEVICE_CODE = 'Zk3mQ0x9Wc2yH7tLr1aVbN4pS8uE6oJdKfTgYhUiOwM';
@@ -45,7 +42,7 @@ class HubConnectCommandTest extends HubTestCase
         parent::tearDown();
     }
 
-    public function test_a_code_connects_with_exactly_the_granted_abilities_without_asking(): void
+    public function test_a_code_connects_with_push_and_its_first_report_without_asking(): void
     {
         \App\Models\Setting::setRuntimeSettings(['default_ipv4' => self::engineIp(), 'license_key' => 'FROM-SETTING']);
         $this->fakeHub([$this->approved(['admin_sso'], warnings: ['license_ip_mismatch', 'something_new'])]);
@@ -67,35 +64,34 @@ class HubConnectCommandTest extends HubTestCase
         $create = $this->sentTo('/api/engine/v1/connect-sessions');
         $this->assertSame('wdjb mjht', $create['connect_code'], 'sent as typed; the Hub normalizes');
         $this->assertSame('engine', $create['product']);
+        $this->assertSame('push', $create['protocol']);
+        $this->assertArrayNotHasKey('tls_spki', $create, 'the Hub never connects to this engine');
         $this->assertSame(self::APP_ID, $create['app_id']);
         $this->assertSame(self::engineIp(), $create['ip']);
-        $this->assertSame(SpkiPin::fromFile($this->certificate), $create['tls_spki']);
         $this->assertNull($create['license_key'], 'the code names its license; the key on record would conflict');
         $this->assertSame('srv1.acme.com', $create['engine']['hostname']);
         Sleep::assertNeverSlept();
 
-        $expected = HubGrants::abilities(['admin_sso']);
-        $this->assertSame($expected, $this->completed['credential']['abilities']);
-        $this->assertSame($create['tls_spki'], $this->completed['tls_spki']);
-
-        /** @var PersonalAccessToken $token */
-        $token = PersonalAccessToken::query()->findOrFail($this->completed['credential']['token_id']);
-        $this->assertSame($expected, $token->abilities);
-        $this->assertSame('hub:hc_01J8Z6Q4X9V3K2M7N5P1R0S8T6', $token->name, 'renamed once the Hub named the connection');
-        $this->assertEqualsWithDelta(now()->addDays(30)->timestamp, $token->expires_at->timestamp, 5);
+        $this->assertSame(['device_code' => self::DEVICE_CODE], $this->completed, 'no token, no pin');
+        $this->assertSame(0, PersonalAccessToken::query()->count(), 'the Hub holds no token');
 
         $connection = HubConnection::active();
         $this->assertNotNull($connection);
         $this->assertSame('hc_01J8Z6Q4X9V3K2M7N5P1R0S8T6', $connection->connection_id);
         $this->assertSame(self::SECRET, $connection->hub_secret);
+        $this->assertSame(HubConnection::PROTOCOL_PUSH, $connection->protocol);
         $this->assertSame('42', $connection->account_id);
         $this->assertSame('101', $connection->license_id);
         $this->assertSame(['admin_sso'], $connection->grants);
-        $this->assertSame($token->id, $connection->token_id);
-        $this->assertNotNull($connection->last_hub_call_at, 'the Hub verified the token before answering');
-        $this->withToken($this->completed['credential']['token'])->getJson('/api/projects/all')->assertOk();
+        $this->assertNull($connection->token_id);
+        $this->assertNull($connection->tls_spki);
+        $this->assertNotNull($connection->last_report_at);
 
+        $this->assertSame(1, $this->sentTo('/api/engine/v1/report')['schema']);
+        Http::assertSent(fn (Request $r): bool => str_ends_with($r->url(), '/api/engine/v1/report')
+            && $r->header('X-Server-Id') === ['hc_01J8Z6Q4X9V3K2M7N5P1R0S8T6'] && $r->hasHeader('X-Signature'));
         $this->assertNothingSentTo('/cancel');
+        $this->assertNothingSentTo('/disconnect');
     }
 
     public function test_the_code_is_required(): void
@@ -118,32 +114,33 @@ class HubConnectCommandTest extends HubTestCase
         $this->assertTrue($definition->getArgument('code')->isRequired());
     }
 
-    public function test_an_unreachable_engine_revokes_the_minted_token(): void
+    public function test_a_refused_first_report_tells_the_hub_and_keeps_nothing(): void
     {
-        $this->fakeHub([$this->approved()], complete: Http::response(
-            ['error' => 'engine_unreachable', 'reason' => 'connect_timeout'],
-            409
-        ));
+        $this->fakeHub([$this->approved()], report: Http::response([
+            'message' => 'The given data was invalid.',
+            'errors' => ['projects.0.username' => ['The username format is invalid.']],
+        ], 422));
 
         $this->artisan('hub:connect', ['code' => self::CODE])
-            ->expectsOutputToContain('The Hub could not reach https://' . self::engineIp() . ':2011. Allow inbound TCP 2011')
+            ->expectsOutputToContain('The first report to PanelAlpha Connect failed: The given data was invalid.')
             ->assertExitCode(1);
 
-        /** @var PersonalAccessToken $token */
-        $token = PersonalAccessToken::query()->where('name', 'like', 'hub:%')->sole();
-        $this->assertNotNull($token->revoked_at);
         $this->assertNull(HubConnection::active());
+        $this->assertSame('first_report_failed', $this->sentTo('/api/engine/v1/connection/disconnect')['reason']);
+        $this->assertStringContainsString('projects.0.username: The username format is invalid.', (string) \App\Models\HubExchange::query()->sole()->detail);
     }
 
-    public function test_any_other_complete_failure_revokes_the_token_too(): void
+    public function test_a_failed_complete_keeps_nothing(): void
     {
-        $this->fakeHub([$this->approved()], complete: Http::response(['error' => 'invalid_credential'], 400));
+        $this->fakeHub([$this->approved()], complete: Http::response(['error' => 'invalid_grant'], 400));
 
         $this->artisan('hub:connect', ['code' => self::CODE])
-            ->expectsOutputToContain('invalid_credential')
+            ->expectsOutputToContain('invalid_grant')
             ->assertExitCode(1);
 
-        $this->assertNotNull(PersonalAccessToken::query()->where('name', 'like', 'hub:%')->sole()->revoked_at);
+        $this->assertNull(HubConnection::active());
+        $this->assertSame(0, PersonalAccessToken::query()->count());
+        $this->assertNothingSentTo('/report');
     }
 
     public function test_an_unknown_grant_is_refused_before_anything_is_minted(): void
@@ -268,18 +265,15 @@ class HubConnectCommandTest extends HubTestCase
     {
         $this->fakeHub([$this->approved(['admin_sso'])]);
         $this->artisan('hub:connect', ['code' => self::CODE])->assertExitCode(0);
-
-        $token = (string) $this->completed['credential']['token'];
-        $this->withToken($token)->getJson('/api/projects/all')->assertOk();
         $this->artisan('hub:disconnect')->assertExitCode(0);
 
         $log = (string) file_get_contents($this->logFile);
         $this->assertStringContainsString('hub.connected', $log, 'the audit line is written to this log');
-        foreach ([$token, explode('|', $token)[1], self::SECRET, self::DEVICE_CODE, self::CODE] as $secret) {
+        foreach ([self::SECRET, self::DEVICE_CODE, self::CODE] as $secret) {
             $this->assertStringNotContainsString($secret, $log);
         }
-        foreach (\App\Models\HubAccessLog::query()->get() as $row) {
-            $this->assertStringNotContainsString(explode('|', $token)[1], json_encode($row->toArray()));
+        foreach (\App\Models\HubExchange::query()->get() as $row) {
+            $this->assertStringNotContainsString(self::SECRET, json_encode($row->toArray()));
         }
     }
 
@@ -375,35 +369,32 @@ class HubConnectCommandTest extends HubTestCase
             ->expectsOutputToContain('Connected to Other Ltd.')
             ->assertExitCode(0);
 
-        $this->assertNotNull($old->accessToken->fresh()->revoked_at);
+        $this->assertNotNull($old->accessToken->fresh()->revoked_at, 'the pull connection it replaces loses its token');
         $this->assertNull($oldConnection->fresh(), 'one connection at a time');
         $this->assertSame('77', HubConnection::active()?->account_id);
-        $this->assertNull(PersonalAccessToken::query()->find($this->completed['credential']['token_id'])->revoked_at);
     }
 
-    public function test_the_address_connect_verified_from_is_exempt_from_the_api_jail_instead_of_the_replaced_one(): void
+    public function test_replacing_a_pull_connection_drops_the_address_it_was_called_from(): void
     {
         $old = $this->hubToken([], 'hc_OLD');
         $this->connection($old, [], 'hc_OLD')->forceFill(['caller_ips' => [TestNetwork::public2(20) => now()->toIso8601ZuluString()]])->save();
         $this->fail2ban->files['/etc/fail2ban/panelalpha-api-ignoreip'] = TestNetwork::public2(20)." # PanelAlpha Connect\n";
-        $this->withServerVariables(['REMOTE_ADDR' => TestNetwork::public3(31)]);
         $this->fakeHub([$this->approved()]);
 
         $this->artisan('hub:connect', ['code' => self::CODE, '--replace' => true])->assertExitCode(0);
 
-        $this->assertSame([TestNetwork::public3(31)], array_keys(HubConnection::active()?->caller_ips ?? []));
-        $this->assertSame(TestNetwork::public3(31)." # PanelAlpha Connect\n", $this->fail2ban->files['/etc/fail2ban/panelalpha-api-ignoreip']);
-        $this->assertSame(1, $this->fail2ban->reloads);
+        $this->assertSame([], HubConnection::active()?->caller_ips ?? []);
+        $this->assertStringNotContainsString(TestNetwork::public2(20), $this->fail2ban->files['/etc/fail2ban/panelalpha-api-ignoreip'] ?? '');
     }
 
     public function test_replace_that_fails_keeps_the_old_connection(): void
     {
         $old = $this->hubToken([], 'hc_OLD');
         $this->connection($old, [], 'hc_OLD');
-        $this->fakeHub([$this->approved()], complete: Http::response(['error' => 'engine_unreachable', 'reason' => 'tls_pin_mismatch'], 409));
+        $this->fakeHub([$this->approved()], complete: Http::response(['error' => 'invalid_grant'], 400));
 
         $this->artisan('hub:connect', ['code' => self::CODE, '--replace' => true])
-            ->expectsOutputToContain('The certificate on :2011 changed during connect.')
+            ->expectsOutputToContain('invalid_grant')
             ->assertExitCode(1);
 
         $this->assertNull($old->accessToken->fresh()->revoked_at);
@@ -421,6 +412,7 @@ class HubConnectCommandTest extends HubTestCase
         mixed $create = null,
         ?array $completeLicense = ['id' => 101, 'name' => 'PanelAlpha Pro', 'key_fragment' => '...7F3'],
         array $completeAccount = ['id' => 42, 'name' => 'Acme Ltd'],
+        mixed $report = null,
     ): void {
         $sequence = Http::sequence();
         foreach ($polls as $poll) {
@@ -432,20 +424,20 @@ class HubConnectCommandTest extends HubTestCase
             self::HUB . '/api/engine/v1/connect-sessions/poll' => $sequence,
             self::HUB . '/api/engine/v1/connect-sessions/complete' => $complete ?? function (Request $request) use ($completeLicense, $completeAccount) {
                 $this->completed = $request->data();
-                // As the Hub does before answering: verify the token on /ping.
-                $this->assertSame(HubTokens::PENDING, PersonalAccessToken::query()->find($this->completed['credential']['token_id'])?->name);
-                // Verified with the pending token, as the Hub does before it answers.
-                $this->withToken($this->completed['credential']['token'])->getJson('/api/projects/all')->assertOk();
-                $this->app['auth']->forgetGuards();
 
                 return Http::response([
                     'connection_id' => 'hc_01J8Z6Q4X9V3K2M7N5P1R0S8T6',
                     'hub_secret' => self::SECRET,
                     'account' => $completeAccount,
                     'license' => $completeLicense,
+                    'report' => ['interval_seconds' => 60, 'path' => 'api/engine/v1/report'],
                 ]);
             },
             self::HUB . '/api/engine/v1/connect-sessions/cancel' => Http::response(null, 204),
+            self::HUB . '/api/engine/v1/report' => $report ?? Http::response(['data' => [
+                'next_report_seconds' => 60, 'want' => [], 'backfill' => null, 'rotate_secret' => false,
+            ]]),
+            self::HUB . '/api/engine/v1/connection/disconnect' => Http::response(null, 204),
         ]);
     }
 

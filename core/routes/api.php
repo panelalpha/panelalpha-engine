@@ -6,6 +6,7 @@ use App\Http\Controllers\BugReportController;
 use App\Http\Controllers\DomainController;
 use App\Http\Controllers\FirewallController;
 use App\Http\Controllers\HttpAcmeChallengeController;
+use App\Http\Controllers\HubSsoController;
 use App\Http\Controllers\IpController;
 use App\Http\Controllers\LighthouseController;
 use App\Http\Controllers\McpActivityLogController;
@@ -113,6 +114,12 @@ Route::get('/internal/site-password/{username}/gate', [SitePasswordGateControlle
     ->withoutMiddleware(['auth:api', 'throttle:api']);
 Route::post('/internal/site-password/{username}/login', [SitePasswordGateController::class, 'login'])
     ->withoutMiddleware('auth:api');
+
+// A PanelAlpha Connect admin login ticket, posted by the browser to an app's own
+// domain and routed here by its vhost; the ticket is the only credential.
+Route::post('/internal/hub-sso/{username}', [HubSsoController::class, 'login'])
+    ->withoutMiddleware(['auth:api', 'throttle:api'])
+    ->middleware('throttle:hub-sso');
 
 // What any token may do to itself. PanelAlpha Connect rotates and ends its
 // token through these; nothing here reaches another token.

@@ -15,6 +15,9 @@ use Tests\TestCase;
  */
 class ScheduleMutexTest extends TestCase
 {
+    /** Commands that wait inside their minute and lock only their own work, so a scheduler mutex would skip the next tick. */
+    private const SELF_LOCKING = ['hub:report'];
+
     private function events(): array
     {
         /** @var Kernel $kernel */
@@ -47,7 +50,7 @@ class ScheduleMutexTest extends TestCase
     {
         $minute = array_values(array_filter(
             $this->events(),
-            static fn ($event) => $event->expression === '* * * * *',
+            static fn ($event) => $event->expression === '* * * * *' && ! self::locksItself((string) $event->command),
         ));
 
         $this->assertNotEmpty($minute, 'no every-minute command found');
@@ -60,6 +63,17 @@ class ScheduleMutexTest extends TestCase
                 "{$event->command} outlives its minute cadence for up to a day",
             );
         }
+    }
+
+    private static function locksItself(string $command): bool
+    {
+        foreach (self::SELF_LOCKING as $name) {
+            if (str_ends_with($command, " {$name}")) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -64,7 +64,7 @@ class HubHousekeepingCommandsTest extends HubTestCase
             HubAccessLog::query()->create(['at' => now()->subDays($daysAgo), 'method' => 'GET', 'route' => '/hub/status', 'status' => 200]);
         }
 
-        $this->artisan('hub:prune')->expectsOutput('Pruned 2 access log row(s).')->assertExitCode(0);
+        $this->artisan('hub:prune')->expectsOutput('Pruned 2 access log row(s), 0 report row(s) and 0 login row(s).')->assertExitCode(0);
 
         $this->assertSame(1, HubAccessLog::query()->count());
     }

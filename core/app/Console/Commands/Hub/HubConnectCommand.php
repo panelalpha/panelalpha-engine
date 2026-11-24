@@ -8,15 +8,15 @@ use App\Lib\Hub\EngineIdentity;
 use App\Lib\Hub\HubAudit;
 use App\Lib\Hub\HubCallerAddress;
 use App\Lib\Hub\HubClient;
-use App\Lib\Hub\HubConnectionCalls;
 use App\Lib\Hub\HubException;
 use App\Lib\Hub\HubGrants;
+use App\Lib\Hub\HubHostFacts;
+use App\Lib\Hub\HubLifecycle;
+use App\Lib\Hub\HubReporter;
 use App\Lib\Hub\HubResponse;
 use App\Lib\Hub\HubTokens;
 use App\Lib\Hub\HubUrl;
-use App\Lib\Hub\SpkiPin;
 use App\Models\HubConnection;
-use App\Models\PersonalAccessToken;
 use App\System;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -25,9 +25,9 @@ use Illuminate\Support\Sleep;
 /**
  * Connect this engine to a PanelAlpha Connect account with a one-time code
  * from the Hub's Connect engine dialog. The user chose the account, license and
- * permissions there, so the session is approved when the code is claimed; the
- * engine mints a token limited to a few API routes and hands it to the Hub
- * over its own verified TLS connection.
+ * permissions there, so the session is approved when the code is claimed. The
+ * engine reports to the Hub from then on and the Hub never calls it, so it
+ * hands over no token; its first report confirms the connection.
  *
  * The device code and the connect code live only in this process. Neither is
  * logged or written anywhere.
@@ -67,8 +67,6 @@ class HubConnectCommand extends Command
     private string $connectCode = '';
 
     private ?string $deviceCode = null;
-
-    private ?int $mintedTokenId = null;
 
     private bool $settled = false;
 
@@ -120,11 +118,10 @@ class HubConnectCommand extends Command
 
         $base = HubUrl::base();
         $ip = $this->engineIp();
-        $pin = SpkiPin::fromFile(SpkiPin::servedCertificatePath());
         $this->hub = new HubClient($base);
         $this->cancelOnInterrupt();
 
-        $session = $this->createSession($ip, $pin);
+        $session = $this->createSession($ip);
         if ($session === null) {
             return self::FAILURE;
         }
@@ -144,10 +141,10 @@ class HubConnectCommand extends Command
 
         $this->showApproval($approval, $grants);
 
-        return $this->deliver($approval, $grants, $ip, $pin, $base);
+        return $this->completeConnection($approval, $grants, $ip, $base);
     }
 
-    /** Ctrl+C cancels the session and revokes anything minted. Needs pcntl, which core's php-cli has. */
+    /** Ctrl+C cancels the session. Needs pcntl, which core's php-cli has. */
     private function cancelOnInterrupt(): void
     {
         if (! extension_loaded('pcntl')) {
@@ -184,7 +181,7 @@ class HubConnectCommand extends Command
      *
      * @throws HubException
      */
-    private function createSession(string $ip, string $pin): ?array
+    private function createSession(string $ip): ?array
     {
         $engine = array_filter([
             'version' => EngineIdentity::version(),
@@ -195,7 +192,7 @@ class HubConnectCommand extends Command
             'product' => EngineIdentity::PRODUCT,
             'app_id' => EngineIdentity::appId(),
             'ip' => $ip,
-            'tls_spki' => $pin,
+            'protocol' => HubConnection::PROTOCOL_PUSH,
             'license_key' => null,
             'engine' => (object) $engine,
             'connect_code' => $this->connectCode,
@@ -351,65 +348,48 @@ class HubConnectCommand extends Command
     }
 
     /**
-     * The token is named after its connection once there is one; until then,
-     * pending. One connection at a time: once the new one is stored, the one it
-     * replaces and anything a failed attempt left stop working.
+     * One connection at a time: once the new one is stored, the one it replaces and any Hub token a connection made
+     * before push left behind stop working. The first report proves the connection works; without it the Hub is told
+     * and nothing is kept.
      *
      * @param  array<string, mixed>  $approval
      * @param  array<int, string>  $grants
      *
      * @throws HubException
      */
-    private function deliver(
-        array $approval,
-        array $grants,
-        string $ip,
-        string $pin,
-        string $base
-    ): int {
-        $abilities = HubGrants::abilities($grants);
-        if (! HubGrants::isHubScoped($abilities)) {
-            throw new HubException('Refusing to mint a Hub token beyond the routes the Hub may call.');
-        }
-
-        $new = HubTokens::mint($abilities);
-        $this->mintedTokenId = (int) $new->accessToken->id;
-
-        $response = $this->hub()->complete((string) $this->deviceCode, [
-            'token' => $new->plainTextToken,
-            'token_id' => $this->mintedTokenId,
-            'abilities' => $abilities,
-            'expires_at' => $new->accessToken->expires_at?->utc()->toIso8601ZuluString(),
-        ], $pin);
-        unset($new);
-
-        if ($response->status === 409 && $response->error() === 'engine_unreachable') {
-            $this->revokeMinted();
-            $this->error($this->unreachableMessage((string) ($response->json['reason'] ?? ''), $ip));
-
-            return self::FAILURE;
-        }
+    private function completeConnection(array $approval, array $grants, string $ip, string $base): int
+    {
+        $response = $this->hub()->complete((string) $this->deviceCode);
+        $this->settled = true;
 
         $connectionId = $response->json['connection_id'] ?? null;
         $secret = $response->json['hub_secret'] ?? null;
         if ($response->status !== 200 || ! is_string($connectionId) || $connectionId === ''
             || ! is_string($secret) || preg_match('/\A[0-9a-f]{64}\z/i', $secret) !== 1) {
-            $this->revokeMinted();
             $this->error('PanelAlpha Connect did not complete the connection: '.$this->describe($response));
 
             return self::FAILURE;
         }
 
-        $account = is_array($response->json['account'] ?? null) ? $response->json['account'] : $approval['account'];
-        $license = array_key_exists('license', $response->json) ? $response->json['license'] : ($approval['license'] ?? null);
-        $license = is_array($license) ? $license : null;
+        $connection = $this->storeConnection($response->json, $approval, $grants, $ip, $base, $connectionId, $secret);
 
-        $connection = DB::transaction(function () use (
-            $connectionId, $secret, $account, $license, $approval, $grants, $ip, $pin, $base
-        ): HubConnection {
-            HubTokens::revokeAll(except: $this->mintedTokenId);
-            PersonalAccessToken::query()->whereKey($this->mintedTokenId)
-                ->update(['name' => HubTokens::nameFor($connectionId)]);
+        return $this->confirmWithFirstReport($connection) ? self::SUCCESS : self::FAILURE;
+    }
+
+    /**
+     * @param  array<string, mixed>  $json
+     * @param  array<string, mixed>  $approval
+     * @param  array<int, string>  $grants
+     */
+    private function storeConnection(array $json, array $approval, array $grants, string $ip, string $base, string $connectionId, string $secret): HubConnection
+    {
+        $account = is_array($json['account'] ?? null) ? $json['account'] : $approval['account'];
+        $license = array_key_exists('license', $json) ? $json['license'] : ($approval['license'] ?? null);
+        $license = is_array($license) ? $license : null;
+        $interval = $json['report']['interval_seconds'] ?? null;
+
+        $connection = DB::transaction(function () use ($connectionId, $secret, $account, $license, $approval, $grants, $ip, $base, $interval): HubConnection {
+            HubTokens::revokeAll();
             HubConnection::query()->delete();
 
             $connection = HubConnection::query()->create([
@@ -422,44 +402,59 @@ class HubConnectCommand extends Command
                 'license_id' => isset($license['id']) ? (string) $license['id'] : null,
                 'license_name' => is_string($license['name'] ?? null) ? $license['name'] : null,
                 'ip' => $ip,
-                'tls_spki' => $pin,
                 'grants' => array_values($grants),
-                'token_id' => $this->mintedTokenId,
                 'status' => HubConnection::STATUS_CONNECTED,
                 'connected_at' => now(),
+                'protocol' => HubConnection::PROTOCOL_PUSH,
             ]);
-
-            HubConnectionCalls::stampVerificationCalls($connection, $this->mintedTokenId);
+            $connection->forceFill([
+                'report_interval_seconds' => is_int($interval) ? max(HubReporter::MIN_INTERVAL, min(HubReporter::MAX_INTERVAL, $interval)) : HubReporter::MIN_INTERVAL,
+            ])->save();
 
             return $connection;
         });
         HubCallerAddress::sync();
 
-        $this->settled = true;
+        return $connection;
+    }
+
+    /** The first report, sent now: the Hub counts the connection as made only once one arrives. */
+    private function confirmWithFirstReport(HubConnection $connection): bool
+    {
+        try {
+            HubHostFacts::refreshIfStale($connection);
+        } catch (\Throwable) {
+        }
+
+        $response = (new HubReporter($this->hub()))->send($connection);
+        if ($response === null || $response->status !== 200) {
+            $this->error('The first report to PanelAlpha Connect failed: '
+                .($response === null ? 'the Hub could not be reached' : $this->describe($response)).'. Nothing was kept.');
+            $this->forgetUnconfirmed($connection);
+
+            return false;
+        }
+
         HubAudit::log('hub.connected', [
             'connection_id' => $connection->connection_id,
             'account_id' => $connection->account_id,
             'license_id' => $connection->license_id,
-            'token_id' => $connection->token_id,
-            'grants' => implode(',', $grants),
+            'protocol' => HubConnection::PROTOCOL_PUSH,
+            'grants' => implode(',', $connection->grantList()),
         ]);
-
         $this->info('Connected to '.($connection->account_name ?? 'account '.$connection->account_id).'.');
         $this->line('Not your account? Disconnect with: pae hub:disconnect');
 
-        return self::SUCCESS;
+        return true;
     }
 
-    private function unreachableMessage(string $reason, string $ip): string
+    private function forgetUnconfirmed(HubConnection $connection): void
     {
-        return match ($reason) {
-            'connect_failed', 'connect_timeout' => "The Hub could not reach https://{$ip}:2011. Allow inbound TCP 2011 "
-                .'from the Hub, or pass the right address with --ip.',
-            'tls_pin_mismatch' => 'The certificate on :2011 changed during connect. Run the command again.',
-            'unauthorized' => 'The token was rejected. Check the engine API.',
-            'app_id_mismatch' => 'Another engine answered at this address.',
-            default => 'The Hub could not verify this engine: '.($reason !== '' ? $reason : 'engine_unreachable'),
-        };
+        try {
+            $this->hub()->disconnect($connection, 'first_report_failed');
+        } catch (HubException) {
+        }
+        HubLifecycle::forget('first_report_failed');
     }
 
     private function describe(HubResponse $response): string
@@ -478,27 +473,14 @@ class HubConnectCommand extends Command
         return $text." (HTTP {$response->status})";
     }
 
-    /**
-     * Undo whatever this run left behind: the minted token, and the session on
-     * the Hub. Safe to call more than once and from a signal handler.
-     */
+    /** Cancel the session on the Hub. Safe to call more than once and from a signal handler. */
     private function abandon(string $reason): void
     {
-        $this->revokeMinted();
-
         if ($this->settled || $this->deviceCode === null || $this->hub === null) {
             return;
         }
         $this->settled = true;
         $this->hub->cancel($this->deviceCode, $reason);
-    }
-
-    private function revokeMinted(): void
-    {
-        if ($this->mintedTokenId !== null && ! $this->settled) {
-            HubTokens::revoke($this->mintedTokenId);
-            $this->mintedTokenId = null;
-        }
     }
 
     private function hub(): HubClient

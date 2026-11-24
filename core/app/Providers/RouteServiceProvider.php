@@ -31,6 +31,9 @@ class RouteServiceProvider extends ServiceProvider
 
     private const CAPABILITY_LINK_ATTEMPTS_PER_MINUTE = 60;
 
+    /** Admin login tickets posted to app domains, per address. */
+    private const HUB_SSO_ATTEMPTS_PER_MINUTE = 30;
+
     /**
      * Define your route model bindings, pattern filters, and other route configuration.
      *
@@ -85,6 +88,8 @@ class RouteServiceProvider extends ServiceProvider
                 optional($request->user()?->currentAccessToken())->id ?: $request->ip()
             );
         });
+
+        RateLimiter::for('hub-sso', fn (Request $request) => Limit::perMinute(self::HUB_SSO_ATTEMPTS_PER_MINUTE)->by($request->ip()));
 
         $this->configureVaultLimiters();
         $this->configureCapabilityLinkLimiters();

@@ -162,7 +162,7 @@ Open these inbound ports in the provider's firewall:
 |---|---|---|
 | 80 | Visitors, and Let's Encrypt checking that a domain is yours | Everyone, if you want Let's Encrypt certificates |
 | 443 | Visitors to your sites | Everyone who should see your sites |
-| 2011 | Your AI assistant, REST API clients, PanelAlpha Connect and git hosts calling a [push-to-deploy](../05-capabilities/push-to-deploy.md) hook | Your own addresses, plus the addresses of those services |
+| 2011 | Your AI assistant, REST API clients and git hosts calling a [push-to-deploy](../05-capabilities/push-to-deploy.md) hook | Your own addresses, plus the addresses of those services |
 | 22 | You, over SSH | Your own addresses |
 | 2222 | SFTP clients | Whoever uploads files over SFTP |
 | 21 and 30000-30009 | FTP clients | Whoever uploads files over FTP |

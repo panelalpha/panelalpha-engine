@@ -387,8 +387,10 @@ Context: [Telemetry](../02-getting-started/what-is-collected.md).
 | Command | What it does |
 |---|---|
 | `pae hub:connect CODE` | Connects this engine to the PanelAlpha Connect account that created the code (**Connect engine** in Connect). `--ip`, `--replace`. |
-| `pae hub:status` | Shows the connection, Connect's own view of it, and the last calls Connect made. `--local` skips asking Connect. |
-| `pae hub:disconnect` | Revokes Connect's access at once, then tells Connect. |
+| `pae hub:status` | Shows the connection, Connect's own view of it, the last reports and the last admin logins. `--local` skips asking Connect. |
+| `pae hub:report` | Sends the minute report now. It runs every minute by itself; `--now` skips waiting for this engine's second of the minute. |
+| `pae hub:sso-routes` | Gives every app domain the route Connect's admin login arrives on. It runs by itself once after connecting; `--force` renders them again. |
+| `pae hub:disconnect` | Stops reporting and forgets the connection at once, then tells Connect. |
 
 Context: [Connect to PanelAlpha Connect](../02-getting-started/connect-to-panelalpha-connect.md).
 

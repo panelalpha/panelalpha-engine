@@ -29,6 +29,11 @@ class HubTlsAnnounceCommand extends Command
 
                 return self::SUCCESS;
             }
+            if ($connection->isPush()) {
+                $this->line('PanelAlpha Connect does not call this engine, so it pins no certificate; nothing to announce.');
+
+                return self::SUCCESS;
+            }
 
             $path = $this->argument('certificate');
             $pin = SpkiPin::fromFile(is_string($path) && $path !== '' ? $path : SpkiPin::servedCertificatePath());

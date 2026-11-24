@@ -110,6 +110,16 @@ server {
         }
 @endif
     }
+    location = /panelalpha-sso/hub {
+        resolver 127.0.0.54 valid=30s;
+        set $enginehost core.shared-hosting.palocal;
+        limit_except POST { deny all; }
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $remote_addr;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_pass http://$enginehost/api/internal/hub-sso/{{ $user }};
+    }
     location /panelalpha-sso {
         resolver 127.0.0.54 valid=30s;
         set $enginehost core.shared-hosting.palocal;
@@ -235,6 +245,16 @@ server {
                 proxy_pass http://phpmyadmin-users.shared-hosting.palocal;
             }
 @endif
+        }
+        location = /panelalpha-sso/hub {
+            resolver 127.0.0.54 valid=30s;
+            set $enginehost core.shared-hosting.palocal;
+            limit_except POST { deny all; }
+            proxy_set_header   Host              $host;
+            proxy_set_header   X-Real-IP         $remote_addr;
+            proxy_set_header   X-Forwarded-For   $remote_addr;
+            proxy_set_header   X-Forwarded-Proto $scheme;
+            proxy_pass http://$enginehost/api/internal/hub-sso/{{ $user }};
         }
         location /panelalpha-sso {
             resolver 127.0.0.54 valid=30s;

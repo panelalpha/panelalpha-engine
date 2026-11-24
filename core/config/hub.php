@@ -6,8 +6,8 @@
 |--------------------------------------------------------------------------
 |
 | The account portal `pae hub:connect` connects this engine to. After the
-| connect ceremony the Hub reads the regular API with a token limited to a
-| few routes, and the engine sends it only a few signed notices.
+| connect ceremony the engine reports to it every minute, signed with the Hub
+| secret, and the Hub never calls the engine.
 |
 | Deliberately its own setting, not `config('connect.url')`: that one is the
 | WithoutDNS service, and moving one must not move the other.

@@ -40,6 +40,21 @@ final class ServerMetricsHistory
     }
 
     /**
+     * The averages of every bucket of `$step` seconds in [from, to) that has samples, as `period` plus the metrics.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function between(Carbon $from, Carbon $to, int $step): array
+    {
+        $points = [];
+        foreach (self::query($from, $to, $step)->get() as $row) {
+            $points[] = ['period' => Carbon::createFromTimestampUTC((int) $row->bucket)->format('Y-m-d H:i:s')] + self::values($row);
+        }
+
+        return $points;
+    }
+
+    /**
      * @param  array{start: Carbon, end: Carbon, bucket: int}  $window
      * @return list<array<string, mixed>>
      */
