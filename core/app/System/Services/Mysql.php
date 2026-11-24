@@ -149,8 +149,8 @@ class Mysql
     }
 
     /**
-     * The account a copy into $database imports as: the application database's own; else of $owner's users granted on
-     * it the one named like it, or the first by name; a temporary one when none is.
+     * The account a copy into $database imports as: the application database's own; else the one of $owner's users
+     * granted on it that ImportAccount::choose() picks; a temporary one when none is.
      */
     public function importAccount(User $owner, string $database): ImportAccount
     {
@@ -158,24 +158,19 @@ class Mysql
             return new ImportAccount($database);
         }
 
-        $granted = $this->usersGrantedOn($owner, $database);
-        if ($granted === []) {
-            return ImportAccount::temporary();
-        }
-
-        return new ImportAccount(in_array($database, $granted, true) ? $database : $granted[0]);
+        return ImportAccount::choose($database, $this->privilegesOn($owner, $database));
     }
 
-    /** @return list<string> sorted by name */
-    private function usersGrantedOn(User $owner, string $database): array
+    /** @return array<string, string> each of $owner's users granted on $database => its privileges there */
+    private function privilegesOn(User $owner, string $database): array
     {
         $granted = [];
         foreach ($owner->mysqlUsers()->pluck('user') as $user) {
-            if (is_string($user) && isset($this->privileges()->showPrivileges($user)[$database])) {
-                $granted[] = $user;
+            $privileges = is_string($user) ? ($this->privileges()->showPrivileges($user)[$database] ?? null) : null;
+            if ($privileges !== null) {
+                $granted[$user] = $privileges;
             }
         }
-        sort($granted, SORT_STRING);
 
         return $granted;
     }

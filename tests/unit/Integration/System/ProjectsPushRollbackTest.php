@@ -58,8 +58,10 @@ class ProjectsPushRollbackTest extends TestCase
         $cases = [
             'one account' => [['live_wp' => ['live_wp' => 'ALL PRIVILEGES']], ' live_wp'],
             'none: a temporary one' => [[], " ''"],
-            'two: the one named like the database' => [['live_wp' => ['live_wp' => 'SELECT'], 'live_a' => ['live_wp' => 'ALL PRIVILEGES']], ' live_wp'],
-            'two: the first by name' => [['live_b' => ['live_wp' => 'SELECT'], 'live_a' => ['live_wp' => 'SELECT']], ' live_a'],
+            'two: the writing one, not the read-only one named like the database' => [['live_wp' => ['live_wp' => 'SELECT'], 'live_a' => ['live_wp' => 'ALL PRIVILEGES']], ' live_a'],
+            'two: the writing one, not the read-only one first by name' => [['live_a' => ['live_wp' => 'SELECT'], 'live_b' => ['live_wp' => 'ALL PRIVILEGES']], ' live_b'],
+            'two equal: the one named like the database' => [['live_a' => ['live_wp' => 'ALL PRIVILEGES'], 'live_wp' => ['live_wp' => 'ALL PRIVILEGES']], ' live_wp'],
+            'two equal: the first by name' => [['live_b' => ['live_wp' => 'SELECT'], 'live_a' => ['live_wp' => 'SELECT']], ' live_a'],
         ];
         $this->stagingPair();
         $live = User::findByUsernameOrFail('live');

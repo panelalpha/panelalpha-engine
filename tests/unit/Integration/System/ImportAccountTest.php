@@ -46,13 +46,14 @@ class ImportAccountTest extends TestCase
         $this->assertSame('', ImportAccount::temporary()->user);
     }
 
-    public function test_of_several_granted_accounts_the_one_named_like_the_database_is_chosen_else_the_first_by_name(): void
+    public function test_of_several_granted_accounts_the_one_whose_grants_run_the_copied_objects_is_chosen(): void
     {
-        $bob = $this->projectWithUsers('bob_zed', 'bob_wp', 'bob_shop');
-        $all = ['bob_wp' => 'ALL PRIVILEGES'];
+        $bob = $this->projectWithUsers('bob_ro', 'bob_rw', 'bob_wp');
 
-        $this->assertSame('bob_wp', $this->mysql(['bob_zed' => $all, 'bob_wp' => ['bob_wp' => 'SELECT'], 'bob_shop' => $all])->importAccount($bob, 'bob_wp')->user);
-        $this->assertSame('bob_shop', $this->mysql(['bob_zed' => $all, 'bob_shop' => $all])->importAccount($bob, 'bob_wp')->user);
+        $grants = ['bob_ro' => ['bob_multi' => 'SELECT'], 'bob_rw' => ['bob_multi' => 'ALL PRIVILEGES'], 'bob_wp' => ['bob_wp' => 'ALL PRIVILEGES']];
+        $this->assertSame('bob_rw', $this->mysql($grants)->importAccount($bob, 'bob_multi')->user);
+        $named = ['bob_ro' => ['bob_wp' => 'ALL PRIVILEGES'], 'bob_wp' => ['bob_wp' => 'ALL PRIVILEGES']];
+        $this->assertSame('bob_wp', $this->mysql($named)->importAccount($bob, 'bob_wp')->user);
     }
 
     private function projectWithUsers(string ...$users): User
