@@ -6,6 +6,10 @@
 # and the containers that need the runtime, an account with its volumes. Nothing
 # else in daemon.json, in a unit's drop-in directory or on Docker is touched.
 #
+# An upgrade installs only a package that matches the sha256 its release
+# publishes, never one older than the minimum, and starts again exactly the
+# accounts that were running, with their restart policy untouched.
+#
 #   bash tests/scripts/install-sysbox.test.sh
 
 set -uo pipefail
@@ -19,7 +23,8 @@ STUB_DIR="$TMP/stub"
 mkdir -p "$STUB_DIR"
 export STUB_DIR
 
-for fn in remove_sysbox_daemon_json remove_sysbox_configuration sysbox_containers remove_sysbox_containers uninstall_sysbox; do
+for fn in remove_sysbox_daemon_json remove_sysbox_configuration sysbox_containers remove_sysbox_containers uninstall_sysbox \
+    install_or_upgrade_sysbox_package sysbox_package_sha256 version_lt running_sysbox_containers upgrade_sysbox; do
     sed -n "/^${fn}() {/,/^}\$/p" "$SCRIPT_DIR/install-sysbox.sh" >>"$TMP/funcs.sh"
 done
 
@@ -61,9 +66,32 @@ EOF
 cat >"$BIN/docker" <<'EOF'
 #!/bin/bash
 printf 'docker %s\n' "$*" >>"$STUB_DIR/calls"
-[ "$1" = "ps" ] && cut -d' ' -f1 "$STUB_DIR/containers"
-[ "$1" = "inspect" ] && cut -d' ' -f1-3 "$STUB_DIR/containers"
+if [ "$1" = "ps" ]; then
+    case "$*" in
+        *-a*) cut -d' ' -f1 "$STUB_DIR/containers" ;;
+        *) grep -xFf "$STUB_DIR/running" <(cut -d' ' -f1 "$STUB_DIR/containers") 2>/dev/null ;;
+    esac
+fi
+if [ "$1" = "inspect" ]; then
+    case "$*" in
+        *.Name*) awk -v ids=" ${*:4} " 'index(ids, " " $1 " ") { print "/" $1, $2 }' "$STUB_DIR/containers" ;;
+        *) cut -d' ' -f1-3 "$STUB_DIR/containers" ;;
+    esac
+fi
 exit 0
+EOF
+cat >"$BIN/curl" <<'EOF'
+#!/bin/bash
+out=''
+for arg in "$@"; do url="$arg"; done
+while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
+printf 'curl %s\n' "$url" >>"$STUB_DIR/calls"
+if [ -z "$out" ]; then
+    [ -f "$STUB_DIR/release" ] || exit 22
+    cat "$STUB_DIR/release"
+    exit 0
+fi
+printf '%s' "${STUB_DEB:-a sysbox package}" >"$out"
 EOF
 cat >"$BIN/systemctl" <<'EOF'
 #!/bin/bash
@@ -183,6 +211,66 @@ if command -v jq >/dev/null 2>&1; then
     check "a daemon.json with none of the entries is not rewritten" "yes" \
         "$(cmp -s "$DAEMON_JSON" "$TMP/daemon.before" && echo yes || echo no)"
 fi
+
+recover_with_the_engine() { printf 'recover %s\n' "$1" >>"$STUB_DIR/calls"; }
+ensure_time_namespaces_disabled() { DOCKER_DAEMON_MODIFIED=0; }
+SYSBOX_MIN_VERSION="0.7.2"
+SYSBOX_VERSION="0.7.2"
+SYSBOX_ARCH="amd64"
+SYSBOX_RELEASES="https://example.invalid/releases"
+SYSBOX_DEB_URL="https://example.invalid/sysbox.deb"
+SYSBOX_DEB_SHA256=""
+PACKAGE_SHA256="$(printf '%s' 'a sysbox package' | sha256sum | cut -d' ' -f1)"
+publish_release() {
+    printf '{"assets":[{"name":"sysbox-ce_%s.linux_arm64.deb","digest":"sha256:%s"},{"name":"sysbox-ce_%s.linux_amd64.deb","digest":"sha256:%s"}]}' \
+        "$1" "$(printf x | sha256sum | cut -d' ' -f1)" "$1" "$2" >"$STUB_DIR/release"
+}
+publish_release 0.7.2 "$PACKAGE_SHA256"
+
+printf 'acct sysbox-runc dind\nparked sysbox-runc dind\npanel runc api\n' >"$STUB_DIR/containers"
+printf 'acct\npanel\n' >"$STUB_DIR/running"
+: >"$STUB_DIR/calls"
+(upgrade_sysbox 0.7.1) >/dev/null 2>&1
+check "an upgrade installs the downloaded package" "1" "$(grep -c '^apt-get install -y .*\.deb$' "$STUB_DIR/calls")"
+check "it stops and starts only the account that was running" "docker stop acct|docker start acct" \
+    "$(grep -E '^docker (stop|start)' "$STUB_DIR/calls" | paste -sd'|')"
+check "it leaves every restart policy as it was" "0" "$(grep -c '^docker update' "$STUB_DIR/calls")"
+check "it does not bring up stopped accounts or the engine stack" "0" "$(grep -c 'compose\|container-manager' "$STUB_DIR/calls")"
+
+: >"$STUB_DIR/calls"
+(STUB_DEB="something else"; export STUB_DEB; upgrade_sysbox 0.7.1) >"$TMP/bad.out" 2>&1
+check "a package that does not match its checksum is not installed" "0" "$(grep -c '^apt-get install' "$STUB_DIR/calls")"
+check "and the upgrade stops with the reason" "yes" "$(grep -q 'does not match its checksum' "$TMP/bad.out" && echo yes || echo no)"
+
+: >"$STUB_DIR/calls"
+(upgrade_sysbox 0.7.1) >/dev/null 2>&1
+check "the sha256 is the one the release publishes for this version and architecture" \
+    "curl https://example.invalid/releases/tags/v0.7.2" "$(grep -m1 '^curl ' "$STUB_DIR/calls")"
+
+: >"$STUB_DIR/calls"
+publish_release 0.7.3 "$PACKAGE_SHA256"
+(SYSBOX_VERSION="0.7.3"; upgrade_sysbox 0.7.2) >/dev/null 2>&1
+check "a newer release is installed from its own published sha256" "curl https://example.invalid/releases/tags/v0.7.3|1" \
+    "$(grep -m1 '^curl ' "$STUB_DIR/calls")|$(grep -c '^apt-get install -y .*\.deb$' "$STUB_DIR/calls")"
+publish_release 0.7.2 "$PACKAGE_SHA256"
+
+: >"$STUB_DIR/calls"
+(SYSBOX_DEB_SHA256="$PACKAGE_SHA256"; rm -f "$STUB_DIR/release"; upgrade_sysbox 0.7.1) >/dev/null 2>&1
+check "SYSBOX_DEB_SHA256 is used without asking the release" "0|1" \
+    "$(grep -c 'releases/tags' "$STUB_DIR/calls")|$(grep -c '^apt-get install -y .*\.deb$' "$STUB_DIR/calls")"
+publish_release 0.7.2 "$PACKAGE_SHA256"
+
+: >"$STUB_DIR/calls"
+(rm -f "$STUB_DIR/release"; upgrade_sysbox 0.7.1) >"$TMP/nodigest.out" 2>&1
+check "without a published sha256 nothing is downloaded or installed" "0|0" \
+    "$(grep -c '^curl https://example.invalid/sysbox.deb' "$STUB_DIR/calls")|$(grep -c '^apt-get install' "$STUB_DIR/calls")"
+check "and it names SYSBOX_DEB_SHA256" "yes" "$(grep -q 'set SYSBOX_DEB_SHA256' "$TMP/nodigest.out" && echo yes || echo no)"
+publish_release 0.7.2 "$PACKAGE_SHA256"
+
+: >"$STUB_DIR/calls"
+(SYSBOX_VERSION="0.7.1"; upgrade_sysbox 0.7.0) >"$TMP/old.out" 2>&1
+check "a version older than the minimum is refused before any download" "0|yes" \
+    "$(grep -c '^curl ' "$STUB_DIR/calls")|$(grep -q 'older than 0.7.2, the oldest release' "$TMP/old.out" && echo yes || echo no)"
 
 echo
 echo "$PASS passed, $FAIL failed"

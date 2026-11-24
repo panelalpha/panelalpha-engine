@@ -8,9 +8,13 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-SYSBOX_VERSION="0.7.1"
-# Package filename keeps the "-0" revision suffix used by Nestybox downloads.
-SYSBOX_DEB_URL="https://downloads.nestybox.com/sysbox/releases/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}-0.linux_amd64.deb"
+# Oldest release without the host-file escape through the inner Docker's volumes.
+SYSBOX_MIN_VERSION="0.7.2"
+SYSBOX_VERSION="${SYSBOX_VERSION:-$SYSBOX_MIN_VERSION}"
+SYSBOX_ARCH="${SYSBOX_ARCH:-$(dpkg --print-architecture 2>/dev/null || echo amd64)}"
+SYSBOX_RELEASES="${SYSBOX_RELEASES:-https://api.github.com/repos/nestybox/sysbox/releases}"
+SYSBOX_DEB_URL="${SYSBOX_DEB_URL:-https://github.com/nestybox/sysbox/releases/download/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}.linux_${SYSBOX_ARCH}.deb}"
+SYSBOX_DEB_SHA256="${SYSBOX_DEB_SHA256:-}"
 DAEMON_JSON="${DAEMON_JSON:-/etc/docker/daemon.json}"
 SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 USER_HOME_DIR="${USER_HOME_DIR:-/home}"
@@ -230,14 +234,79 @@ EOF
     fi
 }
 
+# The sha256 GitHub publishes for the release's package, unless SYSBOX_DEB_SHA256 names one.
+sysbox_package_sha256() {
+    if [ -n "$SYSBOX_DEB_SHA256" ]; then
+        echo "$SYSBOX_DEB_SHA256"
+        return 0
+    fi
+    curl --proto '=https' -sSfL "${SYSBOX_RELEASES}/tags/v${SYSBOX_VERSION}" 2>/dev/null |
+        jq -r --arg name "sysbox-ce_${SYSBOX_VERSION}.linux_${SYSBOX_ARCH}.deb" \
+            '.assets[] | select(.name == $name) | .digest // empty | ltrimstr("sha256:")' 2>/dev/null
+}
+
 install_or_upgrade_sysbox_package() {
+    local deb sha256
+    if version_lt "$SYSBOX_VERSION" "$SYSBOX_MIN_VERSION"; then
+        log_error "Sysbox ${SYSBOX_VERSION} is older than ${SYSBOX_MIN_VERSION}, the oldest release this engine runs on"
+    fi
+    sha256="$(sysbox_package_sha256)"
+    if [ -z "$sha256" ]; then
+        log_error "No sha256 for Sysbox ${SYSBOX_VERSION} (${SYSBOX_ARCH}) from ${SYSBOX_RELEASES}; set SYSBOX_DEB_SHA256 to install it"
+    fi
+    deb="$(mktemp --suffix=.deb)"
     log_info "Downloading Sysbox ${SYSBOX_VERSION}..."
-    curl --proto '=https' -sSfL "$SYSBOX_DEB_URL" -o /tmp/sysbox.deb
-    if ! apt-get install -y /tmp/sysbox.deb; then
-        rm -f /tmp/sysbox.deb
+    if ! curl --proto '=https' -sSfL "$SYSBOX_DEB_URL" -o "$deb"; then
+        rm -f "$deb"
+        log_error "Failed to download Sysbox from $SYSBOX_DEB_URL"
+    fi
+    if ! echo "$sha256  $deb" | sha256sum -c --status -; then
+        rm -f "$deb"
+        log_error "The Sysbox package from $SYSBOX_DEB_URL does not match its checksum"
+    fi
+    if ! apt-get install -y "$deb"; then
+        rm -f "$deb"
         log_error "Failed to install Sysbox package"
     fi
-    rm -f /tmp/sysbox.deb
+    rm -f "$deb"
+}
+
+# Names, not ids: an account the engine recovers comes back as a new container.
+running_sysbox_containers() {
+    local ids
+    ids="$(docker ps -q 2>/dev/null)"
+    [ -n "$ids" ] || return 0
+    # shellcheck disable=SC2086
+    docker inspect --format '{{.Name}} {{.HostConfig.Runtime}}' $ids 2>/dev/null |
+        awk '$2 == "sysbox-runc" { sub(/^\//, "", $1); print $1 }'
+}
+
+# Only what was running is started again, with its restart policy as it was:
+# an account stopped on purpose stays stopped, and every account still comes
+# back after a reboot. The engine stack runs on runc and keeps running.
+upgrade_sysbox() {
+    local name running=()
+    log_warn "Sysbox $1 is older than ${SYSBOX_VERSION}"
+    log_info "Upgrading Sysbox - stopping the running sysbox-runc containers..."
+    while read -r name; do
+        [ -n "$name" ] && running+=("$name")
+    done < <(running_sysbox_containers)
+    for name in "${running[@]}"; do
+        timeout 60 docker stop "$name" >/dev/null 2>&1 || recover_with_the_engine "$name" || true
+    done
+    install_or_upgrade_sysbox_package
+    systemctl restart sysbox 2>/dev/null || service sysbox restart 2>/dev/null || true
+    ensure_time_namespaces_disabled
+    if [ "${DOCKER_DAEMON_MODIFIED:-0}" -eq 1 ]; then
+        systemctl restart docker 2>/dev/null || service docker restart 2>/dev/null || true
+    fi
+    if [ ${#running[@]} -gt 0 ]; then
+        log_info "Starting the ${#running[@]} container(s) that were running..."
+        for name in "${running[@]}"; do
+            docker start "$name" >/dev/null 2>&1 || log_warn "Could not start $name"
+        done
+    fi
+    log_info "Sysbox upgraded to ${SYSBOX_VERSION}"
 }
 
 restart_panelalpha_stacks() {
@@ -266,25 +335,7 @@ install_sysbox() {
 
     if [ -n "$current" ]; then
         if version_lt "$current" "$SYSBOX_VERSION"; then
-            log_warn "Sysbox ${current} is older than required ${SYSBOX_VERSION} (fixes FUSE deadlock #998)"
-            log_info "Upgrading Sysbox — temporarily stopping sysbox-runc containers..."
-            # Only stop sysbox containers; leave engine/app stacks running if possible.
-            for id in $(docker ps -q); do
-                rt=$(docker inspect -f '{{.HostConfig.Runtime}}' "$id" 2>/dev/null || true)
-                if [ "$rt" = "sysbox-runc" ]; then
-                    docker update --restart=no "$id" >/dev/null 2>&1 || true
-                    timeout 60 docker stop "$id" >/dev/null 2>&1 || \
-                        recover_with_the_engine "$(docker inspect -f '{{.Name}}' "$id" | sed 's#^/##')" || true
-                fi
-            done
-            install_or_upgrade_sysbox_package
-            systemctl restart sysbox 2>/dev/null || service sysbox restart 2>/dev/null || true
-            ensure_time_namespaces_disabled
-            if [ "${DOCKER_DAEMON_MODIFIED:-0}" -eq 1 ]; then
-                systemctl restart docker 2>/dev/null || service docker restart 2>/dev/null || true
-            fi
-            restart_panelalpha_stacks
-            log_info "Sysbox upgraded to ${SYSBOX_VERSION}"
+            upgrade_sysbox "$current"
             return 0
         fi
 
@@ -458,7 +509,7 @@ show_usage() {
     echo "PanelAlpha Sysbox Installation Script"
     echo ""
     echo "Usage:"
-    echo "  bash install-sysbox.sh                # Install or upgrade Sysbox to ${SYSBOX_VERSION}"
+    echo "  bash install-sysbox.sh                # Install or upgrade Sysbox to ${SYSBOX_VERSION} (SYSBOX_VERSION, at least ${SYSBOX_MIN_VERSION})"
     echo "  bash install-sysbox.sh --uninstall    # Uninstall Sysbox"
     echo "  bash install-sysbox.sh --registry-mirror  # Only point Docker Hub pulls at registry-proxy"
     echo "  bash install-sysbox.sh --help         # Show this help"
