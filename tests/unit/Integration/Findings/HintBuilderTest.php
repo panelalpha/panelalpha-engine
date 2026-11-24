@@ -131,15 +131,72 @@ class HintBuilderTest extends TestCase
 
     public function test_a_create_that_may_not_deploy_gets_the_hints_of_its_code(): void
     {
-        $inspection = FindingPresenter::inspection(
-            ['verdict' => CreateInspection::NOT_DEPLOYABLE, 'strategy' => 'php', 'code' => DeployabilityCheck::ROOT_FILE_MISSING, 'reason' => 'r', 'suggestion' => 's'],
-            'shop',
-        );
+        $inspection = FindingPresenter::inspection(self::refusedAtCreate('https://github.com/cogsend/cogsend', 'main'), 'shop');
 
         $this->assertSame(['inspect_with_recipe', 'inspect_with_recipe', 'redeploy_with_recipe', 'redeploy_with_recipe'], array_column($inspection['hints'], 'action'));
-        $this->assertSame(['source' => 'shop', 'recipe' => null], $inspection['hints'][0]['body']);
-        $this->assertSame(['verdict' => 'deployable', 'strategy' => 'php'], FindingPresenter::inspection(['verdict' => 'deployable', 'strategy' => 'php'], 'shop'));
+        $this->assertSame(['verdict' => CreateInspection::NOT_DEPLOYABLE, 'strategy' => 'sveltekit', 'code' => DeployabilityCheck::SVELTEKIT_ADAPTER_UNSUPPORTED], array_intersect_key($inspection, array_flip(['verdict', 'strategy', 'code'])));
+        $this->assertSame(['recipe' => null], $inspection['hints'][2]['body']);
+        $this->assertSame(['name' => 'shop', 'recipe' => null], $inspection['hints'][3]['arguments']);
+        $this->assertSame(['verdict' => 'deployable', 'strategy' => 'php'], FindingPresenter::inspection(CreateInspection::fromReport(['application' => ['strategy' => 'php', 'verdict' => 'deployable']]), 'shop'));
+        $this->assertNull(FindingPresenter::inspection(CreateInspection::skipped('not read.'), 'shop'));
         $this->assertNull(FindingPresenter::inspection(null, 'shop'));
+    }
+
+    public function test_a_create_refusal_is_inspected_again_from_the_repository_it_read(): void
+    {
+        $hints = FindingPresenter::inspection(self::refusedAtCreate('https://github.com/cogsend/cogsend', 'main'), 'd25sk')['hints'];
+
+        $this->assertSame(['source' => 'https://github.com/cogsend/cogsend', 'branch' => 'main', 'recipe' => null], $hints[0]['body']);
+        $this->assertSame('source_inspect', $hints[1]['tool']);
+        $this->assertSame(['source' => 'https://github.com/cogsend/cogsend', 'branch' => 'main', 'recipe' => null], $hints[1]['arguments']);
+    }
+
+    public function test_a_create_refusal_on_the_default_branch_names_no_branch(): void
+    {
+        $hints = FindingPresenter::inspection(self::refusedAtCreate('https://github.com/cogsend/cogsend', null), 'd25sk')['hints'];
+
+        $this->assertSame(['source' => 'https://github.com/cogsend/cogsend', 'recipe' => null], $hints[0]['body']);
+        $this->assertSame(['source' => 'https://github.com/cogsend/cogsend', 'recipe' => null], $hints[1]['arguments']);
+    }
+
+    public function test_a_create_refusal_whose_repository_was_not_kept_leaves_the_source_to_the_caller(): void
+    {
+        $stored = self::refusedAtCreate('https://github.com/cogsend/cogsend', 'main')->toArray();
+        unset($stored['repository'], $stored['branch']);
+
+        $hints = FindingPresenter::inspection(CreateInspection::fromArray($stored), 'd25sk')['hints'];
+
+        $this->assertSame(['source' => null, 'recipe' => null], $hints[0]['body']);
+    }
+
+    public function test_the_cli_reads_a_create_refusal_with_the_repository_it_read(): void
+    {
+        $finding = self::refusedAtCreate('https://github.com/cogsend/cogsend', 'main')->finding();
+
+        $hints = FindingPresenter::present([$finding], 'd25sk')[0]['hints'];
+
+        $this->assertSame(['source' => 'https://github.com/cogsend/cogsend', 'branch' => 'main', 'recipe' => null], $hints[0]['body']);
+    }
+
+    public function test_inspect_offers_the_branch_and_directory_it_read_again(): void
+    {
+        $issue = (new Finding(DeployabilityCheck::SVELTEKIT_ADAPTER_UNSUPPORTED, 'm', ['adapter' => 'cloudflare']))->toArray();
+
+        $repository = FindingPresenter::presentOne($issue, null, ['source' => 'https://github.com/owner/repo', 'branch' => 'next', 'subdirectory' => 'apps/web']);
+        $project = FindingPresenter::presentOne($issue, 'shop', ['source' => 'shop', 'branch' => null, 'subdirectory' => 'project']);
+
+        $this->assertSame(['source' => 'https://github.com/owner/repo', 'branch' => 'next', 'subdirectory' => 'apps/web', 'recipe' => null], $repository['hints'][0]['body']);
+        $this->assertSame(['source' => 'shop', 'subdirectory' => 'project', 'recipe' => null], $project['hints'][0]['body']);
+    }
+
+    private static function refusedAtCreate(string $repository, ?string $branch): CreateInspection
+    {
+        return CreateInspection::fromReport(['application' => [
+            'strategy' => 'sveltekit',
+            'label' => 'SvelteKit',
+            'verdict' => CreateInspection::NOT_DEPLOYABLE,
+            'issue' => ['code' => DeployabilityCheck::SVELTEKIT_ADAPTER_UNSUPPORTED, 'message' => 'vite.config.ts uses @sveltejs/adapter-cloudflare.', 'adapter' => 'cloudflare'],
+        ]], $repository, $branch);
     }
 
     public function test_inspect_says_when_no_port_was_found(): void

@@ -62,6 +62,20 @@ class ProjectSourceInspectionHttpTest extends TestCase
             ->assertJsonPath('data.source.subdirectory', 'project/public');
     }
 
+    public function test_what_a_subdirectory_cannot_deploy_is_inspected_again_in_that_subdirectory(): void
+    {
+        mkdir($this->home . '/project/docs');
+        file_put_contents($this->home . '/project/docs/README.md', "# Docs\n");
+
+        $response = $this->postJson('/api/source/inspect', ['source' => 'shop', 'subdirectory' => 'project/docs']);
+
+        $response->assertOk()->assertJsonPath('data.application.issue.hints.0.action', 'inspect_with_recipe');
+        $this->assertSame(
+            ['source' => 'shop', 'subdirectory' => 'project/docs', 'recipe' => null],
+            $response->json('data.application.issue.hints.0.body'),
+        );
+    }
+
     public function test_a_subdirectory_that_is_not_there_is_refused(): void
     {
         $this->getJson('/api/projects/shop/inspect?subdirectory=missing')

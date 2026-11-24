@@ -240,7 +240,7 @@ class Create extends Command
         $response = (new UserResource($user))->response();
         $payload = $response->getData(true);
         if (is_array($payload) && is_array($payload['data'] ?? null)) {
-            $payload['data']['inspection'] = FindingPresenter::inspection($creator->inspection()?->toResponse(), $user->username);
+            $payload['data']['inspection'] = FindingPresenter::inspection($creator->inspection(), $user->username);
             $response->setData($payload);
         }
 

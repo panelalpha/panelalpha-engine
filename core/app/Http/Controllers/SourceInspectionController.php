@@ -320,9 +320,26 @@ class SourceInspectionController extends Controller
             $data += $this->deploymentAndDrift($user, $resolved, $report);
         }
         $report['ports'] = FindingPresenter::ports($report['ports'], $user?->username);
-        $report['application']['issue'] = FindingPresenter::presentOne($report['application']['issue'], $user?->username, ['source' => $resolved->reference]);
+        $report['application']['issue'] = FindingPresenter::presentOne($report['application']['issue'], $user?->username, $this->inspectedAgain($resolved, $subdirectory));
 
         return new JsonResponse(['data' => array_merge($data, $report)]);
+    }
+
+    /**
+     * What inspects the same files again: the source, the directory read, and for a repository the branch.
+     *
+     * @return array<string, scalar|null>
+     */
+    private function inspectedAgain(ResolvedSource $resolved, ?string $subdirectory): array
+    {
+        $branch = $resolved->meta['branch'] ?? null;
+        $subdirectory = trim((string) $subdirectory, '/ ');
+
+        return [
+            'source' => $resolved->reference,
+            'branch' => $resolved->type === SourceResolver::TYPE_GIT && is_string($branch) ? $branch : null,
+            'subdirectory' => $subdirectory === '' ? null : $subdirectory,
+        ];
     }
 
     /** A project's directory was already chosen and checked against the account home; other sources descend here. */

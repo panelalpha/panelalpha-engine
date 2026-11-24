@@ -4,6 +4,7 @@ namespace App\Lib\Findings\Hints;
 
 use App\Lib\Deploy\Inspect\Report\PortsReport;
 use App\Lib\Findings\Finding;
+use App\Lib\Project\CreateInspection;
 
 /**
  * Findings as an answer shows them, each with the hints that act on it. Called only where a response is built, never
@@ -77,19 +78,19 @@ final class FindingPresenter
     }
 
     /**
-     * A create's `inspection`, with the hints that act on what may stop it deploying.
+     * A create's `inspection`, with the hints that act on what may stop it deploying; they inspect the repository it read.
      *
-     * @param  ?array<string, mixed>  $inspection
      * @return ?array<string, mixed>
      */
-    public static function inspection(?array $inspection, ?string $username): ?array
+    public static function inspection(?CreateInspection $inspection, ?string $username): ?array
     {
-        $code = $inspection['code'] ?? null;
-        if (! is_string($code)) {
-            return $inspection;
+        $response = $inspection?->toResponse();
+        $finding = $inspection?->finding();
+        if ($response === null || $finding === null) {
+            return $response;
         }
 
-        return $inspection + ['hints' => (new HintBuilder)->for($code, ['username' => $username, 'source' => $username])];
+        return $response + ['hints' => (new HintBuilder)->for($finding->code, $finding->facts + ['username' => $username])];
     }
 
     /**

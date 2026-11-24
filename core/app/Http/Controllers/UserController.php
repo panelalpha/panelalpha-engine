@@ -412,7 +412,7 @@ class UserController extends Controller
     {
         $payload = $response->getData(true);
         if (is_array($payload) && is_array($payload['data'] ?? null)) {
-            $payload['data']['inspection'] = FindingPresenter::inspection($inspection?->toResponse(), $payload['data']['username'] ?? null);
+            $payload['data']['inspection'] = FindingPresenter::inspection($inspection, $payload['data']['username'] ?? null);
             $response->setData($payload);
         }
 

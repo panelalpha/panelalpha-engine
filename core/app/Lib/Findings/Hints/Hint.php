@@ -34,6 +34,14 @@ abstract class Hint
         return [];
     }
 
+    /**
+     * @return list<string> API parameters left out when nothing known fills them, rather than left for the caller
+     */
+    public function optional(): array
+    {
+        return [];
+    }
+
     /** The artisan command; `{param}` is filled from the same values as the REST call. */
     public function cli(): ?string
     {

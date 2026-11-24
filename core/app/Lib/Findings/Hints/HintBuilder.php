@@ -58,7 +58,7 @@ final class HintBuilder
     }
 
     /**
-     * Every parameter the action takes, path ones first; null where nothing known can fill it.
+     * Every parameter the action takes, path ones first; null where nothing known can fill it, absent when that one is optional.
      *
      * @param  array<string, mixed>  $facts
      * @return array<string, scalar|null>
@@ -75,7 +75,11 @@ final class HintBuilder
             $values[$name] = self::resolve($template, $facts);
         }
 
-        return $values;
+        return array_filter(
+            $values,
+            static fn (mixed $value, string $name): bool => $value !== null || ! in_array($name, $hint->optional(), true),
+            ARRAY_FILTER_USE_BOTH,
+        );
     }
 
     /**

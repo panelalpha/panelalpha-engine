@@ -230,26 +230,7 @@ class ProjectCreateHttpTest extends TestCase
     #[\PHPUnit\Framework\Attributes\Group('network')]
     public function test_a_repository_that_may_not_deploy_is_created_with_the_inspection(): void
     {
-        $asked = new \ArrayObject();
-        $this->app->instance(CreateInspector::class, new class ($asked) extends CreateInspector {
-            public function __construct(private readonly \ArrayObject $asked)
-            {
-            }
-
-            public function inspect(
-                string $repoUrl,
-                ?string $branch = null,
-                ?string $token = null,
-                ?string $recipe = null,
-                ?DeployPlan $plan = null
-            ): CreateInspection {
-                $this->asked[] = [$repoUrl, $branch, $token, $recipe];
-
-                return CreateInspection::fromReport([
-                    'application' => ['strategy' => 'fallback', 'label' => 'Unknown', 'verdict' => DeployVerdict::PLACEHOLDER, 'deployable' => false, 'issue' => DeployVerdict::UNRECOGNISED],
-                ]);
-            }
-        });
+        $asked = $this->inspectorFindingNothingDeployable();
 
         $response = $this->postJson('/api/projects', [
             'name' => 'inspected',
@@ -271,6 +252,78 @@ class ProjectCreateHttpTest extends TestCase
             DeployProject::class,
             static fn (DeployProject $job): bool => ($job->inspection['verdict'] ?? null) === CreateInspection::PLACEHOLDER
         );
+    }
+
+    public function test_the_hint_of_a_create_that_may_not_deploy_inspects_the_repository_again(): void
+    {
+        $this->repositoryAnswersOffline();
+        $this->inspectorFindingNothingDeployable();
+
+        $response = $this->postJson('/api/projects', [
+            'name' => 'refused',
+            'domain' => 'refused.example.test',
+            'tunnel' => 'none',
+            'git_repo' => 'https://github.com/octocat/Spoon-Knife',
+            'git_branch' => 'test-branch',
+        ]);
+
+        $response->assertStatus(202);
+        $this->assertSame('inspect_with_recipe', $response->json('data.inspection.hints.0.action'));
+        $this->assertSame(
+            ['source' => 'https://github.com/octocat/Spoon-Knife', 'branch' => 'test-branch', 'recipe' => null],
+            $response->json('data.inspection.hints.0.body'),
+        );
+        $this->assertSame(['name' => 'refused', 'recipe' => null], $response->json('data.inspection.hints.3.arguments'));
+    }
+
+    /** github.com resolves to a public address and its remote is never asked. */
+    private function repositoryAnswersOffline(): void
+    {
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? [TestNetwork::routable(4)] : []);
+        $this->app->instance(GitRemoteProbe::class, new class extends GitRemoteProbe {
+            public function __construct()
+            {
+            }
+
+            public function problem(
+                string $repoField,
+                string $repoUrl,
+                ?string $token,
+                string $tokenField = 'git_token',
+                ?string $branch = null,
+                string $branchField = 'git_branch',
+                ?array $deployKey = null,
+            ): ?array {
+                return null;
+            }
+        });
+    }
+
+    /** The inspection before the clone, finding that nothing would deploy, and what each create asked it. */
+    private function inspectorFindingNothingDeployable(): \ArrayObject
+    {
+        $asked = new \ArrayObject();
+        $this->app->instance(CreateInspector::class, new class ($asked) extends CreateInspector {
+            public function __construct(private readonly \ArrayObject $asked)
+            {
+            }
+
+            public function inspect(
+                string $repoUrl,
+                ?string $branch = null,
+                ?string $token = null,
+                ?string $recipe = null,
+                ?DeployPlan $plan = null
+            ): CreateInspection {
+                $this->asked[] = [$repoUrl, $branch, $token, $recipe];
+
+                return CreateInspection::fromReport([
+                    'application' => ['strategy' => 'fallback', 'label' => 'Unknown', 'verdict' => DeployVerdict::PLACEHOLDER, 'deployable' => false, 'issue' => DeployVerdict::UNRECOGNISED],
+                ], $repoUrl, $branch);
+            }
+        });
+
+        return $asked;
     }
 
     public function test_a_create_without_a_repository_inspects_nothing(): void

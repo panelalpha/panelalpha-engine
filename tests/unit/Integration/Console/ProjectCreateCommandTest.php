@@ -598,6 +598,23 @@ class ProjectCreateCommandTest extends TestCase
         $this->assertSame(['verdict' => 'deployable', 'strategy' => 'static'], $json['data']['inspection'] ?? null);
     }
 
+    public function test_json_mode_hints_at_inspecting_the_repository_it_read(): void
+    {
+        $this->stubInspectedCreate(CreateInspection::fromReport([
+            'application' => ['strategy' => 'fallback', 'label' => 'Unknown', 'verdict' => DeployVerdict::PLACEHOLDER, 'deployable' => false, 'issue' => DeployVerdict::UNRECOGNISED],
+        ], 'https://github.com/acme/lib', 'next'));
+
+        [$code, $out] = $this->create(['--repo' => 'https://github.com/acme/lib', '--project' => 'acme', '--domain' => 'acme.example.test', '--json' => true, '--quiet-deploy' => true]);
+
+        $this->assertSame(0, $code, $out);
+        $json = json_decode($out, true);
+        $this->assertSame(
+            ['source' => 'https://github.com/acme/lib', 'branch' => 'next', 'recipe' => null],
+            $json['data']['inspection']['hints'][0]['body'] ?? null,
+            $out,
+        );
+    }
+
     /** A create that succeeds with $inspection, however the command drives it. */
     private function stubInspectedCreate(CreateInspection $inspection): void
     {

@@ -5,6 +5,7 @@ namespace Tests\Integration\Http;
 use App\Http\Middleware\Authenticate;
 use App\Jobs\DeployProject;
 use App\Jobs\RebuildProject;
+use App\Lib\Deploy\Inspect\Report\DeployVerdict;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Http\OutboundUrl;
@@ -118,6 +119,36 @@ class ProjectSourceAttachHttpTest extends TestCase
         Queue::assertPushed(
             RebuildProject::class,
             static fn (RebuildProject $job): bool => $job->action === ProjectRebuild::ATTACH_SOURCE
+        );
+    }
+
+    public function test_the_hint_of_a_source_that_may_not_deploy_inspects_that_repository_again(): void
+    {
+        $this->app->instance(CreateInspector::class, new class extends CreateInspector {
+            public function __construct()
+            {
+            }
+
+            public function inspect(
+                string $repoUrl,
+                ?string $branch = null,
+                ?string $token = null,
+                ?string $recipe = null,
+                ?DeployPlan $plan = null
+            ): CreateInspection {
+                return CreateInspection::fromReport(['application' => [
+                    'strategy' => 'fallback', 'label' => 'Unknown', 'verdict' => DeployVerdict::PLACEHOLDER, 'issue' => DeployVerdict::UNRECOGNISED,
+                ]], $repoUrl, $branch);
+            }
+        });
+        $this->makeUser('hintme', ['template' => 'dind']);
+
+        $response = $this->postJson('/api/projects/hintme/source', self::body());
+
+        $response->assertStatus(202);
+        $this->assertSame(
+            ['source' => 'https://github.com/octocat/Hello-World.git', 'branch' => 'master', 'recipe' => null],
+            $response->json('data.inspection.hints.0.body'),
         );
     }
 

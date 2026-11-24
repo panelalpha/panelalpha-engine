@@ -34,6 +34,8 @@ final class CreateInspection
         public readonly ?string $suggestion = null,
         public readonly ?string $skipped = null,
         public readonly ?string $code = null,
+        public readonly ?string $repository = null,
+        public readonly ?string $branch = null,
     ) {}
 
     /** Not inspected, and why: said once in the deploy log, nowhere else. */
@@ -43,23 +45,33 @@ final class CreateInspection
     }
 
     /**
-     * The verdict an AppInspector report carries, with what to do about it.
+     * The verdict an AppInspector report carries, with what to do about it, and the repository and branch it read.
      *
      * @param  array<string, mixed>  $report
      */
-    public static function fromReport(array $report): self
+    public static function fromReport(array $report, ?string $repository = null, ?string $branch = null): self
     {
         $application = is_array($report['application'] ?? null) ? $report['application'] : [];
         $strategy = (string) ($application['strategy'] ?? Strategies::FALLBACK);
         $label = (string) ($application['label'] ?? $strategy);
         $issue = is_array($application['issue'] ?? null) ? Finding::fromStored($application['issue']) : null;
 
-        return match ($application['verdict'] ?? null) {
+        $found = match ($application['verdict'] ?? null) {
             self::NOT_DEPLOYABLE => self::notDeployable($strategy, $label, $issue),
             self::PLACEHOLDER => self::placeholder($strategy, $label, $issue),
             self::NO_START_COMMAND => self::noStartCommand($strategy, $label),
             default => new self(self::DEPLOYABLE, $strategy, $label),
         };
+
+        return $found->readFrom($repository, $branch);
+    }
+
+    private function readFrom(?string $repository, ?string $branch): self
+    {
+        return new self(
+            $this->verdict, $this->strategy, $this->label, $this->reason, $this->suggestion, $this->skipped, $this->code,
+            $repository, $branch,
+        );
     }
 
     private static function notDeployable(string $strategy, string $label, ?Finding $issue): self
@@ -125,11 +137,15 @@ final class CreateInspection
         ];
     }
 
-    /** What may stop it deploying, as a finding; null when nothing may. */
+    /** What may stop it deploying, as a finding whose `source` and `branch` are what was read; null when nothing may. */
     public function finding(): ?Finding
     {
         return $this->warns() && $this->code !== null
-            ? new Finding($this->code, trim("{$this->reason} {$this->suggestion}"), ['strategy' => $this->strategy])
+            ? new Finding($this->code, trim("{$this->reason} {$this->suggestion}"), [
+                'strategy' => $this->strategy,
+                'source' => $this->repository,
+                'branch' => $this->branch,
+            ])
             : null;
     }
 
@@ -174,6 +190,8 @@ final class CreateInspection
             'suggestion' => $this->suggestion,
             'skipped' => $this->skipped,
             'code' => $this->code,
+            'repository' => $this->repository,
+            'branch' => $this->branch,
         ];
     }
 
@@ -195,6 +213,8 @@ final class CreateInspection
             $string('suggestion'),
             $string('skipped') ?? ($string('verdict') === null ? 'no verdict was recorded.' : null),
             $string('code'),
+            $string('repository'),
+            $string('branch'),
         );
     }
 }

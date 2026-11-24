@@ -5,6 +5,7 @@ namespace Tests\Integration\Http;
 use App\Http\Middleware\Authenticate;
 use App\Jobs\CopyProject;
 use App\Jobs\DeployProject;
+use App\Lib\Deploy\Inspect\Report\DeployVerdict;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
@@ -14,6 +15,7 @@ use App\Lib\Project\CreateInspection;
 use App\Lib\Project\CreateInspector;
 use App\Lib\Project\ProvisionEnvironment;
 use App\Lib\Project\SystemProvisionEnvironment;
+use App\Mcp\Tools\Api\Projects\ProjectCreateTool;
 use App\Models\Domain;
 use App\Models\SecretVaultEntry;
 use App\Models\Setting;
@@ -24,6 +26,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
+use Laravel\Mcp\Request;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
@@ -513,6 +516,33 @@ class ProjectCreateTypedTest extends TestCase
     }
 
     /** @param array<string, mixed> $body */
+    public function test_the_mcp_create_hints_at_inspecting_the_repository_it_read(): void
+    {
+        $this->app->instance(CreateInspector::class, new class extends CreateInspector
+        {
+            public function __construct() {}
+
+            public function inspect(string $repoUrl, ?string $branch = null, ?string $token = null, ?string $recipe = null, ?DeployPlan $plan = null): CreateInspection
+            {
+                return CreateInspection::fromReport(['application' => [
+                    'strategy' => 'fallback', 'label' => 'Unknown', 'verdict' => DeployVerdict::PLACEHOLDER, 'issue' => DeployVerdict::UNRECOGNISED,
+                ]], $repoUrl, $branch);
+            }
+        });
+
+        $content = (string) (new ProjectCreateTool)->handle(new Request([
+            'name' => 'mcprefused',
+            'domain' => ['name' => 'mcprefused.example.test', 'tunnel' => 'none'],
+            'source' => ['type' => 'git', 'url' => 'https://github.com/octocat/Spoon-Knife', 'branch' => 'test-branch'],
+        ]))->content();
+
+        $hints = json_decode($content, true)['data']['data']['inspection']['hints'] ?? null;
+        $this->assertIsArray($hints, $content);
+        $this->assertSame('source_inspect', $hints[1]['tool']);
+        $this->assertSame(['source' => 'https://github.com/octocat/Spoon-Knife', 'branch' => 'test-branch', 'recipe' => null], $hints[1]['arguments']);
+        $this->assertSame(['name' => 'mcprefused', 'recipe' => null], $hints[3]['arguments']);
+    }
+
     private function create(array $body): TestResponse
     {
         return $this->postJson('/api/projects', $body);

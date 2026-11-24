@@ -17,7 +17,7 @@ final class AcceptedTask
     {
         $response = TaskResource::make($queued->task)->response();
         $payload = $response->getData(true);
-        $payload['data']['inspection'] = FindingPresenter::inspection($queued->inspection?->toResponse(), $queued->task->username);
+        $payload['data']['inspection'] = FindingPresenter::inspection($queued->inspection, $queued->task->username);
 
         return $response->setData($payload)->setStatusCode(202);
     }

@@ -6,6 +6,7 @@ use App\Lib\Deploy\Inspect\GitHubTree;
 use App\Lib\Deploy\Inspect\Report\DeployVerdict;
 use App\Lib\Deploy\Inspect\ResolvedSource;
 use App\Lib\Deploy\Inspect\SourceResolver;
+use App\Lib\Findings\Hints\FindingPresenter;
 use App\Lib\Project\CreateInspection;
 use App\Lib\Project\CreateInspector;
 use Illuminate\Http\Client\Request;
@@ -82,6 +83,21 @@ class CreateInspectorTest extends TestCase
         $this->assertStringContainsString('the recipe `railpack` may build it', (string) $response['reason']);
         // The workspace goes as soon as the report is made.
         $this->assertSame([], glob($this->tmp.'/inspect-*') ?: []);
+    }
+
+    public function test_what_may_not_deploy_is_inspected_again_from_the_repository_and_branch_it_read(): void
+    {
+        self::fakeRepository([
+            'package.json' => '{"name":"lib","main":"lib.js","scripts":{"test":"node test"}}',
+            'lib.js' => 'module.exports = {};',
+        ]);
+
+        $inspection = $this->inspector()->inspect('github.com/owner/repo', ' next ');
+
+        $this->assertSame('https://github.com/owner/repo', $inspection->repository);
+        $this->assertSame('next', $inspection->branch);
+        $hints = FindingPresenter::inspection($inspection, 'lib')['hints'] ?? [];
+        $this->assertSame(['source' => 'https://github.com/owner/repo', 'branch' => 'next', 'recipe' => null], $hints[0]['body'] ?? null);
     }
 
     public function test_a_site_that_deploys_is_reported_by_its_strategy_alone(): void

@@ -54,7 +54,7 @@ class CreateInspector
         try {
             RecipeFileOverlay::apply($resolved->dir, $repoUrl);
 
-            return CreateInspection::fromReport(AppInspector::inspect($resolved->dir, $repoUrl, $plan, $recipe));
+            return CreateInspection::fromReport(AppInspector::inspect($resolved->dir, $repoUrl, $plan, $recipe), $repoUrl, $branch);
         } catch (\Throwable $e) {
             return CreateInspection::skipped('inspecting its file list failed ('.self::brief($e).').');
         } finally {
