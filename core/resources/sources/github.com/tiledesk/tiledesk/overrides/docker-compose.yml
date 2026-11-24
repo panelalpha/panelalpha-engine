@@ -6,6 +6,7 @@
 # unpinned images are pinned (qdrant release, chat21-rabbitmq by digest: it
 # only has `latest`, pushed 2021-08-03). Qdrant storage is a named volume.
 # The two LLM backends run 1 worker instead of 3 (about 1.25 GB each at 3).
+# The server waits up to 120 s for its first MongoDB connection, not the driver's 10 s.
 # The JWT secrets and the pre-signed RabbitMQ/chat21 admin tokens upstream
 # publishes come from ~/.panelalpha/tiledesk/*.env, generated and signed per
 # account by hooks/prepare.sh, and rabbitmq trusts that key instead of tokenKey.
@@ -167,7 +168,8 @@ services:
     - CHAT21_APPID=tilechat
     - RESTHOOK_ENABLED=true
     - ALLOW_REOPEN_CHAT=true
-    - MONGODB_URI=mongodb://mongo/tiledesk
+    # The driver's 10 s connect timeout runs out while the server still loads its modules (11-13 s from a cold cache).
+    - MONGODB_URI=mongodb://mongo/tiledesk?connectTimeoutMS=120000
     - EMAIL_ENABLED
     - EMAIL_HOST
     - EMAIL_USERNAME

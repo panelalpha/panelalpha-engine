@@ -34,6 +34,11 @@ below). On an install deployed before, everyone is signed out once.
   `latest` tag, 2021-08-03) by digest. Qdrant storage moved from a `./` bind
   to a named volume; MongoDB keeps upstream's named volume.
 - The two LLM backends run `WORKERS=1` instead of 3 (1.25 GB each at 3).
+- The server's `MONGODB_URI` sets `connectTimeoutMS=120000`. It starts
+  connecting before it loads its modules, which takes 11-13 s from a cold
+  cache, and the driver's default 10 s timeout fires as soon as loading
+  ends: `MongoNetworkTimeoutError: connection timed out` against a healthy
+  mongo, and the server exits.
 - `hooks/prepare.sh` generates `CHAT21_SECRET`, `GLOBAL_SECRET`, `LLM_SECRET`
   and the push webhook token once into `~/.panelalpha/tiledesk/secrets.env`.
   On every deploy it signs the RabbitMQ/chat21 admin and observer tokens
