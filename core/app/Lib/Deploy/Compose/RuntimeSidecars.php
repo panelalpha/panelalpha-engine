@@ -916,7 +916,14 @@ final class RuntimeSidecars
             $this->accountUser,
             $this->projectDir
         );
-        [$services, $env] = $this->withCredentialsPinned(is_array($hardened['services'] ?? null) ? $hardened['services'] : []);
+        [$services, $env, $settled] = $this->withCredentialsPinned(is_array($hardened['services'] ?? null) ? $hardened['services'] : []);
+        [$services, $appSecrets] = SettledSecretMounts::unmounted(
+            $services,
+            $this->appSecrets,
+            $settled,
+            is_array($hardened['secrets'] ?? null) ? $hardened['secrets'] : [],
+            $this->env
+        );
 
         return [
             'services' => $services,
@@ -932,17 +939,20 @@ final class RuntimeSidecars
             'dropped_test_services' => $this->droppedTestServices,
             'dropped_test_matrix' => $this->droppedTestMatrix,
             'hardening_removed' => $removed,
-        ] + $this->declaredFilesOf($hardened);
+        ] + $this->declaredFilesOf($hardened, $services, $appSecrets);
     }
 
     /**
      * The `secrets:` and `configs:` the kept services and the app name, past the hardener, and the app's own
-     * secrets among them: left behind, Compose refused the file with "refers to undefined secret".
+     * secrets among them: left behind, Compose refused the file with "refers to undefined secret". A secret no
+     * service names any more is not declared.
      *
      * @param  array<string, mixed>  $hardened
+     * @param  array<array-key, mixed>  $services
+     * @param  list<mixed>  $appSecrets
      * @return array{secrets?: array<string, mixed>, configs?: array<string, mixed>, app_secrets?: list<mixed>}
      */
-    private function declaredFilesOf(array $hardened): array
+    private function declaredFilesOf(array $hardened, array $services, array $appSecrets): array
     {
         $out = [];
         foreach (ComposeFileReferences::SECTIONS as $section) {
@@ -950,7 +960,12 @@ final class RuntimeSidecars
                 $out[$section] = $hardened[$section];
             }
         }
-        $appSecrets = ComposeFileReferences::onlyDeclared($this->appSecrets, $out['secrets'] ?? []);
+        $secrets = ComposeFileReferences::usedBy($services, $appSecrets, ['secrets' => $out['secrets'] ?? []])['secrets'] ?? [];
+        unset($out['secrets']);
+        if ($secrets !== []) {
+            $out['secrets'] = $secrets;
+        }
+        $appSecrets = ComposeFileReferences::onlyDeclared($appSecrets, $out['secrets'] ?? []);
         if ($appSecrets !== []) {
             $out['app_secrets'] = $appSecrets;
         }
@@ -963,17 +978,19 @@ final class RuntimeSidecars
      * the env union keeps what is set, so of two candidates the first declared wins.
      *
      * @param  array<array-key, mixed>  $services
-     * @return array{0: array<array-key, mixed>, 1: array<string, string>}
+     * @return array{0: array<array-key, mixed>, 1: array<string, string>, 2: array<array-key, list<string>>} also the secrets each settled `*_FILE` read
      */
     private function withCredentialsPinned(array $services): array
     {
         $env = [];
+        $settled = [];
         foreach ($services as $name => $service) {
             if (! is_array($service)) {
                 continue;
             }
             $ports = $this->ports[$name] ?? [];
             $services[$name] = SidecarCredentials::pinSidecarCredentials((string) $name, $service, $ports, $this->passwords);
+            $settled[$name] = SettledSecretMounts::settledBetween($service, $services[$name]);
             $generated = [];
             if ($this->placeholderSeed !== null) {
                 [$services[$name], $generated] = SidecarCredentials::withBareSecretsFilled(
@@ -985,7 +1002,7 @@ final class RuntimeSidecars
             $env += $generated + SidecarCredentials::envForSidecar((string) $name, $services[$name], $ports);
         }
 
-        return [$services, $env];
+        return [$services, $env, $settled];
     }
 
     /**

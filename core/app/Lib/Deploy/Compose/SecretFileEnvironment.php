@@ -15,8 +15,6 @@ use App\Lib\Deploy\Sidecar\ServiceRole;
  */
 final class SecretFileEnvironment
 {
-    private const SECRETS_DIR = '/run/secrets/';
-
     /**
      * @param  array<string, mixed>  $service
      * @param  array<string, mixed>  $declared  the file's top-level `secrets:`
@@ -91,7 +89,7 @@ final class SecretFileEnvironment
      */
     private static function secretContents(array $service, string $path, array $declared, callable $read, callable $generated): ?string
     {
-        $name = self::mountedAt($service, trim($path));
+        $name = ComposeFileReferences::secretMountedAt($service, trim($path));
         $file = $name === null ? null : ($declared[$name]['file'] ?? null);
         if (! is_string($file) || ! SecretSourceFiles::isCheckoutPath($file)) {
             return null;
@@ -104,26 +102,5 @@ final class SecretFileEnvironment
         }
 
         return trim($contents) !== '' ? rtrim($contents, "\r\n") : null;
-    }
-
-    /**
-     * @param  array<string, mixed>  $service
-     */
-    private static function mountedAt(array $service, string $path): ?string
-    {
-        foreach (ComposeFileReferences::listed($service, 'secrets') as $reference) {
-            $name = ComposeFileReferences::nameOf($reference);
-            $target = is_array($reference) && is_string($reference['target'] ?? null) ? $reference['target'] : $name;
-            if ($name !== null && is_string($target) && self::targetPath($target) === $path) {
-                return $name;
-            }
-        }
-
-        return null;
-    }
-
-    private static function targetPath(string $target): string
-    {
-        return str_starts_with($target, '/') ? $target : self::SECRETS_DIR.$target;
     }
 }

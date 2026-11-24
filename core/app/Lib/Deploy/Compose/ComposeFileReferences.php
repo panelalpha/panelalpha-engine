@@ -13,6 +13,8 @@ final class ComposeFileReferences
     /** @var list<string> */
     public const SECTIONS = ['secrets', 'configs'];
 
+    private const SECRETS_DIR = '/run/secrets/';
+
     /**
      * @param  array<mixed>  $compose
      * @return array<string, array<string, mixed>> section => name => entry
@@ -102,6 +104,71 @@ final class ComposeFileReferences
         }
 
         return $list;
+    }
+
+    /**
+     * The secret $service mounts at $path, by name.
+     *
+     * @param  array<string, mixed>  $service
+     */
+    public static function secretMountedAt(array $service, string $path): ?string
+    {
+        foreach (self::listed($service, 'secrets') as $reference) {
+            if (self::secretPathOf($reference) === $path) {
+                return self::nameOf($reference);
+            }
+        }
+
+        return null;
+    }
+
+    /** Where a `secrets:` entry mounts its secret: `/run/secrets/<name>`, or the long form's `target`. */
+    public static function secretPathOf(mixed $reference): ?string
+    {
+        $name = self::nameOf($reference);
+        $target = is_array($reference) && is_string($reference['target'] ?? null) ? $reference['target'] : $name;
+        if ($name === null || ! is_string($target)) {
+            return null;
+        }
+
+        return str_starts_with($target, '/') ? $target : self::SECRETS_DIR.$target;
+    }
+
+    /**
+     * $service without its `secrets:` entries for $names, the key gone with the last one.
+     *
+     * @param  array<string, mixed>  $service
+     * @param  list<string>  $names
+     * @return array<string, mixed>
+     */
+    public static function withoutSecrets(array $service, array $names): array
+    {
+        if ($names === [] || ! is_array($service['secrets'] ?? null)) {
+            return $service;
+        }
+        $kept = self::withoutNames(self::listed($service, 'secrets'), $names);
+        if ($kept === []) {
+            unset($service['secrets']);
+        } else {
+            $service['secrets'] = $kept;
+        }
+
+        return $service;
+    }
+
+    /**
+     * $list without the references to $names.
+     *
+     * @param  list<mixed>  $list
+     * @param  list<string>  $names
+     * @return list<mixed>
+     */
+    public static function withoutNames(array $list, array $names): array
+    {
+        return array_values(array_filter(
+            $list,
+            static fn (mixed $reference): bool => ! in_array(self::nameOf($reference), $names, true)
+        ));
     }
 
     /** `db_password`, or `{source: db_password, target: …}`'s source. */
