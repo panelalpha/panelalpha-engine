@@ -2,11 +2,14 @@
 
 namespace App\Console\Commands\Projects;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Lib\Project\ProjectOrphans;
 use Illuminate\Console\Command;
 
 class ProjectOrphanDeleteCommand extends Command
 {
+    use ConfirmsChanges;
+
     protected $signature = 'project:orphan:delete {name : The name to free} {--force : Skip the confirmation}';
 
     protected $description = 'Remove what holds a name without a project: its container, account, home and project directory';
@@ -20,7 +23,7 @@ class ProjectOrphanDeleteCommand extends Command
             return 1;
         }
 
-        if (! $this->option('force') && ! $this->input->isInteractive()) {
+        if (! $this->option('force') && ! $this->canBeAsked()) {
             $this->error('Freeing a name without confirmation requires --force.');
 
             return 1;

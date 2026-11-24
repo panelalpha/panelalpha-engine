@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Users;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Exceptions\ProblemException;
 use App\Exceptions\ProjectBusyException;
 use App\Lib\Project\ProjectDeleter;
@@ -13,6 +14,8 @@ use Symfony\Component\Console\Output\ConsoleOutputInterface;
 
 class Delete extends Command
 {
+    use ConfirmsChanges;
+
     /** Older spellings still answer, so nothing scripted against them breaks. */
     protected $aliases = ['projects:delete', 'users:delete'];
 
@@ -30,7 +33,7 @@ class Delete extends Command
         $usernames = $this->argument('project');
         $forced = (bool) $this->option('force');
 
-        if (! $forced && ! $this->input->isInteractive()) {
+        if (! $forced && ! $this->canBeAsked()) {
             $this->failLine('Deleting without confirmation requires --force.');
 
             return 1;

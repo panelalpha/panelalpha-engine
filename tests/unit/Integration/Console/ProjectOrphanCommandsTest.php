@@ -4,8 +4,10 @@ namespace Tests\Integration\Console;
 
 use App\System;
 use App\System\Project;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Artisan;
 use Mockery;
+use Symfony\Component\Console\Tester\CommandTester;
 use Tests\Support\FakeProcess;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\LocalRoot;
@@ -82,6 +84,19 @@ class ProjectOrphanCommandsTest extends TestCase
 
         $this->assertSame(1, $exit);
         $this->assertStringContainsString('requires --force', Artisan::output());
+        $this->assertSame([], $this->removed);
+    }
+
+    public function test_the_delete_with_no_terminal_and_without_force_frees_nothing(): void
+    {
+        $this->accounts = ['fe25orph' => $this->account()];
+        $this->holders = ['fe25orph' => [System::HOLDER_ACCOUNT]];
+        $tester = new CommandTester($this->app->make(Kernel::class)->all()['project:orphan:delete']);
+
+        $tester->execute(['name' => 'fe25orph']);
+
+        $this->assertSame(1, $tester->getStatusCode());
+        $this->assertStringContainsString('requires --force', $tester->getDisplay());
         $this->assertSame([], $this->removed);
     }
 

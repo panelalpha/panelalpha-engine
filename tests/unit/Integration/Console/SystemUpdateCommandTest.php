@@ -3,7 +3,9 @@
 namespace Tests\Integration\Console;
 
 use App\System;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Cache;
+use Symfony\Component\Console\Tester\CommandTester;
 use Tests\Support\FakeUpdateCheckSystem;
 use Tests\Support\HubReleases;
 use Tests\TestCase;
@@ -114,6 +116,19 @@ class SystemUpdateCommandTest extends TestCase
         HubReleases::fake(['2.4.0']);
 
         $this->artisan('system:update --no-interaction')->assertExitCode(1);
+        $this->assertSame(0, $this->system->started);
+    }
+
+    public function test_with_no_terminal_and_no_force_an_update_is_refused_rather_than_cancelled(): void
+    {
+        HubReleases::fake(['2.4.0']);
+        $tester = new CommandTester($this->app->make(Kernel::class)->all()['system:update']);
+
+        $tester->execute([], ['capture_stderr_separately' => true]);
+
+        $this->assertSame(1, $tester->getStatusCode());
+        $this->assertSame("This change needs confirmation: pass --force to apply it without a prompt.\n", $tester->getErrorOutput());
+        $this->assertStringNotContainsString('Cancelled.', $tester->getDisplay());
         $this->assertSame(0, $this->system->started);
     }
 

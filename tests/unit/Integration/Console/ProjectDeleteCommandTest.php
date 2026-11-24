@@ -7,7 +7,9 @@ use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Project\ProjectDeleter;
 use App\Models\Task;
 use App\Models\User;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Artisan;
+use Symfony\Component\Console\Tester\CommandTester;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
@@ -41,6 +43,17 @@ class ProjectDeleteCommandTest extends TestCase
 
         $this->assertSame(1, $exit);
         $this->assertStringContainsString('requires --force', Artisan::output());
+        $this->assertTrue(User::existsByUsername('keepme'));
+    }
+
+    public function test_no_terminal_without_force_fails_as_no_interaction_does(): void
+    {
+        $tester = new CommandTester($this->app->make(Kernel::class)->all()['project:delete']);
+
+        $tester->execute(['project' => ['keepme']]);
+
+        $this->assertSame(1, $tester->getStatusCode());
+        $this->assertSame('Deleting without confirmation requires --force.', trim($tester->getDisplay()));
         $this->assertTrue(User::existsByUsername('keepme'));
     }
 

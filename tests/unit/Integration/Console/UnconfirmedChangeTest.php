@@ -18,9 +18,10 @@ use Tests\Support\RecordsWebserverApply;
 use Tests\TestCase;
 
 /**
- * A command that asks before a change, run where it cannot ask: confirm()
- * answered no there, so each printed "Cancelled." and exited 0 with nothing
- * changed, which a script reads as success.
+ * A command that asks before a change, run where it cannot ask: with -n, or
+ * without -n and with no terminal to answer on, as from cron or ssh without -t.
+ * Each refuses with a non-zero exit rather than printing "Cancelled." and
+ * exiting 0 with nothing changed, which a script reads as success.
  */
 class UnconfirmedChangeTest extends TestCase
 {
@@ -84,6 +85,21 @@ class UnconfirmedChangeTest extends TestCase
         $this->assertWebserverApplied(0);
     }
 
+    /** @param array<string, mixed> $input */
+    #[DataProvider('changes')]
+    public function test_an_interactive_run_with_no_terminal_is_refused_as_with_no_interaction(string $command, array $input): void
+    {
+        $before = $this->snapshot();
+
+        $tester = $this->runWithoutTerminal($command, $input, interactive: true);
+
+        $this->assertSame(1, $tester->getStatusCode());
+        $this->assertSame(self::REFUSAL, $tester->getErrorOutput());
+        $this->assertSame('', $tester->getDisplay());
+        $this->assertSame($before, $this->snapshot());
+        $this->assertWebserverApplied(0);
+    }
+
     public function test_force_still_applies_the_change_without_a_prompt(): void
     {
         $tester = $this->runWithoutTerminal('project:settings:set', [
@@ -116,10 +132,10 @@ class UnconfirmedChangeTest extends TestCase
     }
 
     /** @param array<string, mixed> $input */
-    private function runWithoutTerminal(string $command, array $input): CommandTester
+    private function runWithoutTerminal(string $command, array $input, bool $interactive = false): CommandTester
     {
         $tester = new CommandTester($this->app->make(Kernel::class)->all()[$command]);
-        $tester->execute($input, ['interactive' => false, 'capture_stderr_separately' => true]);
+        $tester->execute($input, ['interactive' => $interactive, 'capture_stderr_separately' => true]);
 
         return $tester;
     }

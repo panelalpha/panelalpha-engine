@@ -2,20 +2,15 @@
 
 namespace App\Console\Commands\Concerns;
 
-/**
- * For a command that asks before it changes anything, unless --force is given.
- * Without a terminal confirm() answers no, so such a run used to print
- * "Cancelled." and exit 0 with nothing changed, which a script reads as done.
- */
+use Symfony\Component\Console\Input\StreamableInputInterface;
+
+/** For a command that asks before it changes anything, and refuses without --force where it cannot ask. */
 trait ConfirmsChanges
 {
-    /**
-     * True, with one line on stderr, when the change can be neither asked about
-     * nor forced. Called before the command describes the change.
-     */
+    /** True, with one line on stderr, when the change can be neither asked about nor forced; called before the command describes the change. */
     protected function refusedWithoutConfirmation(): bool
     {
-        if ($this->option('force') || $this->input->isInteractive()) {
+        if ($this->option('force') || $this->canBeAsked()) {
             return false;
         }
 
@@ -24,5 +19,19 @@ trait ConfirmsChanges
         );
 
         return true;
+    }
+
+    /** Whether a question can be answered here: Symfony keeps a run without -n interactive even with no terminal to read from. */
+    protected function canBeAsked(): bool
+    {
+        if (! $this->input->isInteractive()) {
+            return false;
+        }
+
+        $stream = $this->input instanceof StreamableInputInterface ? $this->input->getStream() : null;
+
+        return $stream === null
+            ? (defined('STDIN') && @stream_isatty(STDIN)) || $this->laravel->runningUnitTests()
+            : @stream_isatty($stream);
     }
 }
