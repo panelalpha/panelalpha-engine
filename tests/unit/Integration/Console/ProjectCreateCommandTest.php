@@ -417,6 +417,7 @@ class ProjectCreateCommandTest extends TestCase
         $this->stubCreate(function (User $user) use (&$atDeploy): void {
             $atDeploy = [
                 'scope' => app(ApiAccess::class)->entryFor($user)['scope'] ?? null,
+                'mcp' => app(ApiAccess::class)->entryFor($user)['mcp'] ?? null,
                 'routing' => app(PublicRoutingGrants::class)->of($user->username),
                 'system' => $user->fresh()->isSystem(),
             ];
@@ -427,6 +428,7 @@ class ProjectCreateCommandTest extends TestCase
 
         $this->assertSame(0, $code, $out);
         $this->assertSame(ApiAccess::SCOPE_ALL, $atDeploy['scope'], 'the first deploy already delivers an all-projects token');
+        $this->assertTrue($atDeploy['mcp'], 'the panel mints the MCP tokens of Connect AI and its OAuth connections');
         $this->assertEqualsCanonicalizing([PublicRoutingGrants::PORTS, PublicRoutingGrants::HOST_DOMAIN], $atDeploy['routing']);
         $this->assertFalse($atDeploy['system'], 'system only once the application is live');
         $this->assertSame(['acme'], $firewall->last());
@@ -434,7 +436,7 @@ class ProjectCreateCommandTest extends TestCase
         $this->assertTrue(User::findByUsername('acme')->isSystem());
         $this->assertTrue(User::findByUsername('acme')->isProtected());
         $this->assertSame(self::INTRO . "\n"
-            . "Allowed acme to use the Engine API for every project, and to take the server's own name and public ports.\n"
+            . "Allowed acme to use the Engine API and MCP for every project, and to take the server's own name and public ports.\n"
             . "    0:00 Deploy started (source: dind template)\n"
             . "Project 'acme' is a system project: no API or MCP token but its own sees or reaches it, and it is protected.\n"
             . "Project acme created.\n"
@@ -473,6 +475,7 @@ class ProjectCreateCommandTest extends TestCase
         $this->assertSame('panel', $stub->redeployed?->username);
         $this->assertSame(1, User::query()->count());
         $this->assertSame(ApiAccess::SCOPE_ALL, app(ApiAccess::class)->entryFor($panel)['scope'] ?? null);
+        $this->assertTrue(app(ApiAccess::class)->entryFor($panel)['mcp'] ?? null);
         $this->assertTrue($panel->fresh()->isSystem());
         Queue::assertNotPushed(ApplyEnvVars::class);
         $json = json_decode((string) collect(explode("\n", $this->plain($out)))->last(fn (string $line) => str_starts_with($line, '{"data":')), true);

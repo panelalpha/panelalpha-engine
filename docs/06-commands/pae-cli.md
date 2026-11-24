@@ -107,7 +107,7 @@ An application that manages the engine, such as a hosting panel:
 pae project:create --repo=https://github.com/org/panel --full-privileges
 ```
 
-What this does: before the first deploy, it does what `pae system:api-access:allow {project} --scope=all` and `pae system:public-routing:allow {project} --host-domain --ports` do, so that deploy already hands the application its Engine API token and can move it to the server's own name. Once the application is live, it is a system project as with `pae project:settings:set system on`: hidden from every token but its own, and protected. If the deploy fails, it is neither. `--full-privileges` needs a container project: `--repo`, or `--template=dind`.
+What this does: before the first deploy, it does what `pae system:api-access:allow {project} --scope=all --mcp` and `pae system:public-routing:allow {project} --host-domain --ports` do, so that deploy already hands the application its Engine API token, which may also call and mint MCP tokens, and can move it to the server's own name. Once the application is live, it is a system project as with `pae project:settings:set system on`: hidden from every token but its own, and protected. If the deploy fails, it is neither. `--full-privileges` needs a container project: `--repo`, or `--template=dind`.
 
 To deploy the project that already runs this repository again, instead of creating a second one:
 

@@ -211,7 +211,7 @@ Usage: bash installer.sh [options]
                            an alphanumeric password and print it with the URL)
       --no-password        do not set a site password on the --repo project
       --full-privileges    trust the --repo project with this engine: an Engine
-                           API token for every project, the server's own name
+                           API and MCP token for every project, the server's own name
                            and public ports, and once it is live a system
                            project: hidden from every other API token, and
                            protected (for a panel that manages the engine).

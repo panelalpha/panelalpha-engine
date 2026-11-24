@@ -54,7 +54,7 @@ class Create extends Command
                             {--template= : Project template; dind when a repository is given}
                             {--recipe= : Deploy with this recipe instead of the detected one}
                             {--env-var=* : KEY=VALUE environment override, repeatable}
-                            {--full-privileges : Trust the application with this engine: an Engine API token for every project, the server\'s own name and public ports, and once it is live a system project: hidden from every other token and protected}
+                            {--full-privileges : Trust the application with this engine: an Engine API and MCP token for every project, the server\'s own name and public ports, and once it is live a system project: hidden from every other token and protected}
                             {--update-existing : When a project already deploys this repository, deploy it again from it instead of creating another (the one-line installer run a second time)}
                             {--quiet-deploy : Do not print the deploy log while it runs}
                             {--json : Print the created project as JSON instead of a summary}';
@@ -214,15 +214,15 @@ class Create extends Command
     }
 
     /**
-     * `system:api-access:allow --scope=all` and `system:public-routing:allow --host-domain --ports`, before the first
+     * `system:api-access:allow --scope=all --mcp` and `system:public-routing:allow --host-domain --ports`, before the first
      * deploy so it already carries both. No apply is queued, which would race the deploy for its lock.
      */
     private function grantFullPrivileges(User $user): void
     {
-        app(ApiAccess::class)->allow($user, ApiAccess::SCOPE_ALL, false, deliver: false);
+        app(ApiAccess::class)->allow($user, ApiAccess::SCOPE_ALL, true, deliver: false);
         app(ProjectPublicRouting::class)->allow($user, [PublicRoutingGrants::PORTS, PublicRoutingGrants::HOST_DOMAIN]);
         $this->deployOutput()->writeln(
-            "Allowed {$user->username} to use the Engine API for every project, and to take the server's own name and public ports."
+            "Allowed {$user->username} to use the Engine API and MCP for every project, and to take the server's own name and public ports."
         );
     }
 
