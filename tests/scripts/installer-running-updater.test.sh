@@ -30,6 +30,7 @@ check() {
 }
 
 remove_dropped_engine_files() { :; }
+replace_links_shipped_as_files() { :; }
 # installer-root-scripts.test.sh runs it.
 hand_engine_files_to_root() { :; }
 echo_error() {

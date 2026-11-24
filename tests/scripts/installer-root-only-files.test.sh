@@ -31,6 +31,7 @@ check() {
 }
 
 remove_dropped_engine_files() { :; }
+replace_links_shipped_as_files() { :; }
 echo_warning() { echo "warning:$1" >>"$W/warnings"; }
 
 # Not run as root: each path chown is asked about, one per line.

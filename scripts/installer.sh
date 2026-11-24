@@ -1213,6 +1213,18 @@ place_mounted_engine_files() { # <src> <engine dir>
 # one an operator wrote or changed at that path stays, and so does host state,
 # anything whose folder is reached through a link, and a file a running
 # container mounts.
+# cp writes a file through a link at its place, into whatever the link names.
+replace_links_shipped_as_files() { # <src> <engine dir>
+    local rel
+    [ -d "$1" ] && [ -d "$2" ] || return 0
+    while IFS= read -r -d '' rel; do
+        rel=${rel#./}
+        engine_host_state "$rel" && continue
+        [ -L "$2/$rel" ] || continue
+        rm -f -- "${2:?}/$rel" && echo "Replaced the link $rel with the file this release ships"
+    done < <(cd "$1" && find . -type f -print0)
+}
+
 remove_dropped_engine_files() { # <list> <engine dir>
     local root rec mode oid path dir real have src removed=0 kept=0
     local -a order=()
@@ -1298,6 +1310,7 @@ unzip_panelalpha_engine() {
     # Before the copy: a file that became a folder, or the other way round,
     # would stop cp.
     remove_dropped_engine_files "$INSTALL_DIR/dropped-files" "$PANELALPHA_DIR/shared-hosting"
+    replace_links_shipped_as_files "$INSTALL_DIR/src" "$PANELALPHA_DIR/shared-hosting"
     replace_running_updaters "$INSTALL_DIR/src" "$PANELALPHA_DIR/shared-hosting"
     place_mounted_engine_files "$INSTALL_DIR/src" "$PANELALPHA_DIR/shared-hosting"
     # --preserve=mode also repairs files an earlier run left with the wrong mode;

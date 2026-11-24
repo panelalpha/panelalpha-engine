@@ -16,7 +16,7 @@ trap 'rm -rf "$W"' EXIT
 # download and unzip steps run.
 sed -n '/^ENGINE_HOST_STATE=(/,/^)$/p' "$SCRIPT_DIR/installer.sh" >"$W/funcs.sh"
 for fn in download_engine_from_repository engine_host_state list_dropped_engine_files list_shipped_modsecurity_rules \
-    running_bind_sources place_mounted_engine_files remove_dropped_engine_files replace_running_updaters \
+    running_bind_sources place_mounted_engine_files remove_dropped_engine_files replace_links_shipped_as_files replace_running_updaters \
     unzip_panelalpha_engine; do
     sed -n "/^${fn}() {/,/^}\$/p" "$SCRIPT_DIR/installer.sh" >>"$W/funcs.sh"
 done

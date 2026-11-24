@@ -17,7 +17,7 @@ trap 'rm -rf "$W"' EXIT
 # installer.sh installs an engine when sourced, so cut out what the update runs.
 sed -n '/^ENGINE_HOST_STATE=(/,/^)$/p' "$SCRIPT_DIR/installer.sh" >"$W/funcs.sh"
 sed -n '/^ENGINE_REBUILT_DIRS=/p' "$SCRIPT_DIR/installer.sh" >>"$W/funcs.sh"
-for fn in die installer_error_message record_run record_run_outcome engine_host_state running_bind_sources place_mounted_engine_files remove_dropped_engine_files \
+for fn in die installer_error_message record_run record_run_outcome engine_host_state running_bind_sources place_mounted_engine_files remove_dropped_engine_files replace_links_shipped_as_files \
     unzip_panelalpha_engine replace_running_updaters snapshot_engine_tree restore_engine_tree mark_engine_stack_touched \
     restore_previous_release rollback_engine_update restore_interrupted_update discard_engine_snapshot \
     normalize_version version_from_system_php release_order stop_update check_update_target; do
@@ -39,6 +39,7 @@ check() {
     fi
 }
 there() { [ -e "$1" ] || [ -L "$1" ] && echo yes || echo no; }
+there_link() { [ -L "$1" ] && echo yes || echo no; }
 yesno() { "$@" && echo yes || echo no; }
 
 red_color='' default_color=''
@@ -105,6 +106,8 @@ unzip_panelalpha_engine >/dev/null
 check "the copy is armed for a rollback" "1" "$ENGINE_SNAPSHOT_ARMED"
 check "the new release is in place" "old v2" "$(cat "$LIVE/core/app/Old.php")"
 check "the dropped file is gone" "no" "$(there "$LIVE/scripts/dropped.sh")"
+check "a link the release ships as a file is that file, not written through" "no|a file now" \
+    "$(there_link "$LIVE/scripts/link")|$(cat "$LIVE/scripts/link")"
 composer_runs
 listing=$(tar -tf "$ENGINE_SNAPSHOT_DIR/files.tar" | LC_ALL=C sort | tr '\n' ' ')
 check "the snapshot holds only what the copy replaced or removed" \
@@ -273,6 +276,16 @@ sleep 0.5
 kill -TERM "$pid"
 wait "$pid" 2>/dev/null
 check "a killed run reaches the exit trap as a failure" "143" "$(cat "$W/killed" 2>/dev/null)"
+
+echo "a link at a host-state path"
+fresh_trees
+put "$W/elsewhere/alice.yml" 'alice elsewhere'
+rm -f "$LIVE/users/alice/docker-compose.yml"
+ln -s "$W/elsewhere/alice.yml" "$LIVE/users/alice/docker-compose.yml"
+put "$INSTALL_DIR/src/users/alice/docker-compose.yml" 'shipped'
+replace_links_shipped_as_files "$INSTALL_DIR/src" "$LIVE" >/dev/null
+check "is left as the host has it" "yes|alice elsewhere" \
+    "$(there_link "$LIVE/users/alice/docker-compose.yml")|$(cat "$W/elsewhere/alice.yml")"
 
 echo
 echo "$PASS passed, $FAIL failed"
