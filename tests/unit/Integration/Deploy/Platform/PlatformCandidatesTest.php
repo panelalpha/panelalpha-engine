@@ -228,6 +228,49 @@ class PlatformCandidatesTest extends TestCase
         $this->assertSame('dockerfile', $candidates[0]['id']);
     }
 
+    /** Tiledesk's recipe names no platform; falling back to upstream's docker-compose/ would bring its published secrets back. */
+    public function test_a_shipped_recipe_naming_no_platform_falls_back_to_nothing(): void
+    {
+        $this->writeUpstreamCompose();
+        $this->assertContains('compose-nested', PlatformCandidates::fallbackOrder(ProjectContext::at($this->tmpDir, null)));
+
+        $order = PlatformCandidates::fallbackOrder(ProjectContext::at($this->tmpDir, 'https://github.com/tiledesk/tiledesk'));
+
+        $this->assertSame([], $order);
+    }
+
+    /** A repository config with its own compose file chose what runs the same way. */
+    public function test_a_repository_config_with_a_compose_file_falls_back_to_nothing(): void
+    {
+        $this->writeUpstreamCompose();
+        $this->writeFile('.panelalpha/overrides/docker-compose.yml', "services:\n  web:\n    image: nginx:1.27\n");
+
+        $this->assertSame([], PlatformCandidates::fallbackOrder(ProjectContext::at($this->tmpDir, null)));
+    }
+
+    /** Credentials the engine generates for a repository config reach only the stack that config runs. */
+    public function test_a_repository_config_with_credentials_falls_back_to_nothing(): void
+    {
+        $this->writeUpstreamCompose();
+        $this->writeFile('panelalpha.yaml', "credentials:\n  fields:\n    APP_PASSWORD: {kind: password}\n");
+
+        $this->assertSame([], PlatformCandidates::fallbackOrder(ProjectContext::at($this->tmpDir, null)));
+    }
+
+    /** A repository config that only sets variables leaves the choice of recipe to detection, fallback included. */
+    public function test_a_repository_config_with_only_env_still_falls_back(): void
+    {
+        $this->writeUpstreamCompose();
+        $this->writeFile('.panelalpha/panelalpha.yaml', "env:\n  APP_MODE: production\n");
+
+        $this->assertContains('compose-nested', PlatformCandidates::fallbackOrder(ProjectContext::at($this->tmpDir, null)));
+    }
+
+    private function writeUpstreamCompose(): void
+    {
+        $this->writeFile('docker-compose/docker-compose.yml', "services:\n  web:\n    image: nginx:1.27\n    ports:\n      - \"8081:80\"\n");
+    }
+
     /**
      * @return list<array<string, mixed>>
      * @throws ManifestException

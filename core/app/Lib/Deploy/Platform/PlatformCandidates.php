@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform;
 
+use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
 use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Platform\Probes\ProbeRegistry;
@@ -60,7 +61,8 @@ final class PlatformCandidates
 
     /**
      * The recipes a failed start falls back through, in the order a deploy tries them: the detected ones, by priority,
-     * without the placeholder, which runs nothing, and Railpack. None when a source recipe names the platform.
+     * without the placeholder, which runs nothing, and Railpack. None when a source recipe names the platform, or
+     * when an app config chose what runs without naming one ({@see choosesWhatRuns()}).
      *
      * @return list<string>
      *
@@ -68,6 +70,10 @@ final class PlatformCandidates
      */
     public static function fallbackOrder(ProjectContext $context, ?string $directory = null): array
     {
+        $hit = self::appConfig($context);
+        if ($hit !== null && self::choosesWhatRuns($hit)) {
+            return [];
+        }
         $ids = [];
         foreach (self::forContext($context, $directory) as $candidate) {
             if ($candidate['via'] === self::VIA_RECIPE) {
@@ -113,11 +119,7 @@ final class PlatformCandidates
      */
     private static function sourceRecipe(ProjectContext $context): ?PlatformManifest
     {
-        $hit = AppConfigLocator::findCandidate(
-            new LocalAppConfigSource,
-            $context->projectDir,
-            $context->sourceUrl
-        );
+        $hit = self::appConfig($context);
         if ($hit === null) {
             return null;
         }
@@ -127,6 +129,30 @@ final class PlatformCandidates
             AppConfigLocator::describe($hit),
             SourceRecipes::checksDirectory($hit['path'])
         );
+    }
+
+    /**
+     * The project's own app config, else the engine's recipe for the repository it was cloned from.
+     *
+     * @return array{config: AppConfig, path: string, kind: string, origin: string}|null
+     *
+     * @throws ManifestException
+     */
+    private static function appConfig(ProjectContext $context): ?array
+    {
+        return AppConfigLocator::findCandidate(new LocalAppConfigSource, $context->projectDir, $context->sourceUrl);
+    }
+
+    /**
+     * The engine's recipe, or a repository config with a compose file or credentials, which another recipe would drop.
+     *
+     * @param  array{config: AppConfig, path: string, kind: string, origin: string}  $hit
+     */
+    private static function choosesWhatRuns(array $hit): bool
+    {
+        return $hit['origin'] === AppConfigLocator::ORIGIN_ENGINE
+            || $hit['config']->compose() !== null
+            || $hit['config']->credentials() !== null;
     }
 
     /**

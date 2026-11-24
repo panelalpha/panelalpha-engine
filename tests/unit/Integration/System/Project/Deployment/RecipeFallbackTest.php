@@ -193,6 +193,29 @@ class RecipeFallbackTest extends TestCase
         $this->assertSame(0, $this->prepared);
     }
 
+    /** A shipped recipe's failed start is the deploy's, with its own error, and no compose it did not choose is tried. */
+    public function test_a_failed_start_under_a_shipped_recipe_tries_nothing_else(): void
+    {
+        foreach (['composer.json', 'index.php', 'package.json', 'server.js'] as $file) {
+            unlink($this->dir . '/' . $file);
+        }
+        mkdir($this->dir . '/docker-compose');
+        file_put_contents($this->dir . '/docker-compose/docker-compose.yml', "services:\n  web:\n    image: nginx:1.27\n");
+        $this->model->setDetails(['deploy_platform' => 'compose', 'git_repo' => 'https://github.com/tiledesk/tiledesk']);
+        $this->expectCleanup()->expects($this->never())->method('abortRunningDeploy');
+
+        $result = $this->fallback()->start(
+            $this->starts([$this->failed('error: service server did not start (unhealthy)'), $this->ok()]),
+            $this->prepare()
+        );
+
+        $this->assertSame(1, $result['exit_code']);
+        $this->assertSame('error: service server did not start (unhealthy)', $result['stderr']);
+        $this->assertSame([null], $this->started);
+        $this->assertSame(0, $this->prepared);
+        $this->assertNull($this->model->getDetails()[RecipeFallback::DETAIL_RECIPE] ?? null);
+    }
+
     public function test_a_cancel_stops_the_fallback(): void
     {
         $this->expectException(DeployCancelledException::class);
