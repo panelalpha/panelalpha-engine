@@ -223,16 +223,64 @@ class RecipeFallbackTest extends TestCase
         $this->fallback()->start($this->starts([new DeployCancelledException('cancelled')]), $this->prepare());
     }
 
-    /** A redeploy whose previous version still serves: nothing is torn down under it between recipes. */
+    /** A redeploy whose new version failed to build while the previous one serves: nothing is torn down under it. */
     public function test_a_kept_version_is_not_torn_down_between_recipes(): void
     {
         $this->expectCleanup()->expects($this->never())->method('abortRunningDeploy');
-        $kept = $this->failed('new version did not answer') + [ZeroDowntimeRedeploy::PREVIOUS_KEPT => true];
+        $kept = ZeroDowntimeRedeploy::previousKept('', 'composer: Your requirements could not be resolved', 1);
 
         $result = $this->fallback()->start($this->starts([$kept, $this->ok()]), $this->prepare());
 
         $this->assertSame([null, 'express'], $this->started);
         $this->assertSame(0, $result['exit_code']);
+    }
+
+    /**
+     * A redeploy whose new version ran and was turned away fails there: the previous version keeps serving, and no
+     * other recipe replaces it.
+     */
+    public function test_a_new_version_turned_away_while_the_previous_serves_tries_nothing_else(): void
+    {
+        $this->expectCleanup()->expects($this->never())->method('abortRunningDeploy');
+        $kept = $this->failed('The new version did not become healthy: it keeps restarting. The previous version is still serving.')
+            + [ZeroDowntimeRedeploy::PREVIOUS_KEPT => true];
+
+        $result = $this->fallback()->start($this->starts([$kept, $this->ok()]), $this->prepare());
+
+        $this->assertSame([null], $this->started);
+        $this->assertSame(0, $this->prepared);
+        $this->assertSame(1, $result['exit_code']);
+        $this->assertNotNull(ZeroDowntimeRedeploy::keptServing($result));
+        $this->assertNull($this->model->getDetails()[RecipeFallback::DETAIL_RECIPE] ?? null);
+    }
+
+    /** A second copy of the new version left serving is not replaced by another recipe either. */
+    public function test_a_new_version_copy_left_serving_tries_nothing_else(): void
+    {
+        $kept = $this->failed('The previous version could not be started again')
+            + [ZeroDowntimeRedeploy::COPY_KEPT => true, ZeroDowntimeRedeploy::SERVING => 'The new version\'s second copy keeps serving the site'];
+
+        $result = $this->fallback()->start($this->starts([$kept, $this->ok()]), $this->prepare());
+
+        $this->assertSame([null], $this->started);
+        $this->assertSame(1, $result['exit_code']);
+    }
+
+    /** The repository's own Dockerfile failed to start: its checkout is not served as files instead. */
+    public function test_a_failed_dockerfile_is_not_replaced_by_its_checkout_served_as_files(): void
+    {
+        foreach (['composer.json', 'index.php', 'package.json', 'server.js'] as $file) {
+            unlink($this->dir . '/' . $file);
+        }
+        file_put_contents($this->dir . '/Dockerfile', "FROM nginx:1.27-alpine\nCMD [\"sh\", \"-c\", \"exit 1\"]\n");
+        file_put_contents($this->dir . '/index.html', '<!doctype html><title>v1</title>');
+        $this->model->setDetails(['deploy_platform' => 'dockerfile']);
+
+        $result = $this->fallback()->start($this->starts([$this->failed('the container exited with code 1'), $this->ok()]), $this->prepare());
+
+        $this->assertSame([null], $this->started);
+        $this->assertSame(0, $this->prepared);
+        $this->assertSame(1, $result['exit_code']);
     }
 
     /** Falling back to the recipe detection picks first is not worth remembering. */

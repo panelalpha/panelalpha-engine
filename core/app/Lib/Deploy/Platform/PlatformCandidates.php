@@ -25,6 +25,9 @@ final class PlatformCandidates
     /** The last resort, which is code rather than a manifest. */
     public const RAILPACK = Strategies::RAILPACK;
 
+    /** The strategies of a repository that says how it runs: its checkout is an application, never a site of files. */
+    private const BUILDS_ITSELF = [Strategies::DOCKERFILE, Strategies::COMPOSE];
+
     /**
      * @return list<array{id: string, label: string, priority: int, strategy: string, via: string}>
      *
@@ -61,8 +64,9 @@ final class PlatformCandidates
 
     /**
      * The recipes a failed start falls back through, in the order a deploy tries them: the detected ones, by priority,
-     * without the placeholder, which runs nothing, and Railpack. None when a source recipe names the platform, or
-     * when an app config chose what runs without naming one ({@see choosesWhatRuns()}).
+     * without the placeholder, which runs nothing, Railpack, or a static site below a Dockerfile or Compose file.
+     * None when a source recipe names the platform, or when an app config chose what runs without naming one
+     * ({@see choosesWhatRuns()}).
      *
      * @return list<string>
      *
@@ -75,13 +79,18 @@ final class PlatformCandidates
             return [];
         }
         $ids = [];
+        $buildsItself = false;
         foreach (self::forContext($context, $directory) as $candidate) {
             if ($candidate['via'] === self::VIA_RECIPE) {
                 return [];
             }
-            if ($candidate['via'] === self::VIA_DETECTED && $candidate['strategy'] !== Strategies::FALLBACK) {
+            if ($candidate['via'] !== self::VIA_DETECTED || $candidate['strategy'] === Strategies::FALLBACK) {
+                continue;
+            }
+            if (! $buildsItself || $candidate['strategy'] !== Strategies::STATIC) {
                 $ids[] = $candidate['id'];
             }
+            $buildsItself = $buildsItself || in_array($candidate['strategy'], self::BUILDS_ITSELF, true);
         }
 
         return $ids;

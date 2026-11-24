@@ -289,7 +289,7 @@ final class AppLauncher
         ];
     }
 
-    /** @return array{stdout: string, stderr: string, exit_code: int, previous_kept: true} */
+    /** @return array{stdout: string, stderr: string, exit_code: int, previous_kept: true, not_started: true} */
     private static function previousKept(Process $process): array
     {
         return ZeroDowntimeRedeploy::previousKept($process->getOutput(), self::failureOutput($process), (int) $process->getExitCode());
@@ -478,7 +478,7 @@ final class AppLauncher
      * On a redeploy, the registry images the run file names and the account lacks, pulled while the running
      * version serves: a missing tag fails here, with that version untouched. Null when nothing was missing or it all arrived.
      *
-     * @return ?array{stdout: string, stderr: string, exit_code: int, previous_kept: true}
+     * @return ?array{stdout: string, stderr: string, exit_code: int, previous_kept: true, not_started: true}
      */
     private function pullImages(): ?array
     {

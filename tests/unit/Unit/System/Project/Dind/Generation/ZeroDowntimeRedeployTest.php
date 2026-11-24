@@ -71,6 +71,16 @@ class ZeroDowntimeRedeployTest extends TestCase
         $this->assertTrue($result[ZeroDowntimeRedeploy::PREVIOUS_KEPT]);
     }
 
+    public function test_only_a_new_version_that_ran_counts_as_turned_away_while_one_serves(): void
+    {
+        $failed = ['stdout' => '', 'stderr' => 'it exited', 'exit_code' => 1];
+
+        $this->assertFalse(ZeroDowntimeRedeploy::ranAndKeptServing(ZeroDowntimeRedeploy::previousKept('', 'build failed', 1)), 'never ran');
+        $this->assertFalse(ZeroDowntimeRedeploy::ranAndKeptServing($failed), 'nothing serves');
+        $this->assertTrue(ZeroDowntimeRedeploy::ranAndKeptServing($failed + [ZeroDowntimeRedeploy::PREVIOUS_KEPT => true]));
+        $this->assertTrue(ZeroDowntimeRedeploy::ranAndKeptServing($failed + [ZeroDowntimeRedeploy::COPY_KEPT => true]));
+    }
+
     public function test_the_old_checkout_comes_back_only_while_all_its_readers_still_run(): void
     {
         $running = ['State' => ['Running' => true]];

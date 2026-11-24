@@ -34,6 +34,9 @@ final class ZeroDowntimeRedeploy
     /** On a failed start's result: the deploy log's line for what serves, when it is not the running version as it was. */
     public const SERVING = 'serving';
 
+    /** On a failed start's result that kept a version serving: the new version failed to build or pull, and never ran. */
+    public const NOT_STARTED = 'not_started';
+
     /** {@see begin()}: traffic is on the new generation. */
     public const SWITCHED = 'switched';
 
@@ -541,11 +544,29 @@ final class ZeroDowntimeRedeploy
     }
 
     /**
-     * @return array{stdout: string, stderr: string, exit_code: int, previous_kept: true}
+     * A version kept serving after the new one ran and failed: another start would replace what serves, not fix it.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    public static function ranAndKeptServing(array $result): bool
+    {
+        return self::keptServing($result) !== null && empty($result[self::NOT_STARTED]);
+    }
+
+    /**
+     * A failed build or pull of the new version, which never ran: the previous version kept serving throughout.
+     *
+     * @return array{stdout: string, stderr: string, exit_code: int, previous_kept: true, not_started: true}
      */
     public static function previousKept(string $stdout, string $stderr, int $exitCode): array
     {
-        return ['stdout' => $stdout, 'stderr' => $stderr, 'exit_code' => $exitCode === 0 ? 1 : $exitCode, self::PREVIOUS_KEPT => true];
+        return [
+            'stdout' => $stdout,
+            'stderr' => $stderr,
+            'exit_code' => $exitCode === 0 ? 1 : $exitCode,
+            self::PREVIOUS_KEPT => true,
+            self::NOT_STARTED => true,
+        ];
     }
 
     /**

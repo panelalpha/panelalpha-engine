@@ -65,7 +65,9 @@ Recipe php failed (composer-unresolvable); trying express
 
 What started is remembered, and the next deploy starts with it. If nothing starts, the deploy fails with the error of the first match.
 
-The engine does not try again when the problem is the server, not the project: a full disk, too little memory, a build that ran out of time, a registry limit or a network failure. It does not try another kind of project when you named one (`Deploy … as php`) or the repository has a `panelalpha.yaml`. With a named one, it still tries the other package managers. Railpack and the "Project not configured" page are never tried this way.
+The engine does not try again when the problem is the server, not the project: a full disk, too little memory, a build that ran out of time, a registry limit or a network failure. It does not try another kind of project when you named one (`Deploy … as php`) or the repository has a `panelalpha.yaml`. With a named one, it still tries the other package managers. Railpack and the "Project not configured" page are never tried this way. A repository with its own Dockerfile or Compose file is never served as a plain site of files instead: if it does not start, the deploy fails.
+
+On a rebuild, the next match is tried only while the new version has not run yet, for example when its build fails. Once it has started and does not answer, the deploy fails there and the version online keeps serving: [Deploying again later](../02-getting-started/how-a-deploy-works.md#deploying-again-later).
 
 Each attempt is a full build, so a repository that matches several kinds of project takes longer to fail. If you know which one is right, name it, or remove the file that makes the other match.
 

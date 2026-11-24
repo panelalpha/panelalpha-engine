@@ -20,8 +20,8 @@ use Illuminate\Support\Facades\Log;
  * A deploy that failed for a reason of the project's own tries again, until one attempt starts or none is left:
  * first the recipe with every other JS package manager the project has a lockfile for, then the next recipe that
  * claims the project, by descending priority. A requested recipe keeps its recipe and varies only the package
- * manager; a source recipe or the project's app config names everything. What started is remembered, and the
- * next deploy starts with it.
+ * manager; a source recipe or the project's app config names everything. A redeploy whose new version ran and was
+ * turned away while the previous one serves fails there. What started is remembered, and the next deploy starts with it.
  */
 final class RecipeFallback
 {
@@ -125,9 +125,14 @@ final class RecipeFallback
             && $this->nextAttempt([$this->deployed(null)]) !== null;
     }
 
+    /** Not from a failure of the host, nor from a new version that ran and failed while a version kept serving. */
     private function fallsBack(RecipeAttempt $attempt): bool
     {
         if ($attempt->threw(HostDiskLowException::class)) {
+            return false;
+        }
+        $result = $attempt->resultOrNull();
+        if ($result !== null && ZeroDowntimeRedeploy::ranAndKeptServing($result)) {
             return false;
         }
         $rule = DeployFailureExplainer::match($attempt->output())['rule'] ?? null;

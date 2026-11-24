@@ -272,6 +272,32 @@ class PlatformCandidatesTest extends TestCase
     }
 
     /**
+     * A repository that says how it runs, with a Dockerfile or a Compose file, is an application: a failed start
+     * never falls back to serving its checkout as files. The inspection still lists the static recipe to pin.
+     */
+    public function test_a_repository_that_builds_itself_never_falls_back_to_serving_its_files(): void
+    {
+        $this->writeFile('index.html', '<!doctype html><title>v1</title>');
+        $this->writeFile('Dockerfile', "FROM nginx:1.27-alpine\nCOPY index.html /usr/share/nginx/html/index.html\n");
+
+        $this->assertSame(['dockerfile', 'static'], array_column($this->candidates(), 'id'));
+        $this->assertSame(['dockerfile'], PlatformCandidates::fallbackOrder(ProjectContext::at($this->tmpDir, null)));
+
+        $this->writeFile('docker-compose.yml', "services:\n  web:\n    build: .\n    ports:\n      - \"80:80\"\n");
+
+        $this->assertSame(['compose', 'dockerfile'], PlatformCandidates::fallbackOrder(ProjectContext::at($this->tmpDir, null)));
+    }
+
+    /** Documents claimed first keep the recipes below them: a named Dockerfile ranks under the static site. */
+    public function test_a_static_site_chosen_first_keeps_its_fallbacks(): void
+    {
+        $this->writeFile('index.html', '<!doctype html><title>site</title>');
+        $this->writeFile('site.dockerfile', "FROM nginx:1.27-alpine\nCOPY . /usr/share/nginx/html/\n");
+
+        $this->assertSame(['static', 'dockerfile-named'], PlatformCandidates::fallbackOrder(ProjectContext::at($this->tmpDir, null)));
+    }
+
+    /**
      * @return list<array<string, mixed>>
      * @throws ManifestException
      */
