@@ -1198,6 +1198,16 @@ class DeployFailureExplainer
                 '/^(?:(?!npm warn)[^\n])*?((?-i:\bERESOLVE\b)|unable to resolve dependency tree|conflicting peer dependency)/im',
                 static fn (): string => 'The project\'s dependencies conflict with each other and could not be installed.',
             ],
+
+            // A workspace whose root build compiles every package leaves one page per app; HostCompile refuses to
+            // guess which one is served (relocateStaticOutput), so the failure has to say what the build did.
+            'static-build-several-sites' => [
+                '/Static build finished but (\S+)\/index\.html is missing; the build wrote index\.html in several directories: ([^\n]+)/',
+                static fn (array $m): string => 'The build succeeded but wrote a page into several directories ('
+                        .self::clip($m[2]).'), so there is no single site to serve: the repository builds several '
+                        ."applications at once. Build only the one that is the site and have it write {$m[1]}/index.html, "
+                        .'or deploy the project with a strategy that runs its own server.',
+            ],
         ];
     }
 

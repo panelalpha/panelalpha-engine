@@ -77,6 +77,7 @@ class DeployFailureExplainerRuleOrderTest extends TestCase
             'npm-lockfile-out-of-sync',
             'npm-dependency-tree-crash',
             'dependency-conflict',
+            'static-build-several-sites',
             'git-binary-missing',
             'prepare-script-failed',
             'git-exec-failed',
