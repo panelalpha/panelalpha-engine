@@ -59,7 +59,7 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
 
         (new Projects($this->system()))->pushToApp('stg', 'live');
 
-        $this->assertSame(['dump live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app'], $this->mysql->log);
+        $this->assertSame(['dump live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app as live_app'], $this->mysql->log);
         $env = Yaml::parseFile($this->root.'/live/project/'.EngineArtifacts::RUN_COMPOSE)['services']['app']['environment'];
         $this->assertSame('live_app', $env['DB_DATABASE']);
         $this->assertSame('live_app', $env['DB_USERNAME']);
@@ -85,7 +85,7 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
         }
 
         $this->assertSame(
-            ['dump live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app', 'restore live_app from live_app.sql.gz'],
+            ['dump live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app as live_app', 'restore live_app from live_app.sql.gz'],
             $this->mysql->log
         );
         $this->assertDirectoryDoesNotExist($this->root.'/rollbacks/live');
@@ -103,7 +103,7 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
 
         $result = (new Projects($this->system(failRemoving: $this->root.'/live/.pre-push')))->pushToApp('stg', 'live');
 
-        $this->assertSame(['create live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app'], $this->mysql->log);
+        $this->assertSame(['create live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app as live_app'], $this->mysql->log);
         $this->assertTrue(AppDatabase::isOwnedBy($live));
         $this->assertCount(1, $result->warnings);
         $this->assertStringContainsString('The push was applied, but removing '.$this->root.'/live/.pre-push failed', $result->warnings[0]);
@@ -118,7 +118,7 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
 
         $result = (new Projects($this->system(failRemoving: $this->root.'/live/.pre-push')))->pushToApp('stg', 'live');
 
-        $this->assertSame(['dump live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app'], $this->mysql->log);
+        $this->assertSame(['dump live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app as live_app'], $this->mysql->log);
         $this->assertDirectoryDoesNotExist($this->root.'/rollbacks/live');
         $this->assertSame('pushed', Yaml::parseFile($this->root.'/live/project/'.EngineArtifacts::RUN_COMPOSE)['services']['app']['environment']['MARKER']);
         $this->assertCount(1, $result->warnings);
@@ -206,7 +206,7 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
 
         $details = User::findByUsernameOrFail('live')->getDetails();
         $this->assertSame(['php', 'live-image', 'bbbb'], [$details['deploy_strategy'], $details['deploy_image'], $details['git_commit']]);
-        $this->assertContains('copy stg_app to live_app', $this->mysql->log);
+        $this->assertContains('copy stg_app to live_app as live_app', $this->mysql->log);
     }
 
     public function test_a_push_with_files_takes_the_sources_deploy_settings(): void
@@ -292,6 +292,7 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
         $user->mysqlUsers()->create(['user' => $username.'_app']);
         $this->mysql->databases[] = $username.'_app';
         $this->mysql->users[$username.'_app'] = $username.'-secret';
+        $this->mysql->grants[] = [$username.'_app', $username.'_app', 'ALL PRIVILEGES'];
 
         return $user;
     }

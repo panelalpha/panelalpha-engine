@@ -29,16 +29,26 @@ class DatabaseCopier
         return $toPrefix.$name;
     }
 
-    public function copyDatabase(string $from, string $to, DefinerMap $definers): void
+    public function copyDatabase(string $from, string $to, ImportAccount $account): void
+    {
+        Mysql::assertDatabaseName($to);
+
+        $this->mysql->databases()->createDatabase($to);
+        $this->copyInto($from, $to, $account);
+    }
+
+    /** $from loaded into the existing $to as $account, which must already hold its grants on $to. */
+    public function copyInto(string $from, string $to, ImportAccount $account): void
     {
         Mysql::assertDatabaseName($from);
         Mysql::assertDatabaseName($to);
 
-        $this->mysql->databases()->createDatabase($to);
-        $this->mysql->copyInSitesDb($from, $to, null, $definers, 'database copy failed');
+        $this->mysql->copyInSitesDb($from, $to, null, $account, 'database copy failed');
     }
 
     /**
+     * The users and their grants come first, so each database is loaded as the one copied user granted on it.
+     *
      * @param  callable(string): void  $log
      */
     public function copyProjectDatabases(User $source, User $dest, callable $log): DatabaseCopyResult
@@ -46,12 +56,15 @@ class DatabaseCopier
         $fromPrefix = $source->getMysqlPrefix();
         $toPrefix = $dest->getMysqlPrefix();
 
-        $definers = DefinerMap::forProjectCopy($source, $dest);
-        $databases = $this->copyDatabases($source, $dest, $fromPrefix, $toPrefix, $definers, $log);
+        $databases = $this->createDatabases($source, $dest, $fromPrefix, $toPrefix);
         $users = [];
         $passwords = [];
         $warnings = [];
         $this->copyUsers($source, $dest, $fromPrefix, $toPrefix, $log, $databases, $users, $passwords, $warnings);
+        foreach ($databases as $from => $to) {
+            $log("Copying database {$from} to {$to}");
+            $this->copyInto($from, $to, $this->mysql->importAccount($dest, $to));
+        }
 
         return new DatabaseCopyResult($databases, $users, $passwords, $warnings);
     }
@@ -68,21 +81,19 @@ class DatabaseCopier
         return $rollback;
     }
 
-    /**
-     * $rollback is the completed dump of $to that dumpRollback() returned.
-     */
+    /** $rollback is dumpRollback()'s dump of $to; $account keeps its grants across the drop, as MariaDB keeps them. */
     public function replaceDatabase(
         string $from,
         string $to,
         string $rollback,
         User $target,
-        DefinerMap $definers,
+        ImportAccount $account,
     ): void {
         $grants = $this->targetGrants($target, $to);
 
         try {
             $this->mysql->databases()->deleteDatabase($to);
-            $this->copyDatabase($from, $to, $definers);
+            $this->copyDatabase($from, $to, $account);
         } catch (\Throwable $e) {
             $this->mysql->restoreFromGzip($to, $rollback);
             throw $e;
@@ -93,14 +104,14 @@ class DatabaseCopier
 
     /**
      * A database a push created gets, for each source user, what that user had on the source database, granted to the
-     * target user it maps to; without it they could not use the data, nor run the triggers whose DEFINER they got.
+     * target user it maps to; without it they could not use the data, nor could a copy be imported as one of them.
      *
      * @return list<string> a warning when no target user was granted anything
      */
-    public function grantCreatedDatabase(string $from, string $to, DefinerMap $definers): array
+    public function grantCreatedDatabase(string $from, string $to, AccountMap $userMap): array
     {
         $granted = false;
-        foreach ($definers->accounts() as $sourceUser => $targetUser) {
+        foreach ($userMap->accounts() as $sourceUser => $targetUser) {
             $privileges = $this->mysql->privileges()->showPrivileges($sourceUser)[$from] ?? null;
             if ($privileges !== null) {
                 $this->mysql->privileges()->updatePrivileges($targetUser, $to, $privileges);
@@ -115,12 +126,12 @@ class DatabaseCopier
      * Drops a database a push created and takes back what grantCreatedDatabase() gave on it: MariaDB keeps a grant on
      * a dropped name, and a database later created under that name would inherit it.
      */
-    public function dropCreatedDatabase(string $database, DefinerMap $definers): void
+    public function dropCreatedDatabase(string $database, AccountMap $userMap): void
     {
         if ($this->mysql->databases()->databaseExists($database)) {
             $this->mysql->databases()->deleteDatabase($database);
         }
-        foreach ($definers->accounts() as $targetUser) {
+        foreach ($userMap->accounts() as $targetUser) {
             $this->mysql->privileges()->revokeIfExists($targetUser, $database);
         }
     }
@@ -129,13 +140,13 @@ class DatabaseCopier
      * One table of $to, dropped and recreated from $from. The caller dumps the
      * target's own copy first, so a failure can put it back.
      */
-    public function copyTable(string $from, string $to, string $table, DefinerMap $definers): void
+    public function copyTable(string $from, string $to, string $table, ImportAccount $account): void
     {
         Mysql::assertDatabaseName($from);
         Mysql::assertDatabaseName($to);
         Mysql::assertTableName($table);
 
-        $this->mysql->copyInSitesDb($from, $to, $table, $definers, 'table copy failed');
+        $this->mysql->copyInSitesDb($from, $to, $table, $account, 'table copy failed');
     }
 
     public function dropTable(string $database, string $table): void
@@ -162,8 +173,15 @@ class DatabaseCopier
     public function replaceTables(User $source, User $target, array $tables, string $rollbackDir): TableReplacement
     {
         $grouped = self::groupByTarget($tables, $source->getMysqlPrefix(), $target->getMysqlPrefix());
+        $owned = $target->mysqlDatabases()->pluck('database')->all();
+        $accounts = [];
+        foreach (array_keys($grouped) as $dest) {
+            if (in_array($dest, $owned, true)) {
+                $accounts[$dest] = $this->mysql->importAccount($target, $dest);
+            }
+        }
         $targetTables = $this->mysql->tables();
-        $definers = DefinerMap::between($source, $target);
+        $userMap = AccountMap::between($source, $target);
         $rollbacks = [];
         $createdDatabases = [];
         $createdTables = [];
@@ -171,8 +189,9 @@ class DatabaseCopier
         try {
             $result = $this->replaceSelected(
                 $grouped,
+                $accounts,
                 $target,
-                $definers,
+                $userMap,
                 $rollbackDir,
                 $targetTables,
                 $rollbacks,
@@ -180,10 +199,10 @@ class DatabaseCopier
                 $createdTables,
             );
         } catch (\Throwable $e) {
-            throw $this->rolledBack($e, $definers, $rollbacks, $createdDatabases, $createdTables);
+            throw $this->rolledBack($e, $userMap, $rollbacks, $createdDatabases, $createdTables);
         }
 
-        return new TableReplacement($result, $definers, $rollbacks, $createdDatabases, $createdTables);
+        return new TableReplacement($result, $userMap, $rollbacks, $createdDatabases, $createdTables);
     }
 
     /**
@@ -196,14 +215,14 @@ class DatabaseCopier
      */
     private function rolledBack(
         \Throwable $e,
-        DefinerMap $definers,
+        AccountMap $userMap,
         array $rollbacks,
         array $createdDatabases,
         array $createdTables,
     ): \Throwable {
         $failures = $this->restoreTables(new TableReplacement(
             new DatabaseCopyResult,
-            $definers,
+            $userMap,
             $rollbacks,
             $createdDatabases,
             $createdTables,
@@ -214,14 +233,16 @@ class DatabaseCopier
 
     /**
      * @param  array<string, list<array{database: string, name: string}>>  $grouped
+     * @param  array<string, ImportAccount>  $accounts  owned target database => the account it is loaded as
      * @param  list<array{database: string, table: string, dump: string}>  $rollbacks
      * @param  list<string>  $createdDatabases
      * @param  list<array{database: string, table: string}>  $createdTables
      */
     private function replaceSelected(
         array $grouped,
+        array $accounts,
         User $target,
-        DefinerMap $definers,
+        AccountMap $userMap,
         string $rollbackDir,
         Tables $targetTables,
         array &$rollbacks,
@@ -236,11 +257,12 @@ class DatabaseCopier
             if (! in_array($dest, $owned, true)) {
                 $this->createTargetDatabase($target, $dest);
                 $createdDatabases[] = $dest;
-                array_push($warnings, ...$this->grantCreatedDatabase($selections[0]['database'], $dest, $definers));
+                array_push($warnings, ...$this->grantCreatedDatabase($selections[0]['database'], $dest, $userMap));
+                $accounts[$dest] = $this->mysql->importAccount($target, $dest);
             }
 
             foreach ($selections as $selection) {
-                $this->replaceTable($selection, $dest, $definers, $rollbackDir, $targetTables, $rollbacks, $createdTables);
+                $this->replaceTable($selection, $dest, $accounts[$dest], $rollbackDir, $targetTables, $rollbacks, $createdTables);
                 $databases[$selection['database']] = $dest;
             }
         }
@@ -304,7 +326,7 @@ class DatabaseCopier
 
         foreach ($replacement->createdDatabases as $database) {
             try {
-                $this->dropCreatedDatabase($database, $replacement->definers);
+                $this->dropCreatedDatabase($database, $replacement->userMap);
                 MysqlDatabase::query()->where('database', $database)->delete();
             } catch (\Throwable $e) {
                 $failures[] = "dropping created database '{$database}'";
@@ -323,7 +345,7 @@ class DatabaseCopier
     private function replaceTable(
         array $selection,
         string $dest,
-        DefinerMap $definers,
+        ImportAccount $account,
         string $rollbackDir,
         Tables $targetTables,
         array &$rollbacks,
@@ -339,7 +361,7 @@ class DatabaseCopier
             $createdTables[] = ['database' => $dest, 'table' => $table];
         }
 
-        $this->copyTable($selection['database'], $dest, $table, $definers);
+        $this->copyTable($selection['database'], $dest, $table, $account);
     }
 
     /**
@@ -368,24 +390,17 @@ class DatabaseCopier
      * The row is written before the data: a dump that dies mid-stream must
      * still leave a database the destination's teardown can drop.
      *
-     * @param  callable(string): void  $log
      * @return array<string, string> source database => destination database
      */
-    private function copyDatabases(
-        User $source,
-        User $dest,
-        string $fromPrefix,
-        string $toPrefix,
-        DefinerMap $definers,
-        callable $log,
-    ): array {
+    private function createDatabases(User $source, User $dest, string $fromPrefix, string $toPrefix): array
+    {
         $databases = [];
         foreach ($source->mysqlDatabases as $row) {
             $from = $row->database;
             $to = self::mapName($from, $fromPrefix, $toPrefix);
+            Mysql::assertDatabaseName($to);
             MysqlDatabase::create(['user_id' => $dest->id, 'database' => $to]);
-            $log("Copying database {$from} to {$to}");
-            $this->copyDatabase($from, $to, $definers);
+            $this->mysql->databases()->createDatabase($to);
             $databases[$from] = $to;
         }
 

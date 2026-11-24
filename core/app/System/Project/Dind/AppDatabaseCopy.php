@@ -2,12 +2,10 @@
 
 namespace App\System\Project\Dind;
 
-use App\Models\MysqlDatabase;
 use App\Models\User;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\DatabaseCopyResult;
-use App\System\Services\Mysql\DefinerMap;
 
 /**
  * The application database a container project's deploy provisioned ({@see AppDatabase}), carried into a staging,
@@ -18,7 +16,7 @@ final class AppDatabaseCopy
     public function __construct(private Mysql $mysql) {}
 
     /**
-     * $dest's own application database, with the source's data when $withData.
+     * $dest's own application database, with the source's data when $withData, loaded as $dest's own account.
      * Null when the source has none.
      */
     public function intoCopy(User $source, User $dest, bool $withData): ?DatabaseCopyResult
@@ -34,11 +32,8 @@ final class AppDatabaseCopy
 
         $from = AppDatabase::nameFor($source);
         $to = AppDatabase::nameFor($dest);
-        if (! AppDatabase::isOwnedBy($dest)) {
-            MysqlDatabase::create(['user_id' => $dest->id, 'database' => $to]);
-        }
-        $this->copier()->copyDatabase($from, $to, DefinerMap::map($source->getMysqlPrefix(), $dest->getMysqlPrefix(), [$from], [$to]));
         AppDatabase::provision($dest, $this->mysql);
+        $this->copier()->copyInto($from, $to, $this->mysql->importAccount($dest, $to));
 
         return new DatabaseCopyResult([$from => $to]);
     }
@@ -61,12 +56,13 @@ final class AppDatabaseCopy
         $copier = $this->copier();
 
         if (AppDatabase::isOwnedBy($to)) {
+            $account = $this->mysql->importAccount($to, $dest);
             $rollbacks[$dest] = $copier->dumpRollback($dest, $rollbackDir);
-            $copier->replaceDatabase($source, $dest, $rollbacks[$dest], $to, DefinerMap::between($from, $to));
+            $copier->replaceDatabase($source, $dest, $rollbacks[$dest], $to, $account);
         } else {
             $this->provisionRecorded($to, ProvisionedAppDatabase::beforeReplacing($to, $this->mysql), $provisioned);
             $this->mysql->databases()->deleteDatabase($dest);
-            $copier->copyDatabase($source, $dest, DefinerMap::between($from, $to));
+            $copier->copyDatabase($source, $dest, $this->mysql->importAccount($to, $dest));
         }
 
         return new DatabaseCopyResult([$source => $dest]);

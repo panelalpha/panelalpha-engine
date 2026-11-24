@@ -8,7 +8,7 @@ use App\System\Services\Mysql;
 use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\DatabaseRenamer;
 use App\System\Services\Mysql\Databases;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\Users;
 use PDO;
@@ -56,12 +56,16 @@ class DatabaseRenamerTest extends TestCase
         $this->assertSame([], $record->renamed);
         $this->assertCount(1, $record->scripts);
         $this->assertStringEndsWith(
-            "compose.sitesDbCopy -- /opt/panelalpha/shared-hosting shop_old shop_new '' shop_no.definer 1 shop_user shop_user",
+            "compose.sitesDbCopy -- /opt/panelalpha/shared-hosting shop_old shop_new '' shop_user",
             $record->scripts[0],
         );
         $this->assertSame(['shop_new'], $record->created);
         $this->assertSame(['shop_old'], $record->deleted);
-        $this->assertSame([['shop_user', 'shop_new', 'SELECT, INSERT']], $record->grants);
+        $this->assertSame(
+            [['shop_user', 'shop_new', 'SELECT, INSERT'], ['shop_user', 'shop_new', 'SELECT, INSERT']],
+            $record->grants,
+            'granted once so the copy can be loaded as shop_user, then again as the grants move',
+        );
         $this->assertSame('shop_new', $row->fresh()->database);
     }
 
@@ -72,7 +76,10 @@ class DatabaseRenamerTest extends TestCase
 
         $this->renamer($record)->rename($user, $row, 'shop_new');
 
-        $this->assertSame(['revoke shop_user shop_old', 'kill shop_user', 'copy'], array_slice($record->steps, 0, 3));
+        $this->assertSame(
+            ['revoke shop_user shop_old', 'kill shop_user', 'grant shop_user shop_new', 'copy'],
+            array_slice($record->steps, 0, 4),
+        );
         $this->assertSame(['shop_user'], $record->killed);
     }
 
@@ -105,7 +112,8 @@ class DatabaseRenamerTest extends TestCase
 
         $this->assertSame(['shop_new'], $record->deleted);
         $this->assertNotContains('shop_old', $record->deleted);
-        $this->assertSame([['shop_user', 'shop_old', 'ALL PRIVILEGES']], $record->grants);
+        $this->assertSame([['shop_user', 'shop_new', 'ALL PRIVILEGES'], ['shop_user', 'shop_old', 'ALL PRIVILEGES']], $record->grants);
+        $this->assertContains(['shop_user', 'shop_new'], $record->revokes);
         $this->assertSame('shop_old', $row->fresh()->database);
     }
 
@@ -333,6 +341,7 @@ class DatabaseRenamerTest extends TestCase
                         }
 
                         $this->record->grants[] = [$user, $database, $privileges];
+                        $this->record->steps[] = "grant {$user} {$database}";
                     }
 
                     public function revokeIfExists(string $user, string $database): void
@@ -361,9 +370,9 @@ class DatabaseRenamerTest extends TestCase
                 };
             }
 
-            public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
+            public function copyInSitesDb(string $from, string $to, ?string $table, ImportAccount $account, string $failurePrefix): void
             {
-                $this->recordScript(SitesDbRequest::copy($from, $to, $table, $definers), $failurePrefix);
+                $this->recordScript(SitesDbRequest::copy($from, $to, $table, $account), $failurePrefix);
             }
 
             public function dropTableInSitesDb(string $database, string $table): void

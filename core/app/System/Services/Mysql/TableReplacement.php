@@ -15,7 +15,7 @@ final class TableReplacement
      */
     public function __construct(
         public readonly DatabaseCopyResult $result,
-        public readonly DefinerMap $definers,
+        public readonly AccountMap $userMap,
         public readonly array $rollbacks = [],
         public readonly array $createdDatabases = [],
         public readonly array $createdTables = [],

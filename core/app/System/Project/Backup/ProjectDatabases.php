@@ -5,7 +5,7 @@ namespace App\System\Project\Backup;
 use App\Models\MysqlDatabase;
 use App\Support\JobDeadline;
 use App\System\Project as UserProject;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use Illuminate\Support\Facades\Log;
 
 /** The account's databases on the shared MariaDB, dumped and restored as gzipped SQL. */
@@ -43,9 +43,9 @@ class ProjectDatabases
         $this->project->system()->mysql()->withTimeout($timeout ?? $this->deadline->stepSeconds())->restoreFromGzip($name, $sqlGzPath);
     }
 
-    public function restoreCopy(string $sourceName, string $name, string $sqlGzPath, DefinerMap $definers): void
+    public function restoreCopy(string $sourceName, string $name, string $sqlGzPath, ImportAccount $account): void
     {
-        $this->project->system()->mysql()->withTimeout($this->deadline->stepSeconds())->restoreCopyFromGzip($sourceName, $name, $sqlGzPath, $definers);
+        $this->project->system()->mysql()->withTimeout($this->deadline->stepSeconds())->restoreCopyFromGzip($sourceName, $name, $sqlGzPath, $account);
     }
 
     public function size(string $name): int

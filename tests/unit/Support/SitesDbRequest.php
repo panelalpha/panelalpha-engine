@@ -5,14 +5,14 @@ namespace Tests\Support;
 use App\System\EnginePaths;
 use App\System\Privileged;
 use App\System\Privileged\RootEngineComposeLines;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 
 /** The broker request a copy or a table drop in sites-db is asked for with. */
 final class SitesDbRequest
 {
-    public static function copy(string $from, string $to, ?string $table, DefinerMap $definers): string
+    public static function copy(string $from, string $to, ?string $table, ImportAccount $account): string
     {
-        return self::lines()->sitesDbCopy($from, $to, $table, $definers->orphan(), $definers->accounts());
+        return self::lines()->sitesDbCopy($from, $to, $table, $account->user);
     }
 
     public static function drop(string $database, string $table): string

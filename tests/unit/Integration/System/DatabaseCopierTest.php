@@ -4,9 +4,10 @@ namespace Tests\Integration\System;
 
 use App\Models\User;
 use App\System\Services\Mysql;
+use App\System\Services\Mysql\AccountMap;
 use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\Databases;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\Users;
 use PDO;
@@ -38,19 +39,20 @@ class DatabaseCopierTest extends TestCase
         $this->assertSame('bob_wp', $copier->mapName('wp', 'alice_', 'bob_'));
     }
 
-    public function test_copy_database_asks_sites_db_with_the_definers_mapped(): void
+    public function test_copy_database_asks_sites_db_to_import_as_the_account(): void
     {
         $record = $this->recorder();
         $copier = new DatabaseCopier($this->mysqlDouble($record));
 
-        $copier->copyDatabase('alice_wp', 'bob_wp', $this->definers());
+        $copier->copyDatabase('alice_wp', 'bob_wp', $this->account());
 
         $this->assertSame(['bob_wp'], $record->created);
         $this->assertCount(1, $record->scripts);
         $this->assertStringEndsWith(
-            " compose.sitesDbCopy -- /opt/panelalpha/shared-hosting alice_wp bob_wp '' bob_no.definer 1 alice_wp bob_wp",
+            " compose.sitesDbCopy -- /opt/panelalpha/shared-hosting alice_wp bob_wp '' bob_wp",
             $record->scripts[0],
         );
+        $this->assertSame([['bob_wp', 0]], $record->imports);
     }
 
     public function test_copy_project_databases_maps_names_and_copies_owned_grants(): void
@@ -75,7 +77,31 @@ class DatabaseCopierTest extends TestCase
         $this->assertStringContainsString('someone_else', $result->warnings[0]);
         $this->assertArrayHasKey('bob_wp', $result->passwords);
         $this->assertNotSame('', $result->passwords['bob_wp']);
-        $this->assertStringEndsWith(" alice_wp bob_wp '' bob_no.definer 1 alice_wp bob_wp", $record->scripts[0]);
+        $this->assertStringEndsWith(" alice_wp bob_wp '' bob_wp", $record->scripts[0]);
+        $this->assertSame([['bob_wp', 1]], $record->imports);
+    }
+
+    public function test_a_project_copy_refuses_a_database_without_exactly_one_copied_account_to_import_as(): void
+    {
+        foreach (['no account' => [], 'two accounts' => ['alice_wp' => 'ALL PRIVILEGES']] as $case => $sharedGrant) {
+            $source = $this->sourceWithDatabaseAndUser('alice');
+            if ($sharedGrant !== []) {
+                $source->mysqlUsers()->create(['user' => 'alice_wp2']);
+            }
+            $this->makeUser('bob', ['mysql_prefix' => 'bob_']);
+            $record = $this->recorder(sourcePrivileges: $case === 'no account' ? [] : $sharedGrant);
+            $copier = new DatabaseCopier($this->mysqlDouble($record, sharedSourcePrivileges: $sharedGrant !== []));
+
+            try {
+                $copier->copyProjectDatabases($source->refresh(), User::findByUsernameOrFail('bob'), fn (string $line) => null);
+                $this->fail("{$case}: the copy ran without one account to import as");
+            } catch (\RuntimeException $e) {
+                $this->assertStringContainsString("Database 'bob_wp' cannot be copied", $e->getMessage(), $case);
+            }
+            $this->assertSame([], $record->scripts, $case);
+
+            User::query()->delete();
+        }
     }
 
     public function test_replace_database_reapplies_target_grants_on_success(): void
@@ -86,7 +112,7 @@ class DatabaseCopierTest extends TestCase
         $copier = new DatabaseCopier($mysql);
 
         $rollback = $copier->dumpRollback('bob_wp', '/tmp/rq-rollback');
-        $copier->replaceDatabase('alice_wp', 'bob_wp', $rollback, $target, $this->definers());
+        $copier->replaceDatabase('alice_wp', 'bob_wp', $rollback, $target, $this->account());
 
         $this->assertSame('/tmp/rq-rollback/bob_wp.sql.gz', $rollback);
         $this->assertSame(['/tmp/rq-rollback/bob_wp.sql.gz'], $record->dumps);
@@ -108,7 +134,7 @@ class DatabaseCopierTest extends TestCase
                 'bob_wp',
                 '/tmp/rq-rollback/bob_wp.sql.gz',
                 $target,
-                $this->definers(),
+                $this->account(),
             );
             $this->fail('the copy should have failed');
         } catch (\RuntimeException $e) {
@@ -122,7 +148,7 @@ class DatabaseCopierTest extends TestCase
     {
         $record = $this->recorder(sourcePrivileges: ['alice_wp' => 'SELECT, INSERT, TRIGGER', 'alice_other' => 'SELECT']);
 
-        $warnings = (new DatabaseCopier($this->mysqlDouble($record)))->grantCreatedDatabase('alice_wp', 'bob_wp', $this->definers());
+        $warnings = (new DatabaseCopier($this->mysqlDouble($record)))->grantCreatedDatabase('alice_wp', 'bob_wp', AccountMap::map('alice_', 'bob_', ['alice_wp'], ['bob_wp']));
 
         $this->assertSame([['bob_wp', 'bob_wp', 'SELECT, INSERT, TRIGGER']], $record->grants);
         $this->assertSame([], $warnings);
@@ -135,7 +161,7 @@ class DatabaseCopierTest extends TestCase
         $warnings = (new DatabaseCopier($this->mysqlDouble($record)))->grantCreatedDatabase(
             'alice_wp',
             'bob_wp',
-            DefinerMap::map('alice_', 'bob_', ['alice_wp'], []),
+            AccountMap::map('alice_', 'bob_', ['alice_wp'], []),
         );
 
         $this->assertSame([], $record->grants);
@@ -145,9 +171,9 @@ class DatabaseCopierTest extends TestCase
         );
     }
 
-    private function definers(): DefinerMap
+    private function account(): ImportAccount
     {
-        return DefinerMap::map('alice_', 'bob_', ['alice_wp'], ['bob_wp']);
+        return new ImportAccount('bob_wp');
     }
 
     private function sourceWithDatabaseAndUser(string $name): User
@@ -182,18 +208,19 @@ class DatabaseCopierTest extends TestCase
             'restores' => [],
             'grants' => [],
             'scripts' => [],
+            'imports' => [],
             'sourcePrivileges' => $sourcePrivileges,
             'targetPrivileges' => $targetPrivileges,
         ];
     }
 
-    private function mysqlDouble(?object $record = null, bool $failStream = false): Mysql
+    private function mysqlDouble(?object $record = null, bool $failStream = false, bool $sharedSourcePrivileges = false): Mysql
     {
         $record ??= $this->recorder();
 
-        return new class($record, $failStream) extends Mysql
+        return new class($record, $failStream, $sharedSourcePrivileges) extends Mysql
         {
-            public function __construct(private object $record, private bool $failStream)
+            public function __construct(private object $record, private bool $failStream, private bool $sharedSourcePrivileges)
             {
                 parent::__construct(null);
             }
@@ -243,20 +270,27 @@ class DatabaseCopierTest extends TestCase
             {
                 $record = $this->record;
 
-                return new class($record) extends Privileges
+                return new class($record, $this->sharedSourcePrivileges) extends Privileges
                 {
-                    public function __construct(private object $record)
+                    public function __construct(private object $record, private bool $sharedSourcePrivileges)
                     {
                         parent::__construct(new PDO('sqlite::memory:'), '%');
                     }
 
                     public function showPrivileges(string $user): array
                     {
-                        if ($user === 'alice_wp') {
+                        if ($user === 'alice_wp' || ($this->sharedSourcePrivileges && str_starts_with($user, 'alice_'))) {
                             return $this->record->sourcePrivileges;
                         }
 
-                        return $this->record->targetPrivileges;
+                        $granted = $this->record->targetPrivileges;
+                        foreach ($this->record->grants as [$grantee, $database, $privileges]) {
+                            if ($grantee === $user) {
+                                $granted[$database] = $privileges;
+                            }
+                        }
+
+                        return $granted;
                     }
 
                     public function updatePrivileges(string $user, string $database, string $privileges): void
@@ -266,9 +300,10 @@ class DatabaseCopierTest extends TestCase
                 };
             }
 
-            public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
+            public function copyInSitesDb(string $from, string $to, ?string $table, ImportAccount $account, string $failurePrefix): void
             {
-                $this->recordScript(SitesDbRequest::copy($from, $to, $table, $definers), $failurePrefix);
+                $this->recordScript(SitesDbRequest::copy($from, $to, $table, $account), $failurePrefix);
+                $this->record->imports[] = [$account->user, count($this->record->grants)];
             }
 
             public function dropTableInSitesDb(string $database, string $table): void

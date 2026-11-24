@@ -10,13 +10,14 @@ use App\System\Project\Dind\CopyVolumes;
 use App\System\Projects;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\Databases;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\Tables;
 use PDO;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\KnowsEveryImportAccount;
 use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
@@ -202,6 +203,8 @@ class ProjectsPushUndoFailuresTest extends TestCase
 /** @internal Dumps to files, restores by recording, and drops databases except the one it is told to fail on. */
 final class PushUndoMysql extends Mysql
 {
+    use KnowsEveryImportAccount;
+
     public function __construct(private object $record)
     {
         parent::__construct(null);
@@ -217,7 +220,7 @@ final class PushUndoMysql extends Mysql
         $this->record->restores[] = $name;
     }
 
-    public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
+    public function copyInSitesDb(string $from, string $to, ?string $table, ImportAccount $account, string $failurePrefix): void
     {
     }
 

@@ -145,9 +145,9 @@ class BackupRestoreIntoTest extends TestCase
 
         $this->assertStringEndsWith('/database-alice_app.sql.gz', $copy->restoredDumps['bob_app']);
         $this->assertSame(
-            ['from' => 'alice_app', 'orphan' => 'bob_no.definer', 'accounts' => []],
+            ['from' => 'alice_app', 'account' => 'bob_app'],
             $copy->copiedDatabases['bob_app'],
-            'the schema name and every DEFINER are rewritten from the source project to the new one',
+            'the dump is loaded as the new project\'s own application database account',
         );
     }
 

@@ -2,12 +2,14 @@
 
 namespace App\System\Services;
 
+use App\Models\User;
 use App\Support\JobBudget;
 use App\System as EngineSystem;
 use App\System\Privileged;
 use App\System\Privileged\RootEngineComposeLines;
+use App\System\Project\Dind\AppDatabase;
 use App\System\Services\Mysql\Databases;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\Tables;
 use App\System\Services\Mysql\Users;
@@ -106,13 +108,13 @@ class Mysql
         $this->runInCore('gunzip -c '.escapeshellarg($sqlGzPath).' | '.$this->sitesDb()->sitesDbRestore($name), 'database restore failed');
     }
 
-    /** A dump of $from loaded into $to, with the schema name and each DEFINER rewritten as copyInSitesDb() does. */
-    public function restoreCopyFromGzip(string $from, string $to, string $sqlGzPath, DefinerMap $definers): void
+    /** A dump of $from loaded into $to as copyInSitesDb() loads a stream. */
+    public function restoreCopyFromGzip(string $from, string $to, string $sqlGzPath, ImportAccount $account): void
     {
         self::assertDatabaseName($from);
         self::assertDatabaseName($to);
         $this->runInCore(
-            'gunzip -c '.escapeshellarg($sqlGzPath).' | '.$this->sitesDb()->sitesDbRestoreCopy($from, $to, $definers->orphan(), $definers->accounts()),
+            'gunzip -c '.escapeshellarg($sqlGzPath).' | '.$this->sitesDb()->sitesDbRestoreCopy($from, $to, $account->user),
             'database restore failed',
         );
     }
@@ -140,12 +142,33 @@ class Mysql
         return is_string($value) ? $value : $default;
     }
 
-    /**
-     * Streams $from, or only its $table, into $to inside sites-db, rewriting each DEFINER by $definers.
-     */
-    public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
+    /** Streams $from, or only its $table, into $to inside sites-db, imported as $account and every DEFINER given to it. */
+    public function copyInSitesDb(string $from, string $to, ?string $table, ImportAccount $account, string $failurePrefix): void
     {
-        $this->runInCore($this->sitesDb()->sitesDbCopy($from, $to, $table, $definers->orphan(), $definers->accounts()), $failurePrefix);
+        $this->runInCore($this->sitesDb()->sitesDbCopy($from, $to, $table, $account->user), $failurePrefix);
+    }
+
+    /** The account a copy into $database imports as: the application database's, else the one user granted on it. */
+    public function importAccount(User $owner, string $database): ImportAccount
+    {
+        if ($database === AppDatabase::nameFor($owner)) {
+            return new ImportAccount($database);
+        }
+
+        $granted = [];
+        foreach ($owner->mysqlUsers()->pluck('user') as $user) {
+            if (is_string($user) && isset($this->privileges()->showPrivileges($user)[$database])) {
+                $granted[] = $user;
+            }
+        }
+        if (count($granted) !== 1) {
+            throw new RuntimeException(
+                "Database '{$database}' cannot be copied into: a copy is imported as the database's one MariaDB account, "
+                    .'and '.count($granted).' of the project\'s accounts are granted on it.'
+            );
+        }
+
+        return new ImportAccount($granted[0]);
     }
 
     public function dropTableInSitesDb(string $database, string $table): void

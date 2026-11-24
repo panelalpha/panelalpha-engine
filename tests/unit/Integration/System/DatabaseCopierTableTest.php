@@ -5,15 +5,17 @@ namespace Tests\Integration\System;
 use App\Models\MysqlDatabase;
 use App\Models\User;
 use App\System\Services\Mysql;
+use App\System\Services\Mysql\AccountMap;
 use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\DatabaseCopyResult;
 use App\System\Services\Mysql\Databases;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\TableReplacement;
 use App\System\Services\Mysql\Tables;
 use PDO;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\KnowsEveryImportAccount;
 use Tests\Support\SitesDbRequest;
 use Tests\TestCase;
 
@@ -27,15 +29,15 @@ class DatabaseCopierTableTest extends TestCase
         $this->bootInMemoryDatabase();
     }
 
-    public function test_copy_table_asks_sites_db_for_that_table_with_the_definers_mapped(): void
+    public function test_copy_table_asks_sites_db_for_that_table_imported_as_the_account(): void
     {
         $record = $this->recorder();
 
-        $this->copier($record)->copyTable('alice_wp', 'bob_wp', 'wp_posts', DefinerMap::map('alice_', 'bob_', [], []));
+        $this->copier($record)->copyTable('alice_wp', 'bob_wp', 'wp_posts', new ImportAccount('bob_wp'));
 
         $this->assertCount(1, $record->scripts);
         $this->assertStringEndsWith(
-            "compose.sitesDbCopy -- /opt/panelalpha/shared-hosting alice_wp bob_wp wp_posts bob_no.definer 0",
+            "compose.sitesDbCopy -- /opt/panelalpha/shared-hosting alice_wp bob_wp wp_posts bob_wp",
             $record->scripts[0],
         );
     }
@@ -49,7 +51,7 @@ class DatabaseCopierTableTest extends TestCase
             'alice_wp',
             'bob_wp',
             'wp_posts`; DROP TABLE x',
-            DefinerMap::map('alice_', 'bob_', [], []),
+            new ImportAccount('bob_wp'),
         );
     }
 
@@ -85,7 +87,7 @@ class DatabaseCopierTableTest extends TestCase
         $this->assertSame([], $replacement->createdDatabases);
     }
 
-    public function test_replace_tables_gives_triggers_to_the_target_user_the_source_user_maps_to(): void
+    public function test_replace_tables_imports_each_table_as_the_target_databases_account(): void
     {
         $record = $this->recorder();
         $source = $this->userWithDatabase('alice', 'alice_wp');
@@ -101,7 +103,7 @@ class DatabaseCopierTableTest extends TestCase
         );
 
         $this->assertStringEndsWith(
-            "compose.sitesDbCopy -- /opt/panelalpha/shared-hosting alice_wp bob_wp wp_posts bob_no.definer 1 alice_wp bob_wp",
+            "compose.sitesDbCopy -- /opt/panelalpha/shared-hosting alice_wp bob_wp wp_posts bob_wp",
             $record->scripts[0],
         );
     }
@@ -170,7 +172,7 @@ class DatabaseCopierTableTest extends TestCase
         $record = $this->recorder(existing: ['bob_wp']);
         $replacement = new TableReplacement(
             new DatabaseCopyResult,
-            DefinerMap::map('alice_', 'bob_', [], []),
+            AccountMap::map('alice_', 'bob_', [], []),
             [],
             ['bob_wp'],
             [['database' => 'bob_wp', 'table' => 'wp_posts']],
@@ -275,7 +277,7 @@ class DatabaseCopierTableTest extends TestCase
     public function test_restore_tables_deletes_the_row_of_a_created_database(): void
     {
         $target = $this->userWithDatabase('bob', 'bob_wp');
-        $replacement = new TableReplacement(new DatabaseCopyResult(), DefinerMap::map('alice_', 'bob_', [], []), [], ['bob_wp'], []);
+        $replacement = new TableReplacement(new DatabaseCopyResult(), AccountMap::map('alice_', 'bob_', [], []), [], ['bob_wp'], []);
 
         $this->copier($this->recorder(existing: ['bob_wp']))->restoreTables($replacement);
 
@@ -329,6 +331,8 @@ class DatabaseCopierTableTest extends TestCase
     {
         return new class($record, $tableNames, $failTable) extends Mysql
         {
+            use KnowsEveryImportAccount;
+
             /**
              * @param  array<string, list<string>>  $tableNames
              */
@@ -376,9 +380,9 @@ class DatabaseCopierTableTest extends TestCase
                 $this->record->restores[] = [$name, $sqlGzPath];
             }
 
-            public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
+            public function copyInSitesDb(string $from, string $to, ?string $table, ImportAccount $account, string $failurePrefix): void
             {
-                $this->recordScript(SitesDbRequest::copy($from, $to, $table, $definers), $failurePrefix);
+                $this->recordScript(SitesDbRequest::copy($from, $to, $table, $account), $failurePrefix);
             }
 
             public function dropTableInSitesDb(string $database, string $table): void

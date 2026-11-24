@@ -4,14 +4,9 @@ namespace App\System\Services\Mysql;
 
 use App\Models\User;
 
-/**
- * The DEFINER of every routine, trigger, view and event a root-run import recreates: a mapped source user becomes the
- * destination's, anything else an uncreatable account under the destination prefix, so it never runs as root.
- */
-final class DefinerMap
+/** Source users mapped to the destination's users, for the grants a push gives on a database it creates. */
+final class AccountMap
 {
-    private const string ORPHAN = 'no.definer';
-
     private const string NAME_GRAMMAR = '/^[A-Za-z0-9_-]+$/D';
 
     /**
@@ -19,12 +14,9 @@ final class DefinerMap
      */
     private function __construct(
         private readonly array $accounts,
-        private readonly string $orphan,
     ) {}
 
-    /**
-     * Between two projects as they are now: only users the destination owns.
-     */
+    /** Between two projects as they are now: only users the destination owns. */
     public static function between(User $source, User $dest): self
     {
         return self::map(
@@ -33,23 +25,6 @@ final class DefinerMap
             self::userNames($source),
             self::userNames($dest),
         );
-    }
-
-    /**
-     * For a whole-project copy, which creates every source user under the
-     * destination prefix once the databases are in.
-     */
-    public static function forProjectCopy(User $source, User $dest): self
-    {
-        $fromPrefix = $source->getMysqlPrefix();
-        $toPrefix = $dest->getMysqlPrefix();
-        $sourceUsers = self::userNames($source);
-        $copied = array_map(
-            static fn (string $user): string => DatabaseCopier::mapName($user, $fromPrefix, $toPrefix),
-            $sourceUsers,
-        );
-
-        return self::map($fromPrefix, $toPrefix, $sourceUsers, $copied);
     }
 
     /**
@@ -66,12 +41,7 @@ final class DefinerMap
             }
         }
 
-        return new self($accounts, self::orphanFor($toPrefix));
-    }
-
-    public function orphan(): string
-    {
-        return $this->orphan;
+        return new self($accounts);
     }
 
     /**
@@ -80,15 +50,6 @@ final class DefinerMap
     public function accounts(): array
     {
         return $this->accounts;
-    }
-
-    private static function orphanFor(string $prefix): string
-    {
-        if ($prefix !== '' && ! self::isPlainName($prefix)) {
-            throw new \RuntimeException('Invalid MySQL prefix');
-        }
-
-        return $prefix.self::ORPHAN;
     }
 
     private static function isPlainName(string $name): bool

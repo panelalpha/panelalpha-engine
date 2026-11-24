@@ -35,9 +35,10 @@ use App\System\Project\PhpHosting\WordPress\UnclearInstall;
 use App\System\Project\PhpHosting\WordPress\WordPress;
 use App\System\Project\PushAttempt;
 use App\System\Services\Mysql;
+use App\System\Services\Mysql\AccountMap;
 use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\DatabaseCopyResult;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use App\System\Services\Mysql\TableReplacement;
 use App\System\Services\Mysql\Tables;
 use Illuminate\Support\Facades\File;
@@ -577,13 +578,21 @@ class Projects
     private function pushDatabases(ModelsUser $from, ModelsUser $to, string $rollbackDir, array &$rollbacks, array &$created): DatabaseCopyResult
     {
         $copier = $this->databaseCopier();
-        $definers = DefinerMap::between($from, $to);
+        $userMap = AccountMap::between($from, $to);
         $sourcePrefix = $from->getMysqlPrefix();
         $targetPrefix = $to->getMysqlPrefix();
         $owned = $to->mysqlDatabases()->pluck('database')->all();
 
         if ($from->mysqlDatabases->isEmpty()) {
             return new DatabaseCopyResult;
+        }
+
+        $accounts = [];
+        foreach ($from->mysqlDatabases as $row) {
+            $dest = DatabaseCopier::mapName($row->database, $sourcePrefix, $targetPrefix);
+            if (in_array($dest, $owned, true)) {
+                $accounts[$dest] = $this->system->mysql()->importAccount($to, $dest);
+            }
         }
 
         $this->prepareRollbackDir($rollbackDir);
@@ -594,9 +603,9 @@ class Projects
             $source = $row->database;
             $dest = DatabaseCopier::mapName($source, $sourcePrefix, $targetPrefix);
             if (in_array($dest, $owned, true)) {
-                $this->replacePushedDatabase($copier, $definers, $to, $source, $dest, $rollbackDir, $rollbacks);
+                $this->replacePushedDatabase($copier, $accounts[$dest], $to, $source, $dest, $rollbackDir, $rollbacks);
             } else {
-                array_push($warnings, ...$this->createPushedDatabase($copier, $definers, $to, $source, $dest, $created));
+                array_push($warnings, ...$this->createPushedDatabase($copier, $userMap, $to, $source, $dest, $created));
             }
             $databases[$source] = $dest;
         }
@@ -612,7 +621,7 @@ class Projects
      */
     private function replacePushedDatabase(
         DatabaseCopier $copier,
-        DefinerMap $definers,
+        ImportAccount $account,
         ModelsUser $to,
         string $source,
         string $dest,
@@ -620,18 +629,19 @@ class Projects
         array &$rollbacks,
     ): void {
         $rollbacks[$dest] = $copier->dumpRollback($dest, $rollbackDir);
-        $copier->replaceDatabase($source, $dest, $rollbacks[$dest], $to, $definers);
+        $copier->replaceDatabase($source, $dest, $rollbacks[$dest], $to, $account);
     }
 
     /**
-     * The target users the source users map to get the grants those had on the created database.
+     * The target users the source users map to get the grants those had on the created database, before it is
+     * loaded as the one of them granted on it.
      *
      * @param  list<string>  $created
      * @return list<string>
      */
     private function createPushedDatabase(
         DatabaseCopier $copier,
-        DefinerMap $definers,
+        AccountMap $userMap,
         ModelsUser $to,
         string $source,
         string $dest,
@@ -639,9 +649,10 @@ class Projects
     ): array {
         MysqlDatabase::create(['user_id' => $to->id, 'database' => $dest]);
         $created[] = $dest;
-        $copier->copyDatabase($source, $dest, $definers);
+        $warnings = $copier->grantCreatedDatabase($source, $dest, $userMap);
+        $copier->copyDatabase($source, $dest, $this->system->mysql()->importAccount($to, $dest));
 
-        return $copier->grantCreatedDatabase($source, $dest, $definers);
+        return $warnings;
     }
 
     /**
@@ -664,7 +675,7 @@ class Projects
 
         foreach ($created as $database) {
             try {
-                $this->databaseCopier()->dropCreatedDatabase($database, DefinerMap::between($from, $to));
+                $this->databaseCopier()->dropCreatedDatabase($database, AccountMap::between($from, $to));
                 $to->mysqlDatabases()->where('database', $database)->delete();
             } catch (\Throwable $e) {
                 $failures[] = "dropping created database '{$database}'";

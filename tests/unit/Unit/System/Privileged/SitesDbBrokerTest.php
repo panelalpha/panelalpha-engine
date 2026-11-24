@@ -5,7 +5,6 @@ namespace Tests\Unit\System\Privileged;
 use App\System\Privileged;
 use App\System\Privileged\InvalidArgument;
 use App\System\Privileged\RootEngineComposeLines;
-use App\System\Services\Mysql\DefinerMap;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -16,34 +15,25 @@ final class SitesDbBrokerTest extends TestCase
     public function test_each_line_asks_for_the_action_with_the_values_the_broker_is_checked_against(): void
     {
         $lines = self::lines();
-        $map = DefinerMap::map('alice_', 'bob_', ['alice_wp', 'alice_shop'], ['bob_wp', 'bob_shop']);
-        $none = DefinerMap::map('', '', [], []);
+        $client = '/usr/local/lib/panelalpha/pa-root';
 
         $this->assertSame([
-            "/usr/local/lib/panelalpha/pa-root compose.sitesDbDump -- ".self::ENGINE." alice_wp ''",
-            "/usr/local/lib/panelalpha/pa-root compose.sitesDbDump -- ".self::ENGINE." alice-wp 'wp_\$posts'",
-            '/usr/local/lib/panelalpha/pa-root compose.sitesDbRestore -- '.self::ENGINE.' bob_wp',
-            '/usr/local/lib/panelalpha/pa-root compose.sitesDbCopy -- '.self::ENGINE.' alice_wp bob_wp \'\' bob_no.definer 2 alice_wp bob_wp alice_shop bob_shop',
-            '/usr/local/lib/panelalpha/pa-root compose.sitesDbCopy -- '.self::ENGINE.' alice-wp bob-wp wp_posts no.definer 0',
-            '/usr/local/lib/panelalpha/pa-root compose.sitesDbRestoreCopy -- '.self::ENGINE.' alice_wp bob_wp bob_no.definer 2 alice_wp bob_wp alice_shop bob_shop',
-            '/usr/local/lib/panelalpha/pa-root compose.sitesDbDropTable -- '.self::ENGINE.' bob_wp wp_posts',
+            "{$client} compose.sitesDbDump -- ".self::ENGINE." alice_wp ''",
+            "{$client} compose.sitesDbDump -- ".self::ENGINE." alice-wp 'wp_\$posts'",
+            "{$client} compose.sitesDbRestore -- ".self::ENGINE.' bob_wp',
+            "{$client} compose.sitesDbCopy -- ".self::ENGINE." alice_wp bob_wp '' bob_app",
+            "{$client} compose.sitesDbCopy -- ".self::ENGINE.' alice-wp bob-wp wp_posts bob_app',
+            "{$client} compose.sitesDbRestoreCopy -- ".self::ENGINE.' alice_wp bob_wp bob_app',
+            "{$client} compose.sitesDbDropTable -- ".self::ENGINE.' bob_wp wp_posts',
         ], [
             $lines->sitesDbDump('alice_wp', null),
             $lines->sitesDbDump('alice-wp', 'wp_$posts'),
             $lines->sitesDbRestore('bob_wp'),
-            $lines->sitesDbCopy('alice_wp', 'bob_wp', null, $map->orphan(), $map->accounts()),
-            $lines->sitesDbCopy('alice-wp', 'bob-wp', 'wp_posts', $none->orphan(), $none->accounts()),
-            $lines->sitesDbRestoreCopy('alice_wp', 'bob_wp', $map->orphan(), $map->accounts()),
+            $lines->sitesDbCopy('alice_wp', 'bob_wp', null, 'bob_app'),
+            $lines->sitesDbCopy('alice-wp', 'bob-wp', 'wp_posts', 'bob_app'),
+            $lines->sitesDbRestoreCopy('alice_wp', 'bob_wp', 'bob_app'),
             $lines->sitesDbDropTable('bob_wp', 'wp_posts'),
         ]);
-    }
-
-    public function test_the_definers_travel_as_a_counted_list_after_the_orphan(): void
-    {
-        $this->assertSame(
-            "/usr/local/lib/panelalpha/pa-root compose.sitesDbCopy -- /opt/panelalpha/shared-hosting a_x b_x '' b_no.definer 1 a_u b_u",
-            self::lines()->sitesDbCopy('a_x', 'b_x', null, 'b_no.definer', ['a_u' => 'b_u']),
-        );
     }
 
     /** @return iterable<string, array{\Closure(RootEngineComposeLines): string}> */
@@ -54,12 +44,13 @@ final class SitesDbBrokerTest extends TestCase
         yield 'empty database' => [fn (RootEngineComposeLines $l) => $l->sitesDbRestore('')];
         yield 'table with a backtick' => [fn (RootEngineComposeLines $l) => $l->sitesDbDropTable('a', 't`; DROP TABLE x')];
         yield 'table with a line break' => [fn (RootEngineComposeLines $l) => $l->sitesDbDump('a', "t\n")];
-        yield 'definer with a backtick' => [fn (RootEngineComposeLines $l) => $l->sitesDbCopy('a', 'b', null, 'no.definer', ['a_u' => 'b`u'])];
-        yield 'source user with a quote' => [fn (RootEngineComposeLines $l) => $l->sitesDbCopy('a', 'b', null, 'no.definer', ["a'u" => 'b_u'])];
-        yield 'orphan that is root' => [fn (RootEngineComposeLines $l) => $l->sitesDbCopy('a', 'b', null, 'root', [])];
-        yield 'restored copy into a database with a quote' => [fn (RootEngineComposeLines $l) => $l->sitesDbRestoreCopy('a', "b'", 'no.definer', [])];
-        yield 'restored copy definer with a backtick' => [fn (RootEngineComposeLines $l) => $l->sitesDbRestoreCopy('a', 'b', 'no.definer', ['a_u' => 'b`u'])];
-        yield 'restored copy orphan that is root' => [fn (RootEngineComposeLines $l) => $l->sitesDbRestoreCopy('a', 'b', 'root', [])];
+        yield 'import account with a backtick' => [fn (RootEngineComposeLines $l) => $l->sitesDbCopy('a', 'b', null, 'b`u')];
+        yield 'import account with a quote' => [fn (RootEngineComposeLines $l) => $l->sitesDbCopy('a', 'b', null, "b'u")];
+        yield 'import account that is root' => [fn (RootEngineComposeLines $l) => $l->sitesDbCopy('a', 'b', null, 'root')];
+        yield 'empty import account' => [fn (RootEngineComposeLines $l) => $l->sitesDbCopy('a', 'b', null, '')];
+        yield 'restored copy into a database with a quote' => [fn (RootEngineComposeLines $l) => $l->sitesDbRestoreCopy('a', "b'", 'b_u')];
+        yield 'restored copy import account with a backtick' => [fn (RootEngineComposeLines $l) => $l->sitesDbRestoreCopy('a', 'b', 'b`u')];
+        yield 'restored copy import account that is root' => [fn (RootEngineComposeLines $l) => $l->sitesDbRestoreCopy('a', 'b', 'Root')];
         yield 'relative project directory' => [fn (RootEngineComposeLines $l) => Privileged::engineComposeLines('opt/engine')->sitesDbRestore('a')];
         yield 'project directory climbing out' => [fn (RootEngineComposeLines $l) => Privileged::engineComposeLines('/opt/engine/..')->sitesDbRestore('a')];
     }

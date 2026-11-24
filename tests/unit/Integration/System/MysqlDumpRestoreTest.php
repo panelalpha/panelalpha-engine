@@ -5,7 +5,7 @@ namespace Tests\Integration\System;
 use App\Support\JobBudget;
 use App\System;
 use App\System\Services\Mysql;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
@@ -40,7 +40,6 @@ class MysqlDumpRestoreTest extends TestCase
             self::request($recorded[0]['cmd'][2]),
             'the password stays inside sites-db, read there from the container\'s own environment',
         );
-        $this->assertSame([], $recorded[0]['env']);
     }
 
     public function test_a_dump_without_its_completion_line_fails_the_backup(): void
@@ -124,11 +123,11 @@ class MysqlDumpRestoreTest extends TestCase
         $recorded = [];
         $mysql = new Mysql($this->recordingSystem($recorded, successful: true));
 
-        $mysql->restoreCopyFromGzip('alice_app', 'bob_app', '/tmp/alice_app.sql.gz', DefinerMap::map('alice_', 'bob_', ['alice_app'], ['bob_app']));
+        $mysql->restoreCopyFromGzip('alice_app', 'bob_app', '/tmp/alice_app.sql.gz', new ImportAccount('bob_app'));
 
         $this->assertCount(1, $recorded);
         $this->assertSame(
-            ['bash', '-c', "set -o pipefail; gunzip -c '/tmp/alice_app.sql.gz' | ".self::CLIENT.' compose.sitesDbRestoreCopy -- /opt/panelalpha/shared-hosting alice_app bob_app bob_no.definer 1 alice_app bob_app'],
+            ['bash', '-c', "set -o pipefail; gunzip -c '/tmp/alice_app.sql.gz' | ".self::CLIENT.' compose.sitesDbRestoreCopy -- /opt/panelalpha/shared-hosting alice_app bob_app bob_app'],
             $recorded[0]['cmd'],
         );
     }

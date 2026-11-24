@@ -16,7 +16,7 @@ use App\System\Project\Runtime;
 use App\System\Projects;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\Databases;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\Tables;
 use App\System\Services\Mysql\Users;
@@ -385,6 +385,7 @@ class ProjectsWordPressCopyTest extends TestCase
                     'sourcePrivileges' => ['live_wp' => 'ALL PRIVILEGES'],
                     'created' => [],
                     'users' => [],
+                    'grants' => [],
                 ];
 
                 return new class($record) extends Mysql
@@ -443,14 +444,17 @@ class ProjectsWordPressCopyTest extends TestCase
 
                             public function showPrivileges(string $user): array
                             {
-                                return $this->record->sourcePrivileges;
+                                return [...$this->record->sourcePrivileges, ...($this->record->grants[$user] ?? [])];
                             }
 
-                            public function updatePrivileges(string $user, string $database, string $privileges): void {}
+                            public function updatePrivileges(string $user, string $database, string $privileges): void
+                            {
+                                $this->record->grants[$user][$database] = $privileges;
+                            }
                         };
                     }
 
-                    public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void {}
+                    public function copyInSitesDb(string $from, string $to, ?string $table, ImportAccount $account, string $failurePrefix): void {}
 
                     public function dropTableInSitesDb(string $database, string $table): void {}
 

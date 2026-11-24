@@ -14,7 +14,7 @@ use App\System\Project\Backup\ProjectContent;
 use App\System\Project\Backup\ProjectDatabases;
 use App\System\Project\Backup\ProjectFiles;
 use App\System\Project\Backup\ProjectVolumes;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 
 /**
  * Test subclass whose stack, content and storage are doubles recording one shared call list.
@@ -30,7 +30,7 @@ final class BackupDouble extends Backup
     /** @var array<string, string> database name => the dump that was loaded into it */
     public array $restoredDumps = [];
 
-    /** @var array<string, array{from: string, orphan: string, accounts: array<string, string>}> a copied database => how its dump was rewritten */
+    /** @var array<string, array{from: string, account: string}> a copied database => the account it was loaded as */
     public array $copiedDatabases = [];
 
     private ProjectContent $contentDouble;
@@ -152,9 +152,9 @@ final class BackupDouble extends Backup
         }
     }
 
-    public function restoreCopiedDatabase(string $sourceName, string $name, string $sqlGzPath, DefinerMap $definers): void
+    public function restoreCopiedDatabase(string $sourceName, string $name, string $sqlGzPath, ImportAccount $account): void
     {
-        $this->copiedDatabases[$name] = ['from' => $sourceName, 'orphan' => $definers->orphan(), 'accounts' => $definers->accounts()];
+        $this->copiedDatabases[$name] = ['from' => $sourceName, 'account' => $account->user];
         $this->restoreDatabase($name, $sqlGzPath);
     }
 
@@ -415,9 +415,9 @@ final class BackupDouble extends Backup
                 $this->double->restoreDatabase($name, $sqlGzPath, $timeout);
             }
 
-            public function restoreCopy(string $sourceName, string $name, string $sqlGzPath, DefinerMap $definers): void
+            public function restoreCopy(string $sourceName, string $name, string $sqlGzPath, ImportAccount $account): void
             {
-                $this->double->restoreCopiedDatabase($sourceName, $name, $sqlGzPath, $definers);
+                $this->double->restoreCopiedDatabase($sourceName, $name, $sqlGzPath, $account);
             }
 
             public function exists(string $name): bool

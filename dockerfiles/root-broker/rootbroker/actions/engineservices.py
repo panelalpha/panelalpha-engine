@@ -14,7 +14,7 @@ from .. import cli, composefiles, dockerapi, hostdaemon, values
 from ..dockerapi import Failed, quoted
 from ..refused import Refused
 from . import builders, hostapi
-from .sequence import flag, group, nothing, reads, rest
+from .sequence import flag, nothing, reads, rest
 from .shell import escapeshellarg
 
 SITES_HTTP, MAIL, FTP, SFTP, LIGHTHOUSE, SITES_DB = 'sites-http', 'mail', 'ftp', 'sftp', 'lighthouse', 'sites-db'
@@ -23,10 +23,42 @@ FTP_PASSWORD = 'PA_FTP_PASSWORD'
 FTP_PASSWORD_PIPE = 'printf \'%s\\n%s\\n\' "$' + FTP_PASSWORD + '" "$' + FTP_PASSWORD + '" | '
 LITESPEED_PASSWORD = 'PA_LITESPEED_ADMIN_PASSWORD'
 SITES_DB_PASSWORD = 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; '
+IMPORT_LOCK_DIR = '/run/lock'
 # a definer never spans a quote or a backslash, so rewriting one inside a string cannot move where the string ends
 DEFINER_PART = r'''\([^`'"\\]\|``\)*'''
 ANY_DEFINER = 'DEFINER=`' + DEFINER_PART + '`\\(@`' + DEFINER_PART + '`\\)\\{0,1\\}'
 PREG_SPECIAL = set('.\\+*?[^]$(){}=!<>|:-#/')
+
+IMPORT_SCRIPT = r'''set -o pipefail
+A=@ACCOUNT@
+query() { MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mariadb -uroot -N -B -e "$1" </dev/null; }
+own() {
+    local method
+    method=$(query "SELECT CONCAT(JSON_VALUE(priv, '\$.plugin'), ' ', JSON_VALUE(priv, '\$.authentication_string')) FROM mysql.global_priv WHERE user = '$A' AND host = '%'") || return 2
+    [[ $method =~ ^mysql_native_password\ (\*[0-9A-F]{40})?$ ]] || return 1
+    H=${BASH_REMATCH[1]}
+}
+restore() {
+    local status=$?
+    trap - EXIT
+    trap '' HUP INT TERM
+    own
+    case $? in
+        0) query "ALTER USER '$A'@'%' IDENTIFIED VIA mysql_native_password USING '$H'" && exit $status ;;
+        1) exit $status ;;
+    esac
+    echo "the temporary sign-in of '$A'@'%' was not taken back; the next import as it takes it back" >&2
+    exit 1
+}
+exec 9>@LOCK@ && flock -w 600 9 || { echo "another import as '$A'@'%' is still running" >&2; exit 1; }
+own || { echo "refused: '$A'@'%' does not exist or does not sign in with mysql_native_password" >&2; exit 1; }
+T=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 32)
+trap restore EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+printf "ALTER USER '%s'@'%%' IDENTIFIED VIA mysql_native_password USING '%s' OR mysql_native_password USING PASSWORD('%s')" "$A" "$H" "$T" | MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mariadb -uroot || exit
+@STREAM@ | MYSQL_PWD="$T" mariadb --sandbox --user="$A" -- @DATABASE@'''
 
 MODSECURITY_CHECK_SCRIPT = '''T=$1
 nginx -t -q -c "$T/nginx.conf" || exit
@@ -162,12 +194,23 @@ def sites_db(read, script, stdin=None):
     return in_service(SITES_DB, read, lambda context, *taken: ['bash', '-c', SITES_DB_PASSWORD + script(*taken)], stdin)
 
 
+def sites_db_import(read, script, stdin=None):
+    """`script(*values)` run by bash in sites-db, root only for what `import_as()` says is root's."""
+    return in_service(SITES_DB, read, lambda context, *taken: ['bash', '-c', script(*taken)], stdin)
+
+
 litespeed_verb = values.one_of(('restart', 'fullrestart', 'condrestart'), 'lswsctrl command')
 sftp_login = values.matching(re.compile(r'[a-zA-Z0-9_]+'), 'SFTP login')
 database = values.matching(re.compile(r'[A-Za-z_-][A-Za-z0-9_-]*'), 'database')
 table = values.matching(re.compile(r'[A-Za-z0-9_$]+'), 'table')
 mysql_account = values.matching(re.compile(r'[A-Za-z0-9_-]+'), 'MySQL user')
-orphan = values.matching(re.compile(r'[A-Za-z0-9_-]*no\.definer'), 'orphan DEFINER')
+
+
+def import_account(value):
+    """A project's own account, never sites-db's root."""
+    if mysql_account(value).lower() == 'root':
+        values.refuse('import account', value)
+    return value
 
 
 def operand_matching(pattern, kind):
@@ -272,17 +315,15 @@ def definer(user):
     return f'`{user}`@`%`'
 
 
-def schema_rewrite(source, target, definers, orphan_user):
-    """sed renaming the schema and every DEFINER on schema lines only, so a data row holding `source.` survives.
-    A mapped definer is parked behind a newline so the orphan catch-all skips it."""
+def schema_rewrite(source, target, account):
+    """sed renaming the schema and giving every DEFINER to `account`, on schema lines only, so a data row holding
+    `source.` survives."""
     replacement = target.replace('\\', '\\\\').replace('&', '\\&').replace('/', '\\/')
     pattern = preg_quote(source)
     expressions = [
         f's/`{pattern}`\\./`{replacement}`./g',
         f's/\\b{pattern}\\./{replacement}./g',
-        *(f's/DEFINER={definer(user)}/DEFINER\\n{definer(mapped)}/g' for user, mapped in definers),
-        f's/{ANY_DEFINER}/DEFINER={definer(orphan_user)}/g',
-        's/DEFINER\\n/DEFINER=/g',
+        f's/{ANY_DEFINER}/DEFINER={definer(account)}/g',
     ]
     return 'sed' + ''.join(' -e ' + escapeshellarg(f'/^INSERT INTO /!{{/^(/!{expression}}}') for expression in expressions)
 
@@ -297,14 +338,23 @@ def sites_db_restore(name):
     return 'mariadb -uroot -- ' + escapeshellarg(name)
 
 
-def sites_db_copy(source, target, only, orphan_user, definers):
-    rewrite = schema_rewrite(source, target, definers, orphan_user)
-    return f'set -o pipefail; {sites_db_dump(source, only)} | {rewrite} | mariadb -uroot -- {escapeshellarg(target)}'
+def import_as(account, name, stream):
+    """`stream` loaded into `name` signed in as `account` with a password made here for this import, which the trap
+    takes back however the script ends; root only reads and sets the account's sign-in."""
+    return (IMPORT_SCRIPT
+            .replace('@ACCOUNT@', escapeshellarg(account))
+            .replace('@LOCK@', escapeshellarg(f'{IMPORT_LOCK_DIR}/panelalpha-sites-db-import-{account}'))
+            .replace('@STREAM@', stream)
+            .replace('@DATABASE@', escapeshellarg(name)))
 
 
-def sites_db_restore_copy(source, target, orphan_user, definers):
-    rewrite = schema_rewrite(source, target, definers, orphan_user)
-    return f'set -o pipefail; {rewrite} | {sites_db_restore(target)}'
+def sites_db_copy(source, target, only, account):
+    dump = 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" ' + sites_db_dump(source, only)
+    return import_as(account, target, f'{dump} | {schema_rewrite(source, target, account)}')
+
+
+def sites_db_restore_copy(source, target, account):
+    return import_as(account, target, schema_rewrite(source, target, account))
 
 
 def sites_db_drop_table(name, only):
@@ -316,12 +366,9 @@ ACTIONS = {
     'sitesDbCacheSizes': in_service(SITES_DB, nothing, lambda context: ['sh', '-c', SITES_DB_CACHE_SIZES]),
     'sitesDbDump': sites_db(reads(database, values.optional(table)), sites_db_dump),
     'sitesDbRestore': sites_db(database, sites_db_restore, stdin=dockerapi.CLIENT),
-    'sitesDbCopy': sites_db(
-        reads(database, database, values.optional(table), orphan, group(mysql_account, mysql_account)), sites_db_copy,
-    ),
-    'sitesDbRestoreCopy': sites_db(
-        reads(database, database, orphan, group(mysql_account, mysql_account)), sites_db_restore_copy,
-        stdin=dockerapi.CLIENT,
+    'sitesDbCopy': sites_db_import(reads(database, database, values.optional(table), import_account), sites_db_copy),
+    'sitesDbRestoreCopy': sites_db_import(
+        reads(database, database, import_account), sites_db_restore_copy, stdin=dockerapi.CLIENT,
     ),
     'sitesDbDropTable': sites_db(reads(database, table), sites_db_drop_table),
     'nginxConfigTest': fixed(SITES_HTTP, 'nginx', '-t', on_host=True),

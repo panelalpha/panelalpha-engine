@@ -4,7 +4,7 @@ namespace App\System\Project\Backup;
 
 use App\System\Project as UserProject;
 use App\System\Services\Mysql\DatabaseCopier;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 
 /**
  * A backup restored into a new project rather than the one that owns it: the databases take the new
@@ -47,9 +47,9 @@ final readonly class RestoreCopy
         );
     }
 
-    /** Who owns the views, triggers and routines a copied dump recreates, as the new project is now. */
-    public function definers(): DefinerMap
+    /** The new project's own account on $database, which a copied dump is loaded as. */
+    public function account(string $database): ImportAccount
     {
-        return DefinerMap::between($this->source->model(), $this->target->model());
+        return $this->target->system()->mysql()->importAccount($this->target->model(), $database);
     }
 }

@@ -3,7 +3,7 @@
 namespace App\System\Project\Backup;
 
 use App\Support\JobBudget;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use Throwable;
 
 /** Databases put back from dumps, each behind a dump of its own state taken first, so a failure can undo them all. */
@@ -26,9 +26,9 @@ final class DatabaseRestore
     }
 
     /** restore() of a dump taken from $sourceName in another project, loaded into $name with its names rewritten. */
-    public function restoreCopy(string $sourceName, string $name, string $sqlGzPath, DefinerMap $definers): void
+    public function restoreCopy(string $sourceName, string $name, string $sqlGzPath, ImportAccount $account): void
     {
-        $this->restoreBehindDump($name, fn () => $this->databases->restoreCopy($sourceName, $name, $sqlGzPath, $definers));
+        $this->restoreBehindDump($name, fn () => $this->databases->restoreCopy($sourceName, $name, $sqlGzPath, $account));
     }
 
     private function restoreBehindDump(string $name, callable $load): void

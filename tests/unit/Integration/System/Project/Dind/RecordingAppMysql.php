@@ -4,7 +4,7 @@ namespace Tests\Integration\System\Project\Dind;
 
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\Databases;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\Users;
 use PDO;
@@ -48,9 +48,12 @@ class RecordingAppMysql extends Mysql
         $this->log[] = "restore {$name} from " . basename($sqlGzPath);
     }
 
-    public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
+    /** Logged with the account it is imported as, and whether that account existed and could write $to by then. */
+    public function copyInSitesDb(string $from, string $to, ?string $table, ImportAccount $account, string $failurePrefix): void
     {
-        $this->log[] = 'copy ' . $from . ' to ' . $to;
+        $usable = array_key_exists($account->user, $this->users)
+            && array_key_exists($to, $this->privileges()->showPrivileges($account->user));
+        $this->log[] = 'copy ' . $from . ' to ' . $to . ' as ' . $account->user . ($usable ? '' : ' (unusable)');
     }
 
     public function dropTableInSitesDb(string $database, string $table): void

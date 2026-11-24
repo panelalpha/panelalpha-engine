@@ -9,7 +9,7 @@ use App\System\Project\Dind\CopyVolumes;
 use App\System\Projects;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\Databases;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\Tables;
 use PDO;
@@ -51,6 +51,32 @@ class ProjectsPushRollbackTest extends TestCase
         $this->assertSame([], $record->deleted);
         $this->assertSame([], $record->scripts);
         $this->assertFileDoesNotExist($this->rollbackDir().'/live_wp.sql.gz');
+    }
+
+    public function test_a_push_into_a_database_no_account_of_the_target_is_granted_on_touches_nothing(): void
+    {
+        $this->assertPushTouchesNothingWithoutAnAccount(null);
+    }
+
+    public function test_a_table_push_into_a_database_no_account_of_the_target_is_granted_on_touches_nothing(): void
+    {
+        $this->assertPushTouchesNothingWithoutAnAccount([['database' => 'stg_wp', 'name' => 'wp_posts']]);
+    }
+
+    public function test_a_push_and_a_table_push_load_as_the_one_target_account_granted_on_the_database(): void
+    {
+        foreach ([null, [['database' => 'stg_wp', 'name' => 'wp_posts']]] as $tables) {
+            $record = $this->recorder(failStart: true, knownAccounts: false);
+            $record->privileges = ['live_wp' => ['live_wp' => 'ALL PRIVILEGES']];
+            if ($tables === null) {
+                $this->stagingPair();
+            }
+
+            $this->pushFails($record, 'start exploded', $tables);
+
+            $this->assertStringEndsWith(' live_wp', $record->scripts[0]);
+            $this->assertStringContainsString(' compose.sitesDbCopy -- ', $record->scripts[0]);
+        }
     }
 
     public function test_a_failed_table_rollback_dump_is_never_replayed_into_the_target(): void
@@ -167,6 +193,21 @@ class ProjectsPushRollbackTest extends TestCase
         $this->fail('the push should have failed');
     }
 
+    /** @param  list<array{database: string, name: string}>|null  $tables */
+    private function assertPushTouchesNothingWithoutAnAccount(?array $tables): void
+    {
+        $record = $this->recorder(knownAccounts: false);
+        $this->stagingPair();
+
+        $this->pushFails($record, "Database 'live_wp' cannot be copied into", $tables);
+
+        $this->assertSame([], $record->scripts);
+        $this->assertSame([], $record->deleted);
+        $this->assertSame([], $record->restores);
+        $this->assertFileDoesNotExist($this->rollbackDir().'/live_wp.sql.gz');
+        $this->assertFileDoesNotExist($this->rollbackDir().'/live_wp.wp_posts.sql.gz');
+    }
+
     private function rollbackDir(): string
     {
         return $this->root.'/rollbacks/live';
@@ -177,8 +218,10 @@ class ProjectsPushRollbackTest extends TestCase
         bool $failStart = false,
         bool $failRestore = false,
         ?string $failCopyOf = null,
+        bool $knownAccounts = true,
     ): object {
         return (object) [
+            'knownAccounts' => $knownAccounts,
             'failDumpOf' => $failDumpOf,
             'failStart' => $failStart,
             'failRestore' => $failRestore,
@@ -307,6 +350,11 @@ class PushRollbackMysql extends Mysql
         parent::__construct(null);
     }
 
+    public function importAccount(User $owner, string $database): ImportAccount
+    {
+        return $this->record->knownAccounts ? new ImportAccount($database) : parent::importAccount($owner, $database);
+    }
+
     public function dumpToGzip(string $name, string $dest, ?string $table = null): void
     {
         if ($name === $this->record->failDumpOf) {
@@ -325,9 +373,9 @@ class PushRollbackMysql extends Mysql
         $this->record->restores[] = [$name, $sqlGzPath];
     }
 
-    public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
+    public function copyInSitesDb(string $from, string $to, ?string $table, ImportAccount $account, string $failurePrefix): void
     {
-        $this->recordScript(SitesDbRequest::copy($from, $to, $table, $definers), $failurePrefix);
+        $this->recordScript(SitesDbRequest::copy($from, $to, $table, $account), $failurePrefix);
     }
 
     public function dropTableInSitesDb(string $database, string $table): void

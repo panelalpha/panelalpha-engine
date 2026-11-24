@@ -99,24 +99,17 @@ LIGHTHOUSE = [
 ]
 SITES_DB_DUMP = ['bash', '-c', 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; mariadb-dump --single-transaction --routines '
                               '--triggers --events -uroot -- \'alice_wp\'']
-SITES_DB_COPY = [
-    'bash', '-c', 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; set -o pipefail; mariadb-dump --single-transaction '
-    '--routines --triggers --events -uroot -- \'alice_wp\' | sed '
-    '-e \'/^INSERT INTO /!{/^(/!s/`alice_wp`\\./`bob_wp`./g}\' '
+SITES_DB_REWRITE = (
+    'sed -e \'/^INSERT INTO /!{/^(/!s/`alice_wp`\\./`bob_wp`./g}\' '
     '-e \'/^INSERT INTO /!{/^(/!s/\\balice_wp\\./bob_wp./g}\' '
-    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`alice_wp`@`%`/DEFINER\\n`bob_wp`@`%`/g}\' '
-    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`alice_shop`@`%`/DEFINER\\n`bob_shop`@`%`/g}\' '
-    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`\\([^`\'\\\'\'"\\\\]\\|``\\)*`\\(@`\\([^`\'\\\'\'"\\\\]\\|``\\)*`\\)\\{0,1\\}/DEFINER=`bob_no.definer`@`%`/g}\' '
-    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER\\n/DEFINER=/g}\' | mariadb -uroot -- \'bob_wp\'',
-]
-SITES_DB_RESTORE_COPY = [
-    'bash', '-c', 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; set -o pipefail; sed '
-    '-e \'/^INSERT INTO /!{/^(/!s/`alice_wp`\\./`bob_wp`./g}\' '
-    '-e \'/^INSERT INTO /!{/^(/!s/\\balice_wp\\./bob_wp./g}\' '
-    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`alice_wp`@`%`/DEFINER\\n`bob_wp`@`%`/g}\' '
-    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`\\([^`\'\\\'\'"\\\\]\\|``\\)*`\\(@`\\([^`\'\\\'\'"\\\\]\\|``\\)*`\\)\\{0,1\\}/DEFINER=`bob_no.definer`@`%`/g}\' '
-    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER\\n/DEFINER=/g}\' | mariadb -uroot -- \'bob_wp\'',
-]
+    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`\\([^`\'\\\'\'"\\\\]\\|``\\)*`\\(@`\\([^`\'\\\'\'"\\\\]\\|``\\)*`\\)\\{0,1\\}/DEFINER=`bob_app`@`%`/g}\''
+)
+SITES_DB_COPY = ['bash', '-c', engineservices.import_as(
+    'bob_app', 'bob_wp',
+    'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mariadb-dump --single-transaction --routines --triggers --events -uroot -- '
+    '\'alice_wp\' | ' + SITES_DB_REWRITE,
+)]
+SITES_DB_RESTORE_COPY = ['bash', '-c', engineservices.import_as('bob_app', 'bob_wp', SITES_DB_REWRITE)]
 # (action, 'file' or 'dir' first value, the rest of the values, on the host, service, Cmd, Env, passing)
 EXECS = [
     ('nginxConfigTest', 'file', [], True, 'sites-http', ['nginx', '-t'], [], ()),
@@ -164,10 +157,8 @@ EXECS = [
     ('sitesDbDump', 'dir', ['alice_wp', ''], False, 'sites-db', SITES_DB_DUMP, [], ()),
     ('sitesDbRestore', 'dir', ['bob_wp'], False, 'sites-db',
      ['bash', '-c', 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; mariadb -uroot -- \'bob_wp\''], [], ()),
-    ('sitesDbCopy', 'dir', ['alice_wp', 'bob_wp', '', 'bob_no.definer', '2', 'alice_wp', 'bob_wp', 'alice_shop',
-                            'bob_shop'], False, 'sites-db', SITES_DB_COPY, [], ()),
-    ('sitesDbRestoreCopy', 'dir', ['alice_wp', 'bob_wp', 'bob_no.definer', '1', 'alice_wp', 'bob_wp'], False,
-     'sites-db', SITES_DB_RESTORE_COPY, [], ()),
+    ('sitesDbCopy', 'dir', ['alice_wp', 'bob_wp', '', 'bob_app'], False, 'sites-db', SITES_DB_COPY, [], ()),
+    ('sitesDbRestoreCopy', 'dir', ['alice_wp', 'bob_wp', 'bob_app'], False, 'sites-db', SITES_DB_RESTORE_COPY, [], ()),
     ('sitesDbDropTable', 'dir', ['bob_wp', 'wp_posts'], False, 'sites-db',
      ['bash', '-c', 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; mariadb -uroot -e '
                     '\'DROP TABLE IF EXISTS `wp_posts`\' -- \'bob_wp\''], [], ()),
@@ -298,6 +289,12 @@ class ExecTest(EngineTest):
             'AttachStdout': True, 'AttachStderr': True, 'AttachStdin': True, 'Tty': False,
             'Cmd': ['bash', '-c', 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; mariadb -uroot -- \'bob_wp\''], 'Env': [],
         })
+
+    def test_a_copy_takes_no_password_from_the_caller(self):
+        result = self.ask('compose.sitesDbCopy', self.roots['engine'], 'alice_wp', 'bob_wp', '', 'bob_app',
+                          passing=('PA_SITES_DB_IMPORT_PASSWORD',), environment={'PA_SITES_DB_IMPORT_PASSWORD': 'x'})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b'takes no PA_SITES_DB_IMPORT_PASSWORD', result.stderr)
 
     def test_the_exit_code_and_the_daemon_s_words_are_the_command_s(self):
         self.routes[('POST', f'/containers/{CONTAINERS["sites-http"]}/exec')] = (409, {'message': 'container  is   paused'})

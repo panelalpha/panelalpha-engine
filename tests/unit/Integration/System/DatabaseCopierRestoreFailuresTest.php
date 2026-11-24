@@ -5,16 +5,18 @@ namespace Tests\Integration\System;
 use App\Exceptions\RollbackIncompleteException;
 use App\Models\User;
 use App\System\Services\Mysql;
+use App\System\Services\Mysql\AccountMap;
 use App\System\Services\Mysql\DatabaseCopier;
 use App\System\Services\Mysql\DatabaseCopyResult;
 use App\System\Services\Mysql\Databases;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\TableReplacement;
 use App\System\Services\Mysql\Tables;
 use Illuminate\Support\Facades\Log;
 use PDO;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\KnowsEveryImportAccount;
 use Tests\Support\SitesDbRequest;
 use Tests\TestCase;
 
@@ -37,7 +39,7 @@ class DatabaseCopierRestoreFailuresTest extends TestCase
 
         $failures = $copier->restoreTables(new TableReplacement(
             new DatabaseCopyResult,
-            DefinerMap::map('a_', 'b_', ['a_u1', 'a_u2'], ['b_u1', 'b_u2']),
+            AccountMap::map('a_', 'b_', ['a_u1', 'a_u2'], ['b_u1', 'b_u2']),
             [
                 ['database' => 'b_one', 'table' => 't1', 'dump' => '/r/b_one.t1.sql.gz'],
                 ['database' => 'b_one', 'table' => 't2', 'dump' => '/r/b_one.t2.sql.gz'],
@@ -76,7 +78,7 @@ class DatabaseCopierRestoreFailuresTest extends TestCase
         $journal = new \ArrayObject;
 
         $failures = (new DatabaseCopier($this->mysql($journal)))->restoreTables(
-            new TableReplacement(new DatabaseCopyResult, DefinerMap::map('a_', 'b_', [], []))
+            new TableReplacement(new DatabaseCopyResult, AccountMap::map('a_', 'b_', [], []))
         );
 
         $this->assertSame([], $failures);
@@ -114,9 +116,9 @@ class DatabaseCopierRestoreFailuresTest extends TestCase
 
         $this->assertSame([
             'dump bob_wp wp_posts /tmp/g23-rollback/bob_wp.wp_posts.sql.gz',
-            'script /usr/local/lib/panelalpha/pa-root compose.sitesDbCopy -- /opt/panelalpha/shared-hosting alice_wp bob_wp wp_posts bob_no.definer 0',
+            'script /usr/local/lib/panelalpha/pa-root compose.sitesDbCopy -- /opt/panelalpha/shared-hosting alice_wp bob_wp wp_posts bob_wp',
             'dump bob_wp wp_options /tmp/g23-rollback/bob_wp.wp_options.sql.gz',
-            'script /usr/local/lib/panelalpha/pa-root compose.sitesDbCopy -- /opt/panelalpha/shared-hosting alice_wp bob_wp wp_options bob_no.definer 0',
+            'script /usr/local/lib/panelalpha/pa-root compose.sitesDbCopy -- /opt/panelalpha/shared-hosting alice_wp bob_wp wp_options bob_wp',
             'restore bob_wp /tmp/g23-rollback/bob_wp.wp_posts.sql.gz',
             'restore bob_wp /tmp/g23-rollback/bob_wp.wp_options.sql.gz',
         ], $journal->getArrayCopy());
@@ -163,6 +165,8 @@ class DatabaseCopierRestoreFailuresTest extends TestCase
         array $failDeletes = [],
     ): Mysql {
         return new class ($journal, $tables, $failRestores, $failScripts, $failDeletes) extends Mysql {
+            use KnowsEveryImportAccount;
+
             public function __construct(
                 private \ArrayObject $journal,
                 private array $tableNames,
@@ -201,9 +205,9 @@ class DatabaseCopierRestoreFailuresTest extends TestCase
                 }
             }
 
-            public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
+            public function copyInSitesDb(string $from, string $to, ?string $table, ImportAccount $account, string $failurePrefix): void
             {
-                $this->recordScript(SitesDbRequest::copy($from, $to, $table, $definers), $failurePrefix);
+                $this->recordScript(SitesDbRequest::copy($from, $to, $table, $account), $failurePrefix);
             }
 
             public function dropTableInSitesDb(string $database, string $table): void

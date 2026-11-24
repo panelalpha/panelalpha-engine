@@ -294,7 +294,7 @@ final class BackupRestore
 
         $target = $this->copy->databaseName($name);
         $this->content->databases->ensureRow($target);
-        $databases->restoreCopy($name, $target, $sqlGzPath, $this->copy->definers());
+        $databases->restoreCopy($name, $target, $sqlGzPath, $this->copy->account($target));
     }
 
     private function restoreFailure(Throwable $e): \RuntimeException

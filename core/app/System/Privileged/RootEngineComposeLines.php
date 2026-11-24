@@ -13,8 +13,6 @@ final class RootEngineComposeLines
 
     private const ACCOUNT = '/\A[A-Za-z0-9_-]+\z/';
 
-    private const ORPHAN = '/\A[A-Za-z0-9_-]*no\.definer\z/';
-
     public function __construct(private readonly string $projectDirectory) {}
 
     /** A whole database is dumped with its routines, triggers and events. */
@@ -28,45 +26,21 @@ final class RootEngineComposeLines
         return $this->line(__FUNCTION__, [self::database($database)]);
     }
 
-    /**
-     * Rewrites the schema name, and each DEFINER to its mapped user or to $orphan.
-     *
-     * @param  array<string, string>  $definers  source user => destination user
-     */
-    public function sitesDbCopy(string $from, string $to, ?string $table, string $orphan, array $definers): string
+    /** Imported as $account, which every DEFINER is rewritten to, under a sign-in sites-db makes and takes back. */
+    public function sitesDbCopy(string $from, string $to, ?string $table, string $account): string
     {
-        foreach ($definers as $source => $destination) {
-            self::account((string) $source);
-            self::account($destination);
-        }
-
         return $this->line(__FUNCTION__, [
             self::database($from),
             self::database($to),
             $table === null ? '' : self::table($table),
-            self::orphan($orphan),
-            ...ActionValues::pairs($definers),
+            self::account($account),
         ]);
     }
 
-    /**
-     * sitesDbRestore() of a dump taken from $from, with the schema name and each DEFINER rewritten as sitesDbCopy() does.
-     *
-     * @param  array<string, string>  $definers  source user => destination user
-     */
-    public function sitesDbRestoreCopy(string $from, string $to, string $orphan, array $definers): string
+    /** sitesDbCopy() of a dump taken from $from that the caller pipes in. */
+    public function sitesDbRestoreCopy(string $from, string $to, string $account): string
     {
-        foreach ($definers as $source => $destination) {
-            self::account((string) $source);
-            self::account($destination);
-        }
-
-        return $this->line(__FUNCTION__, [
-            self::database($from),
-            self::database($to),
-            self::orphan($orphan),
-            ...ActionValues::pairs($definers),
-        ]);
+        return $this->line(__FUNCTION__, [self::database($from), self::database($to), self::account($account)]);
     }
 
     public function sitesDbDropTable(string $database, string $table): string
@@ -92,12 +66,11 @@ final class RootEngineComposeLines
 
     private static function account(string $name): string
     {
-        return self::matching(self::ACCOUNT, 'MySQL user', $name);
-    }
+        if (strtolower($name) === 'root') {
+            throw InvalidArgument::of('import account', $name);
+        }
 
-    private static function orphan(string $name): string
-    {
-        return self::matching(self::ORPHAN, 'orphan DEFINER', $name);
+        return self::matching(self::ACCOUNT, 'MySQL user', $name);
     }
 
     private static function matching(string $pattern, string $kind, string $value): string

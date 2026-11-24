@@ -12,15 +12,16 @@ use App\System\Project\PhpHosting\WordPress\ContainerSiteCopy;
 use App\System\Project\PhpHosting\WordPress\SiteCopy;
 use App\System\Projects;
 use App\System\Services\Mysql;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use App\System\Services\Mysql\Tables;
 use Mockery;
 use PDO;
 use Symfony\Component\Process\Process;
+use Tests\Support\FakeWordPressSite;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\KnowsEveryImportAccount;
 use Tests\Support\LocalRoot;
 use Tests\TestCase;
-use Tests\Support\FakeWordPressSite;
 
 /** A push between two classic WordPress sites leaves the target its own wp-config.php and addresses. */
 class ProjectsWordPressPushTest extends TestCase
@@ -323,6 +324,8 @@ class ProjectsWordPressPushTest extends TestCase
             {
                 return new class extends Mysql
                 {
+                    use KnowsEveryImportAccount;
+
                     public function __construct()
                     {
                         parent::__construct(null);
@@ -330,7 +333,7 @@ class ProjectsWordPressPushTest extends TestCase
 
                     public function dumpToGzip(string $name, string $dest, ?string $table = null): void {}
 
-                    public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void {}
+                    public function copyInSitesDb(string $from, string $to, ?string $table, ImportAccount $account, string $failurePrefix): void {}
 
                     public function dropTableInSitesDb(string $database, string $table): void {}
 

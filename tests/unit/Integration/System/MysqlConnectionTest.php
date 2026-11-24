@@ -5,7 +5,7 @@ namespace Tests\Integration\System;
 use App\System;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\Databases;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\Tables;
 use App\System\Services\Mysql\Users;
@@ -61,13 +61,13 @@ class MysqlConnectionTest extends TestCase
         $recorded = [];
         $mysql = new Mysql($this->recordingSystem($recorded, successful: true));
 
-        $mysql->copyInSitesDb('alice_db', 'bob_db', 'wp_posts', DefinerMap::map('alice_', 'bob_', ['alice_u'], ['bob_u']), 'copy failed');
+        $mysql->copyInSitesDb('alice_db', 'bob_db', 'wp_posts', new ImportAccount('bob_u'), 'copy failed');
 
         $this->assertCount(1, $recorded);
-        $this->assertStringStartsWith('set -o pipefail; '.self::CLIENT.' compose.sitesDbCopy -- /opt/panelalpha/shared-hosting alice_db bob_db wp_posts', $recorded[0][2]);
-        $this->assertStringContainsString('bob_no.definer', $recorded[0][2]);
-        $this->assertStringContainsString('alice_u', $recorded[0][2]);
-        $this->assertStringContainsString('bob_u', $recorded[0][2]);
+        $this->assertSame(
+            ['bash', '-c', 'set -o pipefail; '.self::CLIENT.' compose.sitesDbCopy -- /opt/panelalpha/shared-hosting alice_db bob_db wp_posts bob_u'],
+            $recorded[0],
+        );
     }
 
     public function test_a_failed_copy_fails_with_the_callers_prefix(): void
@@ -78,7 +78,7 @@ class MysqlConnectionTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('copy of alice_db failed: boom');
 
-        $mysql->copyInSitesDb('alice_db', 'bob_db', null, DefinerMap::map('alice_', 'bob_', [], []), 'copy of alice_db failed');
+        $mysql->copyInSitesDb('alice_db', 'bob_db', null, new ImportAccount('bob_u'), 'copy of alice_db failed');
     }
 
     public function test_a_table_is_dropped_in_sites_db(): void

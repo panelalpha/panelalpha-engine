@@ -9,11 +9,12 @@ use App\System\Project\Dind\CopyVolumes;
 use App\System\Projects;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\Databases;
-use App\System\Services\Mysql\DefinerMap;
+use App\System\Services\Mysql\ImportAccount;
 use App\System\Services\Mysql\Privileges;
 use PDO;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\KnowsEveryImportAccount;
 use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
@@ -322,6 +323,8 @@ class ProjectsPushFileRollbackTest extends TestCase
 
 class PushFileRollbackMysql extends Mysql
 {
+    use KnowsEveryImportAccount;
+
     public function __construct(private object $record)
     {
         parent::__construct(null);
@@ -337,7 +340,7 @@ class PushFileRollbackMysql extends Mysql
         $this->record->restores[] = [$name, $sqlGzPath];
     }
 
-    public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
+    public function copyInSitesDb(string $from, string $to, ?string $table, ImportAccount $account, string $failurePrefix): void
     {
     }
 

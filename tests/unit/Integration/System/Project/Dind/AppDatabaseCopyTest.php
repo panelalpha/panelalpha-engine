@@ -48,7 +48,7 @@ class AppDatabaseCopyTest extends TestCase
         $result = $this->copy()->intoCopy($live, $stg, true);
 
         $this->assertSame(['live_app' => 'stg_app'], $result?->databases);
-        $this->assertSame(['create stg_app', 'copy live_app to stg_app'], $this->mysql->log);
+        $this->assertSame(['create stg_app', 'copy live_app to stg_app as stg_app'], $this->mysql->log);
         $this->assertSame(['stg_app'], $stg->mysqlDatabases()->pluck('database')->all());
         $this->assertSame(['stg_app'], $stg->mysqlUsers()->pluck('user')->all());
         $password = AppDatabase::credentialsOf($stg->refresh())['password'] ?? null;
@@ -92,7 +92,7 @@ class AppDatabaseCopyTest extends TestCase
         $this->assertSame(['stg_app' => 'live_app'], $result->databases);
         $this->assertSame(['live_app' => $this->rollbackDir . '/live_app.sql.gz'], $rollbacks);
         $this->assertNull($provisioned);
-        $this->assertSame(['dump live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app'], $this->mysql->log);
+        $this->assertSame(['dump live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app as live_app'], $this->mysql->log);
         $this->assertSame('live-secret', AppDatabase::credentialsOf($live->refresh())['password'] ?? null);
     }
 
@@ -107,7 +107,7 @@ class AppDatabaseCopyTest extends TestCase
 
         $this->assertSame([], $rollbacks);
         $this->assertSame('live_app', $provisioned?->name);
-        $this->assertSame(['create live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app'], $this->mysql->log);
+        $this->assertSame(['create live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app as live_app'], $this->mysql->log);
         $this->assertArrayHasKey('live_app', $this->mysql->users);
     }
 
