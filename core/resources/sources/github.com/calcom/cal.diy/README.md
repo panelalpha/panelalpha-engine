@@ -17,6 +17,16 @@ database server` against the Postgres volume created with the old password,
 with every page a 500. `CALENDSO_ENCRYPTION_KEY` also decrypts the stored
 integration credentials, and `NEXTAUTH_SECRET` signs the session cookies.
 
+## Postgres major version
+
+The database is pinned to `postgres:18`. It followed `postgres` (latest) until
+Postgres 19 became latest on 2026-11-24: the volume of every install made
+before then holds an 18 cluster in `/var/lib/postgresql/18/docker`, and on the
+next deploy 19 refused it (`Error: in 18+, these Docker images are configured
+to store database data in a format which is compatible with "pg_ctlcluster"`,
+then `service ... did not start (unhealthy)`). Moving to a newer major needs a
+`pg_upgrade` of the existing volumes, not only a new tag.
+
 ## PanelAlpha Engine snippets
 
 - `panelalpha-before-clone-validation.sh` — [`hooks/precheck.sh`](hooks/precheck.sh)
