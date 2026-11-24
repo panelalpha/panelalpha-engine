@@ -6,6 +6,8 @@ export interface BackupContainer {
   driver: BackupDriver;
   location: string;
   has_credentials: boolean;
+  /** The store a backup that names none goes to. */
+  default?: boolean;
   created_at?: string;
   updated_at?: string;
 }

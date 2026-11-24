@@ -62,6 +62,7 @@ test.describe('deploy-kind fixture catalogue', () => {
       'php',
       'php-plain',
       'python',
+      'react-router',
       'remix',
       'rust',
       'static',

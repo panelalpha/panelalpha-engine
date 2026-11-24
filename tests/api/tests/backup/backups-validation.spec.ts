@@ -3,6 +3,12 @@ import { expectOneOf } from '@/helpers/expect-one-of';
 import { sharedProject } from '@/helpers/shared-project';
 import { skipUnless } from '@/helpers/test-helpers';
 import { expectStatus } from '@/helpers/expect-status';
+import {
+  expectBackupPhaseCompleted,
+  waitForBackupDeleted,
+  waitForBackupPhase,
+} from '@/helpers/backup-helpers';
+import type { BackupRecord } from '@/types';
 
 test.describe('project backups validation', () => {
   // The two PHP-account tests only receive refusals and share one project.
@@ -27,18 +33,36 @@ test.describe('project backups validation', () => {
     await expectStatus(await api.getProjectBackupRaw(user.username, 999_999_999), 404);
   });
 
-  test('creating a backup without a store is refused', async ({ api, sharedEmptyDind }) => {
+  test('a backup that names no store goes to the default one', async ({ api, userFactory }) => {
+    const user = await userFactory.createSimpleUser();
+    const stores = await api.listBackupContainers();
+    const fallback = stores.data.find((store) => store.default === true);
+    const created = await api.createProjectBackupRaw(user.username, {});
+    if (!fallback) {
+      await expectStatus(created, 422);
+      const problems = (created.body as { problems?: { code?: string }[] }).problems;
+      expect(problems?.[0]?.code, 'a host without a default store').toBe('no_default_container');
+      return;
+    }
+
+    await expectStatus(created, 202);
+    const record = (created.body as { data: BackupRecord }).data;
+    const finished = await waitForBackupPhase(api, user.username, record.id, 'backup');
+    try {
+      expect(record.container_id, `the default store ${fallback.name}`).toBe(fallback.id);
+      await expectBackupPhaseCompleted(api, user.username, finished, 'backup');
+    } finally {
+      await api.deleteProjectBackupRaw(user.username, record.id);
+      await waitForBackupDeleted(api, user.username, record.id);
+    }
+  });
+
+  test('creating a backup in an unknown store is refused', async ({ api, sharedEmptyDind }) => {
     const user = await sharedEmptyDind.get();
     skipUnless(user, 'DinD is not available on this engine.');
-    await test.step('a request without a store is refused', async () => {
-      const missingStore = await api.createProjectBackupRaw(user.username, {});
-      expectOneOf(missingStore.status, [400, 422]);
+    const unknownStore = await api.createProjectBackupRaw(user.username, {
+      container: 'no-such-store',
     });
-    await test.step('a request with an unknown store is refused', async () => {
-      const unknownStore = await api.createProjectBackupRaw(user.username, {
-        container: 'no-such-store',
-      });
-      expectOneOf(unknownStore.status, [404, 422]);
-    });
+    expectOneOf(unknownStore.status, [404, 422]);
   });
 });

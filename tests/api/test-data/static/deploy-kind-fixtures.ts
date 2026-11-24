@@ -778,6 +778,26 @@ export const DEPLOY_KIND_FIXTURES: readonly DeployKindFixture[] = [
     },
   },
   {
+    id: 'react-router',
+    strategy: 'remix',
+    pageMarker: frontend('react-router'),
+    files: {
+      'package.json': pkg({
+        dependencies: {
+          '@react-router/node': '^7.0.0',
+          '@react-router/serve': '^7.0.0',
+          'react-router': '^7.0.0',
+        },
+        scripts: {
+          build: 'mkdir -p build/server && cp server.js build/server/index.js',
+          start: 'node build/server/index.js',
+        },
+      }),
+      'react-router.config.ts': 'export default { ssr: true };\n',
+      'server.js': nodeHttpServer('react-router'),
+    },
+  },
+  {
     id: 'remix',
     strategy: 'remix',
     pageMarker: frontend('remix'),

@@ -105,28 +105,42 @@ test.describe('user staging', () => {
     const newUsername = randomUsername(12);
 
     try {
-      await api.putFileContents(
-        source.username,
-        `${source.domain}/public_html/wp-config.php`,
-        '<?php\n'
-      );
-
-      const refusals = {
-        staging: await api.createStagingRaw(source.username, {
-          new_username: newUsername,
-          copy_databases: false,
-        }),
-        clone: await api.cloneUserRaw(source.username, {
-          new_username: newUsername,
-          copy_databases: false,
-        }),
+      const siteRoot = `${source.domain}/public_html`;
+      const copyRefusals = async (code: string) => {
+        const refusals = {
+          staging: await api.createStagingRaw(source.username, {
+            new_username: newUsername,
+            copy_databases: false,
+          }),
+          clone: await api.cloneUserRaw(source.username, {
+            new_username: newUsername,
+            copy_databases: false,
+          }),
+        };
+        for (const [action, response] of Object.entries(refusals)) {
+          await expectStatus(response, 422);
+          const problems = (response.body as { problems?: { code?: string }[] }).problems;
+          expect(
+            problems?.map((problem) => problem.code),
+            `the ${action} refusal names the code`
+          ).toEqual([code]);
+        }
       };
-      for (const [action, response] of Object.entries(refusals)) {
-        await expectStatus(response, 422);
-        expect(JSON.stringify(response.body), `the ${action} refusal names the code`).toContain(
-          'wordpress_copy_needs_databases'
+
+      await test.step('a wp-config.php that no WordPress loads is refused as unclear', async () => {
+        await api.putFileContents(source.username, `${siteRoot}/wp-config.php`, '<?php\n');
+        await copyRefusals('wordpress_install_unclear');
+      });
+
+      await test.step('a WordPress copied without its databases is refused', async () => {
+        await api.createDirectory(source.username, `${siteRoot}/wp-includes`, true);
+        await api.putFileContents(
+          source.username,
+          `${siteRoot}/wp-includes/version.php`,
+          '<?php\n'
         );
-      }
+        await copyRefusals('wordpress_copy_needs_databases');
+      });
 
       await expectStatus(await api.getUserRaw(newUsername), 404);
     } finally {

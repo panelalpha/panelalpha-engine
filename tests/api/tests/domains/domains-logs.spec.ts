@@ -1,6 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import { delay } from '@/helpers/retry';
 import { expectStatus } from '@/helpers/expect-status';
+import { waitForPage } from '@/helpers/site-page';
 
 const LOG_FLUSH_DELAY_MS = 1_000;
 
@@ -137,15 +138,18 @@ test.describe('log endpoint lifecycle', () => {
       '<?php echo "log-test"; ?>'
     );
 
-    const hit = await anonymousRequest.get(`https://${user.domain}/log-test.php`, {
-      ignoreHTTPSErrors: true,
-    });
-    expect(hit.status()).toBeLessThan(500);
+    await waitForPage(
+      anonymousRequest,
+      `https://${user.domain}/log-test.php`,
+      (page) => page.status === 200 && page.body.includes('log-test'),
+      'the new site never served its own page'
+    );
 
     await expect
       .poll(async () => (await api.listDomainLogFiles(user.username, user.domain)).data.length, {
-        timeout: settings.timing.propagationDelay,
-        intervals: [500],
+        timeout: 20_000,
+        intervals: [500, 2_000],
+        message: 'the site served a page and still lists no log file',
       })
       .toBeGreaterThan(0);
 

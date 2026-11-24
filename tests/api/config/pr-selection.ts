@@ -492,6 +492,16 @@ export const PR_RULES: readonly PrRule[] = [
     specs: ['firewall/*'],
   },
   {
+    id: 'egress',
+    reason: 'outbound limits on project and build traffic, their events and lifting a block',
+    paths: [
+      'core/app/Http/Controllers/SystemEgressController.php',
+      'core/app/Lib/Net/Outbound/**',
+      'core/app/Console/Commands/System/Egress*Command.php',
+    ],
+    specs: ['system/egress'],
+  },
+  {
     id: 'exim',
     reason: 'engine mail configuration',
     paths: [
