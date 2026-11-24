@@ -147,7 +147,9 @@ class McpTokenController extends Controller
         description: 'Every tool this engine serves now, with what it does to the server: `access` is `read`, '
             .'`write` or `secret` (a read that hands out a credential), `deletes` marks a DELETE operation, and '
             .'`project_scoped` says whether a project-scoped token can reach it at all. `toolset` is the group '
-            .'the tool is filed under. Pass names from here as `commands`. Panel-facing; not an MCP tool.',
+            .'the tool is filed under, `method` the HTTP verb it calls (GET for a tool that only reads the engine '
+            .'directly) and `summary` the OpenAPI summary of that operation, null for a tool that calls none. Pass '
+            .'names from here as `commands`. Panel-facing; not an MCP tool.',
         x: ['mcp-hide' => true],
         security: [['bearerAuth' => []]],
         tags: ['MCP'],
@@ -157,6 +159,8 @@ class McpTokenController extends Controller
                     properties: [
                         new OA\Property(property: 'name', type: 'string', example: 'project_get'),
                         new OA\Property(property: 'toolset', type: 'string', example: 'projects'),
+                        new OA\Property(property: 'method', type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+                        new OA\Property(property: 'summary', type: 'string', nullable: true, example: 'Get a project'),
                         new OA\Property(property: 'access', type: 'string', enum: ['read', 'write', 'secret']),
                         new OA\Property(property: 'deletes', type: 'boolean'),
                         new OA\Property(property: 'project_scoped', type: 'boolean'),
@@ -176,6 +180,8 @@ class McpTokenController extends Controller
         $commands = array_map(fn (string $class): array => [
             'name' => $policy->nameOf($class),
             'toolset' => $policy->toolsetOf($class),
+            'method' => $policy->verbOf($class),
+            'summary' => $policy->summaryOf($class),
             'access' => $policy->accessOf($class),
             'deletes' => $policy->verbOf($class) === 'DELETE',
             'project_scoped' => isset($scoped[$class]),

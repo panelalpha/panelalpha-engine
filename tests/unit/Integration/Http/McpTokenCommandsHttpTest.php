@@ -2,6 +2,8 @@
 
 namespace Tests\Integration\Http;
 
+use App\Mcp\ToolExposure;
+use App\Mcp\Tools\Api\ApiTool;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
@@ -26,11 +28,13 @@ class McpTokenCommandsHttpTest extends TestCase
         $byName = array_column($data, null, 'name');
 
         $this->assertSame(
-            ['name' => 'project_get', 'toolset' => 'projects', 'access' => 'read', 'deletes' => false, 'project_scoped' => true],
+            ['name' => 'project_get', 'toolset' => 'projects', 'method' => 'GET', 'summary' => 'Get a project', 'access' => 'read', 'deletes' => false, 'project_scoped' => true],
             $byName['project_get'],
         );
         $this->assertSame('write', $byName['project_create']['access']);
+        $this->assertSame('POST', $byName['project_create']['method']);
         $this->assertTrue($byName['project_delete']['deletes']);
+        $this->assertSame('DELETE', $byName['project_delete']['method']);
         $this->assertSame('secret', $byName['app_credentials_get']['access']);
         $this->assertFalse($byName['project_suspend']['project_scoped']);
 
@@ -39,6 +43,28 @@ class McpTokenCommandsHttpTest extends TestCase
         sort($sorted);
         $this->assertSame($sorted, $names);
         $this->assertNotContains('mcp_token_list', $names);
+    }
+
+    public function test_a_tool_calling_no_operation_reads_and_has_no_summary(): void
+    {
+        $byName = array_column($this->getJson('/api/mcp-tokens/commands')->json('data'), null, 'name');
+
+        $this->assertSame('GET', $byName['metrics_latest']['method']);
+        $this->assertNull($byName['metrics_latest']['summary']);
+    }
+
+    public function test_every_api_tool_is_summarised_as_its_description_opens(): void
+    {
+        $policy = ToolExposure::current()->policy();
+        $byName = array_column($this->getJson('/api/mcp-tokens/commands')->json('data'), null, 'name');
+
+        foreach (ToolExposure::current()->exposed() as $class) {
+            $tool = new $class;
+
+            if ($tool instanceof ApiTool) {
+                $this->assertSame(strtok($tool->description(), "\n"), $byName[$policy->nameOf($class)]['summary'], $class);
+            }
+        }
     }
 
     public function test_a_listed_name_can_be_given_to_a_token(): void

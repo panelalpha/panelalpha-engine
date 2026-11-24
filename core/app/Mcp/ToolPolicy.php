@@ -4,6 +4,7 @@ namespace App\Mcp;
 
 use App\Console\Commands\Mcp\GenerateApiToolsCommand;
 use App\Mcp\Tools\Api\ApiTool;
+use App\OpenApi\OperationSummaries;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Laravel\Mcp\Server\Tool;
@@ -173,6 +174,18 @@ class ToolPolicy
         $tool = new $class;
 
         return $tool instanceof ApiTool ? strtoupper($tool->httpMethod()) : 'GET';
+    }
+
+    /**
+     * The OpenAPI summary of the operation behind a tool, or null when it is not an API tool or the operation has none.
+     *
+     * @param  class-string<Tool>  $class
+     */
+    public function summaryOf(string $class): ?string
+    {
+        $tool = new $class;
+
+        return $tool instanceof ApiTool ? OperationSummaries::of($tool->operationKey()) : null;
     }
 
     /**

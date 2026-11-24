@@ -182,6 +182,8 @@ class McpTokenScopeHttpTest extends TestCase
         $this->actingAsScopedToken('alice');
 
         $this->getJson('/api/api-tokens')->assertStatus(403);
+        $this->getJson('/api/api-tokens/operations')->assertStatus(403);
+        $this->getJson('/api/api-tokens/openapi')->assertStatus(403);
         $this->postJson('/api/api-tokens', ['name' => 'widened'])->assertStatus(403);
         $this->putJson('/api/api-tokens/1/routes', ['routes' => null])->assertStatus(403);
         $this->putJson('/api/api-tokens/1/revoke')->assertStatus(403);

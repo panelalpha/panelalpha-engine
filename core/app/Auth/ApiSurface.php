@@ -2,6 +2,7 @@
 
 namespace App\Auth;
 
+use App\OpenApi\OperationSummaries;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\Route as Router;
 
@@ -108,6 +109,37 @@ class ApiSurface
     public static function all(): array
     {
         return array_merge(...array_values(self::byGroup()));
+    }
+
+    /**
+     * Every operation as a row a panel ticks, in the order of {@see byGroup()}. `project_scoped` is whether a token
+     * limited to some projects can reach it at all; `summary` is the operation's OpenAPI summary, null when it is not
+     * documented.
+     *
+     * @return list<array{key: string, group: string, method: string, path: string, summary: string|null, access: string, deletes: bool, project_scoped: bool}>
+     */
+    public static function operations(): array
+    {
+        $scoped = TokenAbilities::fromList([TokenAbilities::API, TokenAbilities::PROJECT_SCOPE]);
+        $rows = [];
+
+        foreach (self::byGroup() as $group => $keys) {
+            foreach ($keys as $key) {
+                [$method, $path] = explode(' ', $key, 2);
+                $rows[] = [
+                    'key' => $key,
+                    'group' => $group,
+                    'method' => $method,
+                    'path' => $path,
+                    'summary' => OperationSummaries::of($key),
+                    'access' => self::access($key),
+                    'deletes' => $method === 'DELETE',
+                    'project_scoped' => $scoped->mayReachRoute($key),
+                ];
+            }
+        }
+
+        return $rows;
     }
 
     /** What an operation does to the server, for the row it is ticked on. */

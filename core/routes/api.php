@@ -137,6 +137,8 @@ Route::delete('/mcp-tokens/{id}', [McpTokenController::class, 'destroy']);
 
 Route::get('/api-tokens', [ApiTokenController::class, 'index']);
 Route::post('/api-tokens', [ApiTokenController::class, 'store']);
+Route::get('/api-tokens/operations', [ApiTokenController::class, 'operations']);
+Route::get('/api-tokens/openapi', [ApiTokenController::class, 'openapi']);
 Route::put('/api-tokens/{id}/routes', [ApiTokenController::class, 'updateRoutes'])->whereNumber('id');
 Route::put('/api-tokens/{id}/revoke', [ApiTokenController::class, 'revoke'])->whereNumber('id');
 Route::delete('/api-tokens/{id}', [ApiTokenController::class, 'destroy'])->whereNumber('id');

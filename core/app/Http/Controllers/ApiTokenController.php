@@ -2,10 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Auth\ApiSurface;
 use App\Auth\OperatorTokens;
 use App\Http\Requests\ApiTokenRoutesRequest;
 use App\Http\Requests\ApiTokenStoreRequest;
+use App\OpenApi\EngineApiDocument;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Response;
 use OpenApi\Attributes as OA;
 
 /**
@@ -86,6 +89,72 @@ class ApiTokenController extends Controller
         return new JsonResponse([
             'data' => [...$tokens->toArray($tokens->find((int) $minted->accessToken->getKey())), 'plain_text_token' => $minted->plainTextToken],
         ], 201);
+    }
+
+    #[OA\Get(
+        path: '/api-tokens/operations',
+        summary: 'List the REST operations an API token can be limited to',
+        description: 'Every operation this engine serves now, grouped by the resource it belongs to and ordered by '
+            .'group, then key. `key` is what `routes` takes, "VERB /path" as in this document; `summary` is that '
+            .'operation\'s summary here, null for one this document does not describe; `access` is `read` for '
+            .'a GET and `write` otherwise, `deletes` marks a DELETE, and `project_scoped` says whether a token scoped '
+            .'to some projects can reach it at all. Panel-facing; not an MCP tool. Refused with 403 for a token '
+            .'scoped to some projects.',
+        x: ['mcp-hide' => true],
+        security: [['bearerAuth' => []]],
+        tags: ['Tokens'],
+        responses: [
+            new OA\Response(response: 200, description: 'REST operations', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(
+                    properties: [
+                        new OA\Property(property: 'key', type: 'string', example: 'POST /projects/{username}/push'),
+                        new OA\Property(property: 'group', type: 'string', example: 'projects'),
+                        new OA\Property(property: 'method', type: 'string', example: 'POST'),
+                        new OA\Property(property: 'path', type: 'string', example: '/projects/{username}/push'),
+                        new OA\Property(property: 'summary', type: 'string', nullable: true, example: 'Push project state to a paired staging or live project'),
+                        new OA\Property(property: 'access', type: 'string', enum: ['read', 'write']),
+                        new OA\Property(property: 'deletes', type: 'boolean'),
+                        new OA\Property(property: 'project_scoped', type: 'boolean'),
+                    ],
+                    type: 'object',
+                ))],
+            )),
+            new OA\Response(response: 403, description: 'The caller\'s token is scoped to some projects', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+        ],
+    )]
+    public function operations(): JsonResponse
+    {
+        return new JsonResponse(['data' => ApiSurface::operations()]);
+    }
+
+    #[OA\Get(
+        path: '/api-tokens/openapi',
+        summary: 'Get the OpenAPI document of the REST API',
+        description: 'This document, as JSON: every operation of this engine, the one `l5-swagger:generate` writes. '
+            .'Generated on the first request after an install or an update, then answered from storage until the '
+            .'engine\'s version changes; it does not depend on SWAGGER_ENABLED. Answers 500 with the reason when it '
+            .'cannot be generated, and never a partial document. Panel-facing; not an MCP tool. Refused with 403 for a '
+            .'token scoped to some projects.',
+        x: ['mcp-hide' => true],
+        security: [['bearerAuth' => []]],
+        tags: ['Tokens'],
+        responses: [
+            new OA\Response(response: 200, description: 'The OpenAPI 3 document', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'openapi', type: 'string', example: '3.0.0'),
+                    new OA\Property(property: 'info', type: 'object'),
+                    new OA\Property(property: 'paths', type: 'object'),
+                    new OA\Property(property: 'components', type: 'object'),
+                ],
+                type: 'object',
+            )),
+            new OA\Response(response: 403, description: 'The caller\'s token is scoped to some projects', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 500, description: 'The document could not be generated', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+        ],
+    )]
+    public function openapi(EngineApiDocument $document): Response
+    {
+        return new Response($document->json(), 200, ['Content-Type' => 'application/json']);
     }
 
     #[OA\Put(
