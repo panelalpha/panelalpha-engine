@@ -126,7 +126,7 @@ export const deployLogSnapshotSchema = z
 export const deployHistoryItemSchema = z
   .object({
     id: z.string(),
-    status: z.enum(['running', 'success', 'partial', 'failed', 'cancelled', 'unknown']),
+    status: z.enum(['running', 'waiting', 'success', 'partial', 'failed', 'cancelled', 'unknown']),
     error: z.string().nullable(),
     warnings: z.array(findingSchema),
     failure: findingSchema.nullable(),

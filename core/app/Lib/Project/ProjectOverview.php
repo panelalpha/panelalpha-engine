@@ -27,7 +27,7 @@ final class ProjectOverview
 
     public const STATUS_SUSPENDED = 'suspended';
 
-    /** Created, never deployed. */
+    /** Created, never deployed, or a container project waiting for its files. */
     public const STATUS_NONE = 'none';
 
     /**
@@ -121,7 +121,7 @@ final class ProjectOverview
         if ($last === DeployLogger::STATUS_FAILED) {
             return self::STATUS_FAILED;
         }
-        if ($last === null && ! isset($details['deploy_strategy'])) {
+        if ($last === DeployLogger::STATUS_WAITING || ($last === null && ! isset($details['deploy_strategy']))) {
             return self::STATUS_NONE;
         }
 

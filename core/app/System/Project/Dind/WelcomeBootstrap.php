@@ -9,6 +9,7 @@ use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
+use App\Models\User;
 use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 
@@ -33,6 +34,12 @@ final class WelcomeBootstrap
         }
 
         $this->writeWelcomeSite($appDir);
+    }
+
+    /** A container project with no repository that has deployed nothing: the welcome page is what it shows. */
+    public static function waitsForFiles(User $user): bool
+    {
+        return $user->getTemplate() === 'dind' && ! $user->hasGitProject() && $user->getDeployStrategy() === null;
     }
 
     /** Have the welcome site's run file load `.env` optionally, as {@see DeployCompose::staticNginx()} writes it. */
@@ -86,16 +93,16 @@ final class WelcomeBootstrap
         );
         $fs->writeFileReplacingPath(
             "{$appDir}/index.html",
-            $this->welcomeHtml(),
+            self::html(),
             $owner,
             '644'
         );
     }
 
-    private function welcomeHtml(): string
+    public static function html(): string
     {
         $title = PlaceholderPage::WELCOME_TITLE;
-        $body = $this->welcomeBody();
+        $body = self::welcomeBody();
 
         return <<<HTML
         <!DOCTYPE html>
@@ -118,7 +125,7 @@ final class WelcomeBootstrap
         HTML;
     }
 
-    private function welcomeBody(): string
+    private static function welcomeBody(): string
     {
         return <<<'HTML'
             <p>

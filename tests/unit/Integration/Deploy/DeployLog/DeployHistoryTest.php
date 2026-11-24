@@ -327,17 +327,7 @@ class DeployHistoryTest extends TestCase
     public function test_the_deploy_that_brings_the_files_is_listed_beside_the_install_that_waited(): void
     {
         $waiting = '20260101-000000-aaaaaa';
-        $this->oldDeploy($waiting, ['Deploy started (source: dind template)', DeployLogger::WAITING_FOR_FILES], null);
-        (new DeployStatus(new DeployLogPaths($this->user->username)))->write([
-            'id' => $waiting,
-            'status' => DeployLogger::STATUS_RUNNING,
-            'stage' => DeployLogger::STAGE_PREPARING,
-            'pid' => null,
-            'started_at' => time() - 3600,
-            'finished_at' => null,
-            'error' => null,
-            'stages' => [['name' => DeployLogger::STAGE_PREPARING, 'started_at' => time() - 3600, 'finished_at' => null]],
-        ]);
+        $this->waitingInstall($waiting);
 
         $deploy = DeployLogger::resumeRunningOrStart($this->user->username);
         $deploy->info('Deploy started (source: archive)');
@@ -353,6 +343,35 @@ class DeployHistoryTest extends TestCase
         $this->assertNotNull($history[$waiting]['finished_at']);
         $this->assertNull($history[$waiting]['task_id']);
         $this->assertStringNotContainsString('engine process', (string) $history[$waiting]['error']);
+    }
+
+    public function test_an_install_waiting_for_its_files_is_listed_waiting(): void
+    {
+        $waiting = '20260101-000000-aaaaaa';
+        $this->waitingInstall($waiting);
+
+        $entry = $this->byId()[$waiting];
+
+        $this->assertSame(DeployLogger::STATUS_WAITING, $entry['status']);
+        $this->assertNull($entry['finished_at']);
+        $this->assertNull($entry['error']);
+        $this->assertNull($entry['failure']);
+        $this->assertSame(DeployStartLine::KIND_INSTALL, $entry['kind']);
+    }
+
+    private function waitingInstall(string $id): void
+    {
+        $this->oldDeploy($id, ['Deploy started (source: dind template)', DeployLogger::WAITING_FOR_FILES], null);
+        (new DeployStatus(new DeployLogPaths($this->user->username)))->write([
+            'id' => $id,
+            'status' => DeployLogger::STATUS_WAITING,
+            'stage' => DeployLogger::STAGE_PREPARING,
+            'pid' => null,
+            'started_at' => time() - 3600,
+            'finished_at' => null,
+            'error' => null,
+            'stages' => [['name' => DeployLogger::STAGE_PREPARING, 'started_at' => time() - 3600, 'finished_at' => time() - 3590]],
+        ]);
     }
 
     public function test_a_new_deploy_keeps_deploy_log_keep_logs(): void

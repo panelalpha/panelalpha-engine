@@ -46,6 +46,9 @@ class DeployLogger
 
     public const STATUS_CANCELLED = 'cancelled';
 
+    /** A container project created without a source: its first deploy set the account up and waits for files; nothing runs and nothing failed. */
+    public const STATUS_WAITING = 'waiting';
+
     public const KEEP_LOGS = DeployLogArchive::KEEP_LOGS;
 
     /** Why a deploy whose process died before finish() is closed as failed. */
@@ -55,7 +58,7 @@ class DeployLogger
         'The deploy stopped without finishing — the engine process running it is gone. '
         .'This usually means the host restarted or ran out of memory. Deploy again to retry.';
 
-    /** The line a DinD account without git ends its first deploy on, `running`, until a deploy brings the files. */
+    /** The line a DinD account without git ends its first deploy on, `waiting`, until a deploy brings the files. */
     public const WAITING_FOR_FILES = 'Environment ready, waiting for project files';
 
     /** How a deploy that waited for files is closed once another one brings them. */
@@ -162,7 +165,7 @@ class DeployLogger
     public static function resumeRunningOrStart(string $username): self
     {
         $current = self::current($username);
-        if ($current === null || ! $current->isRunning()) {
+        if ($current === null || (! $current->isRunning() && ! $current->isWaitingForFiles())) {
             return self::start($username);
         }
         $current->lock->acquire();
@@ -320,14 +323,21 @@ class DeployLogger
 
     /**
      * Close this account's deploy if its process is gone (`running`, no lock holder): nothing else would write its status, and a
-     * poller waits forever. A DinD account waiting for its files is left alone; a coalesced push follows as the lock goes.
+     * poller waits forever. A DinD account waiting for its files is left alone, and one recorded `running` is marked waiting.
      *
      * @return ?string the status written (or, dry, that would be), null when left alone
      */
     public static function settleOrphaned(string $username, bool $dryRun = false): ?string
     {
         $logger = self::current($username);
-        if ($logger === null || ! $logger->isRunning() || $logger->isWaitingForFiles()) {
+        if ($logger === null || ! $logger->isRunning()) {
+            return null;
+        }
+        if ($logger->isWaitingForFiles()) {
+            if (! $dryRun) {
+                $logger->recordWaitingUnlessLocked();
+            }
+
             return null;
         }
         if ($dryRun) {
@@ -383,13 +393,35 @@ class DeployLogger
         return [$finished['status'], $finished['error']];
     }
 
-    /**
-     * The first deploy of a DinD account without git, stopped on purpose until files arrive. Commands run on the waiting account
-     * stream into this log as dim lines, so it is the last line that is not dim that has to say so.
-     */
+    /** End the first deploy of a DinD account without git on {@see WAITING_FOR_FILES}, `waiting` until a deploy brings the files. */
+    public function waitForFiles(): void
+    {
+        $this->info(self::WAITING_FOR_FILES);
+        $this->recordWaiting();
+    }
+
+    /** The create brings its files itself, under this deploy's log: the deploy that waited for them runs again. */
+    public function filesArrived(): void
+    {
+        $latest = $this->ownLatest();
+        if (($latest['status'] ?? null) === self::STATUS_WAITING) {
+            $this->status->write(array_merge($latest, ['status' => self::STATUS_RUNNING]));
+        }
+    }
+
+    /** Stopped on purpose until files arrive; one recorded before `waiting` existed is `running` and ends on its waiting line. */
     private function isWaitingForFiles(): bool
     {
-        if (($this->ownLatest()['stage'] ?? null) !== self::STAGE_PREPARING) {
+        $latest = $this->ownLatest();
+
+        return ($latest['status'] ?? null) === self::STATUS_WAITING
+            || (($latest['status'] ?? null) === self::STATUS_RUNNING && $this->endsOnWaitingForFiles($latest));
+    }
+
+    /** @param  array<string, mixed>  $latest */
+    private function endsOnWaitingForFiles(array $latest): bool
+    {
+        if (($latest['stage'] ?? null) !== self::STAGE_PREPARING) {
             return false;
         }
         foreach (array_reverse($this->entries()) as $line) {
@@ -401,9 +433,34 @@ class DeployLogger
         return false;
     }
 
+    /** The lock tells a deploy still writing this log from one that stopped on its waiting line. */
+    private function recordWaitingUnlessLocked(): void
+    {
+        try {
+            $this->lock->acquire();
+        } catch (DeployAlreadyRunningException) {
+            return;
+        }
+        try {
+            $this->recordWaiting();
+        } finally {
+            $this->lock->releaseQuietly();
+        }
+    }
+
+    private function recordWaiting(): void
+    {
+        $latest = $this->ownLatest();
+        if (($latest['status'] ?? null) !== self::STATUS_RUNNING) {
+            return;
+        }
+        [$stages] = DeployStatus::closeOpenStage($latest['stages'] ?? [], time());
+        $this->status->write(array_merge($latest, ['status' => self::STATUS_WAITING, 'pid' => null, 'stages' => $stages]));
+    }
+
     /**
-     * A create waiting for its files runs nothing: it is `running` with no lock until a
-     * deploy resumes its log, and that deploy is the one a cancel is meant for.
+     * A create waiting for its files runs nothing: it holds no lock until a deploy
+     * takes it over, and that deploy is the one a cancel is meant for.
      */
     private static function isIdleWaitingForFiles(string $username): bool
     {

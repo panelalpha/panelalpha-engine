@@ -31,7 +31,7 @@
             "mechanics->isDindWithoutGit()",
             "mechanics->publishDomain(alice.example.test)",
             "logger->throwIfCancelled()",
-            "logger->info(Environment ready, waiting for project files)"
+            "logger->waitForFiles()"
         ],
         "thrown": null,
         "details": []

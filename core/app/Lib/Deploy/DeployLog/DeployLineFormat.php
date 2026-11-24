@@ -19,11 +19,13 @@ final class DeployLineFormat
         DeployLogger::LEVEL_DIM => 'gray',
     ];
 
+    /** Where a follower stops: a deploy waiting for its files writes nothing more, the one that brings them has its own log. */
     private const TERMINAL = [
         DeployLogger::STATUS_SUCCESS,
         DeployLogger::STATUS_PARTIAL,
         DeployLogger::STATUS_FAILED,
         DeployLogger::STATUS_CANCELLED,
+        DeployLogger::STATUS_WAITING,
     ];
 
     /**

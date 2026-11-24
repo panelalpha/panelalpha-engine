@@ -509,7 +509,7 @@ class UserController extends Controller
     }
 
     /**
-     * The last frame: `continue` while the log still runs (an archive account leaves it running after
+     * The last frame: `continue` while the log still runs or waits for its files (an archive account waits after
      * preparing, and a finish would make the wizard treat the placeholder as deployed), otherwise
      * `finish` with the terminal status and, on success, the user data.
      *
@@ -519,7 +519,7 @@ class UserController extends Controller
     private static function closingFrame(?array $latest, ?string $username, ?callable $userFrame): array
     {
         $status = $latest['status'] ?? null;
-        if ($status === DeployLogger::STATUS_RUNNING) {
+        if (in_array($status, [DeployLogger::STATUS_RUNNING, DeployLogger::STATUS_WAITING], true)) {
             return [
                 'type' => 'continue',
                 'status' => $status,

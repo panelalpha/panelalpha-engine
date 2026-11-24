@@ -123,6 +123,16 @@ class ProjectOverviewTest extends TestCase
         $this->assertSame('live', $this->statusOf('up-app', 'active', $details), 'a pointer with no deploy has no verdict');
     }
 
+    /** Its welcome site may be up: the project is still neither building nor deployed. */
+    public function test_a_project_waiting_for_its_files_has_nothing_deployed(): void
+    {
+        $this->sampleRun('-1 minute', true);
+        $this->sampled('empty-app', '-1 minute');
+        ProjectDeployState::record('empty-app', ['id' => 'd3', 'status' => 'waiting', 'finished_at' => null]);
+
+        $this->assertSame('none', $this->statusOf('empty-app', 'active', ['template' => 'dind']));
+    }
+
     public function test_admin_sso_is_read_from_the_capability_list_not_from_any_mention(): void
     {
         $this->assertTrue($this->shipped('https://github.com/wordpress/wordpress')->supportsAdminSso());

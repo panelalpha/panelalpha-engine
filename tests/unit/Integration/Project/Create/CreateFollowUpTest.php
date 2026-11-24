@@ -36,6 +36,9 @@ class CreateFollowUpTest extends TestCase
             public function run(User $user, string $action, ?DeployLogger $logger, ?string $zipPath, array $git = [], ?ArchiveSource $archive = null): array
             {
                 $this->calls[] = ['run', $action, $zipPath, $archive?->toArray()];
+                if ($logger !== null) {
+                    $this->calls['status'] = $logger->readLatest()['status'] ?? null;
+                }
 
                 return [];
             }
@@ -50,6 +53,25 @@ class CreateFollowUpTest extends TestCase
         $followUp?->run($user, null, static fn (string $line) => null);
 
         $this->assertSame([['run', 'deploy_archive', null, ['kind' => 'upload', 'value' => 'upl_x']]], $this->calls->getArrayCopy());
+    }
+
+    /** The account's own deploy waited for these files: it runs again while the archive deploys under its log. */
+    public function test_the_archive_deploys_under_a_log_running_again(): void
+    {
+        $user = $this->makeUser('fromwait', ['template' => 'dind']);
+        $logger = DeployLogger::start('fromwait');
+        $logger->stage(DeployLogger::STAGE_PREPARING);
+        $logger->waitForFiles();
+
+        try {
+            CreateFollowUp::for(SourceSpec::of(['type' => 'archive', 'upload_id' => 'upl_w']))->run($user, $logger, static fn (string $line) => null);
+
+            $this->assertSame(DeployLogger::STATUS_RUNNING, $this->calls['status']);
+        } finally {
+            $logger->finish(DeployLogger::STATUS_SUCCESS);
+            unset($logger);
+            DeployLogger::deleteUserLogs('fromwait');
+        }
     }
 
     public function test_a_url_is_deployed_by_the_archive_deploy(): void

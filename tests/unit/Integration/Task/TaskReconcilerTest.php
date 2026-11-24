@@ -82,6 +82,17 @@ class TaskReconcilerTest extends SqliteTaskTestCase
         );
     }
 
+    /** The create of a project without a source did all it does: its deploy waits for files. */
+    public function test_a_deploy_waiting_for_its_files_completes_the_row(): void
+    {
+        $task = $this->runningTask();
+
+        $this->assertSame(
+            Task::STATUS_COMPLETED,
+            TaskReconciler::decide($task, $this->log(DeployLogger::STATUS_WAITING), $this->gone())
+        );
+    }
+
     public function test_a_deploy_log_that_failed_fails_the_row(): void
     {
         $task = $this->runningTask();

@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Poll the deploy log (JSON-lines) from a byte-like line offset
 
-    A page of the latest deploy log from `offset`. While `more` is true, call again with `next_offset`. `problem` carries the fix when a failed deploy is a known failure. A `partial` deploy lists `warnings` and a failed one a `failure`; a hint with `type: mcp` is the tool call that resolves one.
+    A page of the latest deploy log from `offset`. While `more` is true, call again with `next_offset`. `problem` carries the fix when a failed deploy is a known failure. A `partial` deploy lists `warnings` and a failed one a `failure`; a hint with `type: mcp` is the tool call that resolves one. `waiting`: a container project created without a source waits for its files; nothing runs and nothing failed.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

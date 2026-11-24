@@ -86,6 +86,12 @@ class DeployLineFormatTest extends TestCase
         ));
     }
 
+    /** `project:deploy:log --follow` on an empty project returns instead of following a log nothing writes. */
+    public function test_a_deploy_waiting_for_its_files_ends_a_follow(): void
+    {
+        $this->assertTrue(DeployLineFormat::isTerminal(DeployLogger::STATUS_WAITING));
+    }
+
     public function test_only_a_finished_deploy_is_terminal(): void
     {
         $this->assertFalse(DeployLineFormat::isTerminal(DeployLogger::STATUS_RUNNING));

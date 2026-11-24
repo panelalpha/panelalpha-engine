@@ -36,10 +36,14 @@ class DeployLogController extends Controller
             .'A deploy that serves with something wrong finishes `partial`: `error` stays null and `warnings` lists each '
             .'finding (`code`, `message`, its facts) with the `hints` that resolve it, one per surface: `rest`, `mcp`, `cli`. '
             .'A failed deploy has `error` and `failure`, the same sentence as a finding: a refusal\'s code, the rule that '
-            .'explains the failure, or `deploy_failed`.',
+            .'explains the failure, or `deploy_failed`.'
+            ."\n\n"
+            .'A container project created without a source is `waiting`: its first deploy set the account up and waits for '
+            .'files. Nothing runs and nothing failed; the deploy that brings the files opens a log of its own.',
         x: ['mcp-description' => 'A page of the latest deploy log from `offset`. While `more` is true, call again '
             .'with `next_offset`. `problem` carries the fix when a failed deploy is a known failure. A `partial` deploy '
-            .'lists `warnings` and a failed one a `failure`; a hint with `type: mcp` is the tool call that resolves one.'],
+            .'lists `warnings` and a failed one a `failure`; a hint with `type: mcp` is the tool call that resolves one. '
+            .'`waiting`: a container project created without a source waits for its files; nothing runs and nothing failed.'],
         security: [['bearerAuth' => []]],
         tags: ['Deploy'],
         parameters: [

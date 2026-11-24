@@ -112,6 +112,9 @@ test.describe('typed project create', () => {
         );
         expect(empty.source_type).toBe('none');
         expect(empty.waiting_for_files, 'the project waits for files').toBe(true);
+        expect((await api.getDeployLog(name)).data.status, 'its deploy waits, not runs').toBe(
+          'waiting'
+        );
         expect(await sourceOf(api, name)).toEqual({ type: 'none' });
 
         const set = await api.setProjectSourceRaw(name, {

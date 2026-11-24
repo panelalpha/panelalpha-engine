@@ -62,7 +62,7 @@ class DeployCancelQueuedTest extends TestCase
             ->assertExactJson(['data' => ['cancelled' => true, 'task_id' => $task->id]]);
 
         $this->assertSame(Task::STATUS_CANCELLED, $task->refresh()->status);
-        $this->assertSame(DeployLogger::STATUS_RUNNING, DeployLogger::readLatestFor($this->username)['status']);
+        $this->assertSame(DeployLogger::STATUS_WAITING, DeployLogger::readLatestFor($this->username)['status']);
     }
 
     public function test_a_create_log_waiting_for_files_alone_is_nothing_to_cancel(): void
@@ -73,7 +73,7 @@ class DeployCancelQueuedTest extends TestCase
             ->assertStatus(409)
             ->assertExactJson(['message' => 'No running or queued deploy to cancel']);
 
-        $this->assertSame(DeployLogger::STATUS_RUNNING, DeployLogger::readLatestFor($this->username)['status']);
+        $this->assertSame(DeployLogger::STATUS_WAITING, DeployLogger::readLatestFor($this->username)['status']);
     }
 
     /** The deploy that took the waiting project over holds its lock before it writes a line of its own. */
@@ -108,7 +108,7 @@ class DeployCancelQueuedTest extends TestCase
     {
         $create = DeployLogger::start($this->username);
         $create->stage(DeployLogger::STAGE_PREPARING);
-        $create->info(DeployLogger::WAITING_FOR_FILES);
+        $create->waitForFiles();
         unset($create);
         gc_collect_cycles();
     }

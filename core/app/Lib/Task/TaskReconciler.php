@@ -108,7 +108,7 @@ final class TaskReconciler
     {
         if ($latest !== null && ($latest['status'] ?? null) !== DeployLogger::STATUS_RUNNING) {
             return match ($latest['status']) {
-                DeployLogger::STATUS_SUCCESS, DeployLogger::STATUS_PARTIAL => Task::STATUS_COMPLETED,
+                DeployLogger::STATUS_SUCCESS, DeployLogger::STATUS_PARTIAL, DeployLogger::STATUS_WAITING => Task::STATUS_COMPLETED,
                 DeployLogger::STATUS_CANCELLED => Task::STATUS_CANCELLED,
                 default => Task::STATUS_FAILED,
             };

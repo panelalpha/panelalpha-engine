@@ -8,7 +8,7 @@ use App\Lib\Deploy\DeployLog\DeployStartLine;
 use Tests\TestCase;
 
 /**
- * A create without git leaves its first deploy `running`, waiting for project files. The deploy that brings them opens one
+ * A create without git leaves its first deploy `waiting` for project files. The deploy that brings them opens one
  * of its own, and the waiting one is closed as taken over, never as a deploy whose process died.
  */
 class DeployLoggerWaitingForFilesTest extends TestCase
@@ -32,11 +32,39 @@ class DeployLoggerWaitingForFilesTest extends TestCase
         $logger = DeployLogger::start($username);
         $logger->info(DeployStartLine::text('dind template'));
         $logger->stage(DeployLogger::STAGE_PREPARING);
-        $logger->info(DeployLogger::WAITING_FOR_FILES);
+        $logger->waitForFiles();
         unset($logger);
         gc_collect_cycles();
 
         return $username;
+    }
+
+    public function test_the_waiting_deploy_is_neither_running_nor_finished(): void
+    {
+        $latest = DeployLogger::readLatestFor($this->waitingForFiles());
+
+        $this->assertSame(DeployLogger::STATUS_WAITING, $latest['status']);
+        $this->assertSame(DeployLogger::STAGE_PREPARING, $latest['stage']);
+        $this->assertNotNull($latest['stages'][0]['finished_at'], 'preparing is over');
+        $this->assertNull($latest['finished_at']);
+        $this->assertNull($latest['pid']);
+    }
+
+    /** A typed create that brings an archive continues under the log that waited for it. */
+    public function test_files_the_create_brings_itself_make_the_waiting_deploy_run_again(): void
+    {
+        $username = 'waiting-' . bin2hex(random_bytes(6));
+        $this->usernames[] = $username;
+        $logger = DeployLogger::start($username);
+        $logger->stage(DeployLogger::STAGE_PREPARING);
+        $logger->waitForFiles();
+
+        $logger->filesArrived();
+
+        $this->assertSame(DeployLogger::STATUS_RUNNING, $logger->readLatest()['status']);
+        $logger->stage(DeployLogger::STAGE_CLONING);
+        $logger->finish(DeployLogger::STATUS_SUCCESS);
+        $this->assertSame(DeployLogger::STATUS_SUCCESS, DeployLogger::readLatestFor($username)['status']);
     }
 
     public function test_the_deploy_that_brings_the_files_opens_its_own_and_closes_the_waiting_one(): void

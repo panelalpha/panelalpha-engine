@@ -11,9 +11,11 @@ use App\System\Filesystem;
 use App\System\Privileged;
 use App\System\Privileged\AccountFiles;
 use App\System\Project;
+use App\System\Project\Dind\WelcomeBootstrap;
 use App\System\Project\Domain as DomainCollaborator;
 use App\System\Services\Webserver;
 use App\System\Services\Webserver\WebserverInterface;
+use Illuminate\Support\Facades\Blade;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\LocalRoot;
 use Tests\TestCase;
@@ -381,6 +383,44 @@ class ProjectDomainTest extends TestCase
                 static fn (string $line): bool => str_starts_with($line, 'template:')
             ));
             $this->assertSame([], $templateLines);
+        } finally {
+            $this->removeTree($tmpRoot);
+        }
+    }
+
+    /** Its domain shows the page its own welcome site serves, not the bare domain name. */
+    public function test_a_container_project_waiting_for_its_files_gets_the_welcome_page(): void
+    {
+        $tmpRoot = sys_get_temp_dir() . '/pa-domain-welcome-' . bin2hex(random_bytes(4));
+        mkdir($tmpRoot . '/home/alice', 0777, true);
+        $system = $this->phpHostingDomainRootSystem($tmpRoot);
+
+        try {
+            (new Project($system, $this->containerAlice([])))->domain($this->phpHostingAliceDomain())->createDomainRootDir();
+
+            [[$templateDir, $vars]] = $system->templates;
+            $this->assertSame($tmpRoot . '/templates/user-home/welcome-site', $templateDir);
+            $template = (string) file_get_contents(dirname(base_path()) . '/templates/user-home/welcome-site/index.html.blade.php');
+            $this->assertSame(WelcomeBootstrap::html(), Blade::render($template, $vars));
+        } finally {
+            $this->removeTree($tmpRoot);
+        }
+    }
+
+    public function test_a_container_project_that_deployed_keeps_its_template_document_root(): void
+    {
+        $tmpRoot = sys_get_temp_dir() . '/pa-domain-deployed-' . bin2hex(random_bytes(4));
+        mkdir($tmpRoot . '/home/alice', 0777, true);
+        $system = $this->phpHostingDomainRootSystem($tmpRoot);
+
+        try {
+            foreach ([['deploy_strategy' => 'static'], ['git_repo' => 'https://github.com/a/b']] as $details) {
+                $system->templates = [];
+                (new Project($system, $this->containerAlice($details)))->domain($this->phpHostingAliceDomain())->createDomainRootDir();
+                $this->removeTree($tmpRoot . '/home/alice/alice.example.test');
+
+                $this->assertStringNotContainsString('welcome-site', $system->templates[0][0], json_encode($details));
+            }
         } finally {
             $this->removeTree($tmpRoot);
         }
@@ -804,6 +844,16 @@ class ProjectDomainTest extends TestCase
         return $user;
     }
 
+    /** @param array<string, mixed> $details */
+    private function containerAlice(array $details): ModelsUser
+    {
+        $user = new ModelsUser();
+        $user->username = 'alice';
+        $user->setDetails(['template' => 'dind', 'UID' => 1001, 'GID' => 1001, ...$details]);
+
+        return $user;
+    }
+
     private function phpHostingAliceDomain(): DomainModel
     {
         $domainModel = new DomainModel();
@@ -842,6 +892,9 @@ class ProjectDomainTest extends TestCase
 
             /** @var list<list<string>> */
             public array $requests = [];
+
+            /** @var list<array{0: string, 1: array<string, mixed>}> */
+            public array $templates = [];
 
             public function __construct(private string $engineRoot)
             {
@@ -902,6 +955,7 @@ class ProjectDomainTest extends TestCase
                             mkdir($dir, 0777, true);
                         }
                         $this->outer->journal[] = 'template:'.$dir.':as-account';
+                        $this->outer->templates[] = [$templateDir, $templateVars];
                     }
                 };
             }

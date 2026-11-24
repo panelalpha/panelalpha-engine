@@ -95,7 +95,7 @@ final class DeploymentWorkflow
             if ($mechanics->isDindWithoutGit()) {
                 $mechanics->publishDomain($domain);
                 $deployLogger?->throwIfCancelled();
-                $deployLogger?->info(DeployLogger::WAITING_FOR_FILES);
+                $deployLogger?->waitForFiles();
 
                 return false;
             }

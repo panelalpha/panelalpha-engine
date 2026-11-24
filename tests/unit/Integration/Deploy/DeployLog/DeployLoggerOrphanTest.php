@@ -2,8 +2,10 @@
 
 namespace Tests\Integration\Deploy\DeployLog;
 
+use App\Lib\Deploy\DeployLog\DeployFinishLine;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployStartLine;
+use App\System\Project\Dind\InnerBuildGuard;
 use Tests\TestCase;
 
 /**
@@ -116,8 +118,39 @@ class DeployLoggerOrphanTest extends TestCase
         $logger->finish(DeployLogger::STATUS_SUCCESS);
     }
 
-    /** POST /users for DinD without git: `running`, no lock, until files arrive. */
+    /** POST /users for DinD without git: `waiting`, no lock, until files arrive. */
     public function test_an_account_waiting_for_its_files_is_left_alone(): void
+    {
+        $username = $this->waitingForFiles();
+
+        $this->assertNull(DeployLogger::settleOrphaned($username, true));
+        $this->assertNull(DeployLogger::settleOrphaned($username));
+        $this->assertNotContains($username, DeployLogger::settleOrphanedDeploys());
+        $this->assertSame(DeployLogger::STATUS_WAITING, DeployLogger::readLatestFor($username)['status']);
+    }
+
+    /** `up` on the waiting account announces the image build's memory, and outbound limits warn, in the same log. */
+    public function test_an_account_waiting_for_its_files_stays_waiting_after_lines_written_on_it(): void
+    {
+        $username = $this->waitingForFiles();
+        $later = DeployLogger::current($username);
+        $later->info(InnerBuildGuard::announcement(8192));
+        $later->warn('Outbound limits reached');
+        $later->writeProcessBuffer('out', "0\norigin/main\n");
+        unset($later);
+        gc_collect_cycles();
+
+        $this->assertNull(DeployLogger::settleOrphaned($username, true));
+        $this->assertNull(DeployLogger::settleOrphaned($username));
+        $this->assertNotContains($username, DeployLogger::settleOrphanedDeploys());
+        $latest = DeployLogger::readLatestFor($username);
+        $this->assertSame(DeployLogger::STATUS_WAITING, $latest['status']);
+        $this->assertNull($latest['failure'] ?? null);
+        $this->assertNull(DeployFinishLine::find(DeployLogger::current($username)->tail(DeployFinishLine::LOOKBACK)));
+    }
+
+    /** A create that stopped on its waiting line before `waiting` was recorded is marked waiting, not closed as failed. */
+    public function test_a_deploy_left_running_on_its_waiting_line_is_marked_waiting(): void
     {
         $username = $this->username();
         $logger = DeployLogger::start($username);
@@ -126,25 +159,14 @@ class DeployLoggerOrphanTest extends TestCase
         unset($logger);
         gc_collect_cycles();
 
-        $this->assertNull(DeployLogger::settleOrphaned($username));
-        $this->assertSame(DeployLogger::STATUS_RUNNING, DeployLogger::readLatestFor($username)['status']);
-    }
-
-    /** A git/connect on the waiting account streams its git output into the same log. */
-    public function test_an_account_waiting_for_its_files_stays_waiting_after_a_git_command(): void
-    {
-        $username = $this->waitingForFiles();
-        // What ShellOperations::exec() does for a command run outside any deploy.
-        $git = DeployLogger::current($username);
-        $git->writeProcessBuffer('out', "0\norigin/main\n");
-        unset($git);
-        gc_collect_cycles();
-        $this->assertSame('origin/main', DeployLogger::current($username)->tail(1)[0]['msg']);
-
         $this->assertNull(DeployLogger::settleOrphaned($username, true));
+        $this->assertSame(DeployLogger::STATUS_RUNNING, DeployLogger::readLatestFor($username)['status'], 'a dry run changes nothing');
+
         $this->assertNull(DeployLogger::settleOrphaned($username));
-        $this->assertNotContains($username, DeployLogger::settleOrphanedDeploys());
-        $this->assertSame(DeployLogger::STATUS_RUNNING, DeployLogger::readLatestFor($username)['status']);
+        $latest = DeployLogger::readLatestFor($username);
+        $this->assertSame(DeployLogger::STATUS_WAITING, $latest['status']);
+        $this->assertNotNull($latest['stages'][0]['finished_at']);
+        $this->assertNull($latest['finished_at']);
     }
 
     /** The deploy that brought the waiting project its files and then died: that one is an orphan. */
@@ -166,7 +188,7 @@ class DeployLoggerOrphanTest extends TestCase
         $username = $this->username();
         $logger = DeployLogger::start($username);
         $logger->stage(DeployLogger::STAGE_PREPARING);
-        $logger->info(DeployLogger::WAITING_FOR_FILES);
+        $logger->waitForFiles();
         unset($logger);
         gc_collect_cycles();
 

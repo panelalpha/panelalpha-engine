@@ -124,10 +124,17 @@ final class CreateFollowUp
     public function run(User $user, ?DeployLogger $logger, callable $log): void
     {
         match ($this->sourceType) {
-            CreateShape::SOURCE_ARCHIVE => app(ProjectRebuild::class)->run($user, ProjectRebuild::DEPLOY_ARCHIVE, $logger, null, [], $this->archive()),
+            CreateShape::SOURCE_ARCHIVE => $this->deployArchive($user, $logger),
             CreateShape::SOURCE_WORDPRESS => $this->installWordpress($user, $log),
             default => null,
         };
+    }
+
+    /** The account's own deploy stopped waiting for these files, and continues with them. */
+    private function deployArchive(User $user, ?DeployLogger $logger): void
+    {
+        $logger?->filesArrived();
+        app(ProjectRebuild::class)->run($user, ProjectRebuild::DEPLOY_ARCHIVE, $logger, null, [], $this->archive());
     }
 
     private function archive(): ArchiveSource

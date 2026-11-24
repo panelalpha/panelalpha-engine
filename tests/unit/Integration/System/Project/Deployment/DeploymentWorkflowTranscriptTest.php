@@ -183,6 +183,9 @@ class DeploymentWorkflowTranscriptTest extends TestCase
             $state['stage'] = $stage;
             $calls[] = "logger->stage({$stage})";
         });
+        $logger->method('waitForFiles')->willReturnCallback(function () use ($calls): void {
+            $calls[] = 'logger->waitForFiles()';
+        });
         $logger->method('finish')->willReturnCallback(function (string $status, ?string $error = null) use ($calls): void {
             $calls[] = "logger->finish({$status}, ".var_export($error, true).')';
         });

@@ -29,7 +29,7 @@ test.describe('deploy log', () => {
 
     const deploy = await api.getDeployLog(user.username);
     expect(
-      ['none', 'running', 'success', 'failed', 'cancelled'],
+      ['none', 'running', 'waiting', 'success', 'failed', 'cancelled'],
       'the deploy status is a known one'
     ).toContain(deploy.data.status);
 

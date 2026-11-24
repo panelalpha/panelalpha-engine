@@ -247,7 +247,7 @@ class TaskCancellerTest extends SqliteTaskTestCase
     {
         $create = DeployLogger::start($username);
         $create->stage(DeployLogger::STAGE_PREPARING);
-        $create->info(DeployLogger::WAITING_FOR_FILES);
+        $create->waitForFiles();
         $id = $create->getDeployId();
         unset($create);
         gc_collect_cycles();
@@ -279,7 +279,7 @@ class TaskCancellerTest extends SqliteTaskTestCase
 
         (new TaskCanceller($this->noKill()))->cancel($task);
 
-        $this->assertSame(DeployLogger::STATUS_RUNNING, DeployLogger::readLatestFor($username)['status'], 'the create log still waits for files');
+        $this->assertSame(DeployLogger::STATUS_WAITING, DeployLogger::readLatestFor($username)['status'], 'the create log still waits for files');
     }
 
     /** A running rebuild on a waiting project cancels the deploy it started: the log is its own by id. */

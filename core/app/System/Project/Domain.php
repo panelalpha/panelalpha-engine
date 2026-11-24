@@ -22,6 +22,7 @@ use App\System\Privileged;
 use App\System\Privileged\AccountFiles;
 use App\System\Privileged\Exchange;
 use App\System\Project as UserProject;
+use App\System\Project\Dind\WelcomeBootstrap;
 use App\System\Services\Webserver\NginxProxy;
 use App\System\Services\Webserver\WebserverInterface;
 use Illuminate\Support\Facades\Log;
@@ -235,6 +236,7 @@ class Domain implements IssuableDomain
         $templateVars = [
             'user' => $this->userModel()->username,
             'domain' => $this->model->domain,
+            'welcome' => WelcomeBootstrap::html(),
         ];
         $this->system()->filesystem()->makeDirFromTemplateAsAccount(
             $account,
@@ -245,10 +247,13 @@ class Domain implements IssuableDomain
         $this->system()->exec($account->changeModeRecursively('ugo-rwx,u+rwX,go+rX', $domainRootDir));
     }
 
-    /** The project template's `public_html`, or the engine's default site when it ships none. */
+    /** The welcome page while a container project waits for its files, else the template's `public_html` or the default site. */
     private function documentRootTemplateDir(): string
     {
         $system = $this->system();
+        if (WelcomeBootstrap::waitsForFiles($this->userModel())) {
+            return $system->templatesDirPath().'/user-home/welcome-site';
+        }
         $template = $this->userModel()->getTemplate() ?? 'default';
         $templateDir = $system->projectDomainTemplateDirPath($template).'/public_html';
         if (! $system->filesystem()->isDir($templateDir)) {

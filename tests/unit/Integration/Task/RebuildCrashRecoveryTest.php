@@ -50,12 +50,12 @@ class RebuildCrashRecoveryTest extends TestCase
         return $this->postJson("/api/projects/{$this->user->username}/rebuild");
     }
 
-    /** The create finished an hour ago, its log left `running`, waiting for files, with no lock. */
+    /** The create finished an hour ago, its log left `waiting` for files, with no lock. */
     private function createWaitingForFiles(): string
     {
         $create = DeployLogger::start($this->user->username);
         $create->stage(DeployLogger::STAGE_PREPARING);
-        $create->info(DeployLogger::WAITING_FOR_FILES);
+        $create->waitForFiles();
         $id = $create->getDeployId();
         unset($create);
         gc_collect_cycles();
@@ -169,7 +169,7 @@ class RebuildCrashRecoveryTest extends TestCase
         $this->assertSame(Task::STATUS_CANCELLED, $task->refresh()->status);
         $this->assertSame(TaskReconciler::ORPHAN_MESSAGE, $task->details['reconciled']);
         $latest = DeployLogger::readLatestFor($this->user->username);
-        $this->assertSame([$createId, DeployLogger::STATUS_RUNNING], [$latest['id'], $latest['status']], 'still waiting for files');
+        $this->assertSame([$createId, DeployLogger::STATUS_WAITING], [$latest['id'], $latest['status']], 'still waiting for files');
         $this->assertSame(202, $this->rebuild()->getStatusCode());
     }
 

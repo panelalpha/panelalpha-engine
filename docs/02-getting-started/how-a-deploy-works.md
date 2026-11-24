@@ -58,7 +58,7 @@ actually serving, and tell me what is wrong.
 
 A container project created without a repository has nothing to build yet. Its first deploy sets the account up, gives the project its address and stops on `Environment ready, waiting for project files`. Nothing has failed: the project waits for the files you send, and one that never receives any keeps waiting.
 
-While it waits, every client sees the same thing. The deploy history lists one deploy, `running`, kind `install`, source `template`, with no task and no finish time, and its log ends on that line. There is no process behind it, so there is nothing to cancel.
+While it waits, every client sees the same thing. The deploy log and the deploy history list one deploy, `waiting`, kind `install`, source `template`, with no task and no finish time, and its log ends on that line. The project's app status is `none`: nothing is deployed yet. There is no process behind it, so there is nothing to cancel, and the engine never closes it as interrupted. Commands you run on the project meanwhile, such as `up`, do not write into it. Its domain shows the same welcome page the account's own site serves.
 
 The deploy that brings the files, an archive upload or a rebuild, does not continue that one. It opens a deploy of its own, with its own id and log, and the waiting deploy is closed first as `cancelled` with the sentence `The project waited for its files, and a later deploy brought them.` The history then lists both: the install that waited, and the deploy that came next. `cancelled` is the engine's word for a deploy that ended before it finished; nothing about the project is wrong.
 
