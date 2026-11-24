@@ -61,6 +61,7 @@ class PruneMetrics extends Command
         $limits = [
             'project_metrics' => $now->copy()->subHours(ProjectStats::rawHours()),
             'project_container_metrics' => $now->copy()->subHours(ProjectStats::rawHours()),
+            'project_sample_runs' => $now->copy()->subHours(ProjectStats::rawHours()),
             'project_metrics_hourly' => $now->copy()->subDays(ProjectStats::hourlyDays()),
             'project_container_metrics_hourly' => $now->copy()->subDays(ProjectStats::hourlyDays()),
         ];

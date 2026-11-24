@@ -5,15 +5,38 @@ namespace Tests\Integration\Project;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
 use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
+use App\Lib\Project\ProjectDeployState;
 use App\Lib\Project\ProjectOverview;
 use App\Models\User;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class ProjectOverviewTest extends TestCase
 {
+    private const NOW = '2026-11-24 12:00:00';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config([
+            'app.key' => 'base64:' . base64_encode(str_repeat('k', 32)),
+            'database.default' => 'sqlite',
+            'database.connections.sqlite.database' => ':memory:',
+        ]);
+        $this->app->forgetInstance('encrypter');
+        DB::purge('sqlite');
+        DB::reconnect('sqlite');
+        DB::setDefaultConnection('sqlite');
+        Artisan::call('migrate', ['--database' => 'sqlite', '--force' => true]);
+        Carbon::setTestNow(self::NOW);
+    }
+
     protected function tearDown(): void
     {
-        ProjectOverview::fakeRunning(false);
+        Carbon::setTestNow();
         parent::tearDown();
     }
 
@@ -49,7 +72,8 @@ class ProjectOverviewTest extends TestCase
 
     public function test_status_prefers_suspended_then_failed_then_container_state(): void
     {
-        ProjectOverview::fakeRunning(['up-app']);
+        $this->sampleRun('-1 minute', true);
+        $this->sampled('up-app', '-1 minute');
 
         $this->assertSame('suspended', $this->statusOf('down-app', 'suspended', ['deploy_strategy' => 'php']));
         $this->assertSame('none', $this->statusOf('fresh-app', 'active', []));
@@ -58,11 +82,45 @@ class ProjectOverviewTest extends TestCase
         $this->assertSame('down', $this->statusOf('down-app', 'active', ['deploy_strategy' => 'php', 'deployment_status' => 'success']));
     }
 
-    public function test_an_unreadable_container_list_never_reports_down(): void
+    public function test_no_recent_sample_that_saw_every_container_never_reports_down(): void
     {
-        ProjectOverview::fakeRunning(null);
+        $this->sampleRun('-10 minutes', true);
+        $this->sampleRun('-1 minute', false);
 
         $this->assertSame('live', $this->statusOf('down-app', 'active', ['deploy_strategy' => 'php', 'deployment_status' => 'success']));
+    }
+
+    public function test_a_project_seen_by_a_later_partial_sample_is_still_running(): void
+    {
+        $this->sampleRun('-2 minutes', true);
+        $this->sampleRun('-1 minute', false);
+        $this->sampled('up-app', '-1 minute');
+
+        $this->assertSame('live', $this->statusOf('up-app', 'active', ['deploy_strategy' => 'php', 'deployment_status' => 'success']));
+    }
+
+    public function test_a_deploy_finished_after_the_sample_is_not_down_yet(): void
+    {
+        $this->sampleRun('-1 minute', true);
+        ProjectDeployState::record('new-app', ['id' => 'd1', 'status' => 'success', 'finished_at' => Carbon::now()->subSeconds(20)->getTimestamp()]);
+
+        $this->assertSame('live', $this->statusOf('new-app', 'active', ['deploy_strategy' => 'php']));
+    }
+
+    public function test_the_stored_deploy_decides_building_and_failed(): void
+    {
+        $this->sampleRun('-1 minute', true);
+        $this->sampled('up-app', '-1 minute');
+        $details = ['deploy_strategy' => 'php', 'deployment_status' => 'success'];
+
+        ProjectDeployState::record('up-app', ['id' => 'd2', 'status' => 'running', 'finished_at' => null]);
+        $this->assertSame('building', $this->statusOf('up-app', 'active', $details));
+
+        ProjectDeployState::record('up-app', ['id' => 'd2', 'status' => 'failed', 'finished_at' => Carbon::now()->subMinutes(5)->getTimestamp()]);
+        $this->assertSame('failed', $this->statusOf('up-app', 'active', $details));
+
+        ProjectDeployState::record('up-app', ['id' => '', 'status' => 'failed']);
+        $this->assertSame('live', $this->statusOf('up-app', 'active', $details), 'a pointer with no deploy has no verdict');
     }
 
     public function test_admin_sso_is_read_from_the_capability_list_not_from_any_mention(): void
@@ -91,10 +149,20 @@ class ProjectOverviewTest extends TestCase
      */
     private function statusOf(string $username, string $status, array $details): string
     {
-        $user = new User(['username' => $username]);
-        $user->status = $status;
+        $user = User::query()->firstOrNew(['username' => $username]);
+        $user->forceFill(['domain' => $username . '.example.com', 'details' => $details, 'status' => $status])->save();
 
         return ProjectOverview::status($user, $details);
+    }
+
+    private function sampleRun(string $ago, bool $listed): void
+    {
+        DB::table('project_sample_runs')->insert(['timestamp' => Carbon::now('UTC')->modify($ago)->format('Y-m-d H:i:s'), 'listed' => $listed]);
+    }
+
+    private function sampled(string $username, string $ago): void
+    {
+        DB::table('project_metrics')->insert(['timestamp' => Carbon::now('UTC')->modify($ago)->format('Y-m-d H:i:s'), 'username' => $username, 'cpu_percent' => 1.0]);
     }
 
     private function shipped(string $gitUrl): AppConfig

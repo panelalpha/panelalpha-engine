@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\DeployLog;
 
 use App\Lib\Deploy\SafeName;
+use App\Lib\Project\ProjectDeployState;
 use InvalidArgumentException;
 
 /**
@@ -141,6 +142,7 @@ final class DeployLogArchive
         if (! SafeName::isSafe($username)) {
             return;
         }
+        ProjectDeployState::forget($username);
 
         $dir = DeployLogPaths::userDir($username);
         if (! is_dir($dir)) {

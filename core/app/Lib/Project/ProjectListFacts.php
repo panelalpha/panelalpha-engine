@@ -8,6 +8,7 @@ use App\Models\Domain;
 use App\Models\Task;
 use App\Models\Tunnel;
 use App\Models\User;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 /**
@@ -22,6 +23,8 @@ final class ProjectListFacts
      * @param  array<int, Collection<int, Tunnel>>  $tunnels  by user id, oldest first
      * @param  array<int, Domain>  $mainDomains  by user id
      * @param  array<string, array{cpu_percent: ?float, memory_bytes: ?int, memory_limit_bytes: ?int, sampled_at: string}>  $usage  by username
+     * @param  array<string, array{status: string, finished_at: ?int}>  $deploys  latest deploy by username
+     * @param  ?Carbon  $listedAt  the newest recent sample that saw every running container
      */
     private function __construct(
         private readonly array $usernames,
@@ -29,6 +32,8 @@ final class ProjectListFacts
         private readonly array $tunnels,
         private readonly array $mainDomains,
         private readonly array $usage,
+        private readonly array $deploys,
+        private readonly ?Carbon $listedAt,
     ) {}
 
     /**
@@ -40,7 +45,7 @@ final class ProjectListFacts
     {
         $saved = collect($users)->filter(static fn (User $user): bool => $user->exists)->keyBy('id');
         if ($saved->isEmpty()) {
-            return new self([], [], [], [], []);
+            return new self([], [], [], [], [], [], null);
         }
         $usernames = $saved->map(static fn (User $user): string => (string) $user->username)->values()->all();
 
@@ -50,6 +55,8 @@ final class ProjectListFacts
             self::tunnels($saved->keys()->all()),
             self::mainDomains($saved),
             ProjectStats::latestOf($usernames),
+            ProjectDeployState::of($usernames),
+            ProjectStats::listedAt(),
         );
     }
 
@@ -58,10 +65,33 @@ final class ProjectListFacts
         return isset($this->usernames[(string) $user->username]);
     }
 
-    /** Queued, not started yet: there is no deploy lock until a worker picks it up. */
-    public function hasQueuedDeploy(User $user): bool
+    /** Queued and not started yet, or started and not finished. */
+    public function isDeploying(User $user): bool
     {
-        return isset($this->queuedDeploys[(string) $user->username]);
+        return isset($this->queuedDeploys[(string) $user->username]) || ProjectDeployState::isRunning($this->deployOf($user));
+    }
+
+    public function lastDeployStatus(User $user): ?string
+    {
+        return $this->deployOf($user)['status'] ?? null;
+    }
+
+    /**
+     * Null when no recent sample saw every running container, or the last deploy finished after it: the container it
+     * started has not been sampled yet.
+     */
+    public function isRunning(User $user): ?bool
+    {
+        if ($this->listedAt === null) {
+            return null;
+        }
+        $finishedAt = $this->deployOf($user)['finished_at'] ?? null;
+        if ($finishedAt !== null && $finishedAt > $this->listedAt->getTimestamp()) {
+            return null;
+        }
+        $sampledAt = $this->usageOf($user)['sampled_at'] ?? null;
+
+        return $sampledAt !== null && Carbon::parse($sampledAt)->greaterThanOrEqualTo($this->listedAt);
     }
 
     /** @return Collection<int, Tunnel> */
@@ -79,6 +109,12 @@ final class ProjectListFacts
     public function usageOf(User $user): ?array
     {
         return $this->usage[(string) $user->username] ?? null;
+    }
+
+    /** @return ?array{status: string, finished_at: ?int} */
+    private function deployOf(User $user): ?array
+    {
+        return $this->deploys[(string) $user->username] ?? null;
     }
 
     /**

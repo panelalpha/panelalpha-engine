@@ -9,15 +9,11 @@ use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Domains\HttpsPorts;
 use App\Models\Tunnel;
 use App\Models\User;
-use App\System;
-use App\System\Privileged;
 use App\System\Projects;
-use Illuminate\Support\Facades\Log;
-use Throwable;
 
 /**
  * One project in a few words: what it is, whether it is up, where it answers, whether an admin can be logged in. Cheap
- * for a list: {@see ProjectListFacts} once for all of it, the deploy lock, one `docker ps` per request, never an account.
+ * for a list: {@see ProjectListFacts} once for all of it, nothing asked of the host or an account.
  */
 final class ProjectOverview
 {
@@ -33,12 +29,6 @@ final class ProjectOverview
 
     /** Created, never deployed. */
     public const STATUS_NONE = 'none';
-
-    /** The same `docker ps` answers a whole list; a worker must not keep it forever. */
-    private const RUNNING_TTL_SECONDS = 5;
-
-    /** @var ?array{at: float, names: ?array<string, true>} */
-    private static ?array $running = null;
 
     /**
      * @param  ?ProjectListFacts  $facts  loaded for the whole list the project is in; loaded for it alone when null
@@ -112,21 +102,22 @@ final class ProjectOverview
     }
 
     /**
-     * A deployed project is down only when `docker ps` was read and lacks its
-     * container: an unreadable `docker ps` proves nothing either way.
+     * A deployed project is down only when a sample that saw every running container did not see its own: without
+     * one nothing is known either way.
      *
      * @param  array<string, mixed>  $details
      */
     public static function status(User $user, array $details, ?ProjectListFacts $facts = null): string
     {
+        $facts ??= ProjectListFacts::load([$user]);
         if ($user->status === 'suspended') {
             return self::STATUS_SUSPENDED;
         }
-        if (self::isDeploying($user, $facts ?? ProjectListFacts::load([$user]))) {
+        if ($facts->isDeploying($user)) {
             return self::STATUS_BUILDING;
         }
 
-        $last = self::lastDeployStatus($user->username) ?? ($details['deployment_status'] ?? null);
+        $last = $facts->lastDeployStatus($user) ?? ($details['deployment_status'] ?? null);
         if ($last === DeployLogger::STATUS_FAILED) {
             return self::STATUS_FAILED;
         }
@@ -134,11 +125,7 @@ final class ProjectOverview
             return self::STATUS_NONE;
         }
 
-        $running = self::runningContainers();
-
-        return $running !== null && ! isset($running[$user->username])
-            ? self::STATUS_DOWN
-            : self::STATUS_LIVE;
+        return $facts->isRunning($user) === false ? self::STATUS_DOWN : self::STATUS_LIVE;
     }
 
     /** A tunnel is reachable from anywhere; a bare local domain may not be. */
@@ -183,61 +170,5 @@ final class ProjectOverview
         }
 
         return AppConfigLocator::findShipped(new LocalAppConfigSource, $gitRepo)?->supportsAdminSso() ?? false;
-    }
-
-    /**
-     * Tests: account containers to treat as running, or null for "could not
-     * tell". Pass false to probe again.
-     *
-     * @param  array<int, string>|null|false  $names
-     */
-    public static function fakeRunning(array|null|false $names): void
-    {
-        self::$running = $names === false
-            ? null
-            : ['at' => INF, 'names' => $names === null ? null : array_fill_keys($names, true)];
-    }
-
-    private static function isDeploying(User $user, ProjectListFacts $facts): bool
-    {
-        return DeployLogger::isLockedFor($user->username) || $facts->hasQueuedDeploy($user);
-    }
-
-    /** The status of the deploy latest.json names; one read of it, not one per question. */
-    private static function lastDeployStatus(string $username): ?string
-    {
-        try {
-            $latest = DeployLogger::readLatestFor($username);
-        } catch (Throwable) {
-            return null;
-        }
-        $id = $latest['id'] ?? null;
-        $status = is_string($id) && $id !== '' ? ($latest['status'] ?? null) : null;
-
-        return is_string($status) ? $status : null;
-    }
-
-    /**
-     * Every account's outer container is named after the account.
-     *
-     * @return ?array<string, true>
-     */
-    private static function runningContainers(): ?array
-    {
-        $now = microtime(true);
-        if (self::$running !== null && $now - self::$running['at'] < self::RUNNING_TTL_SECONDS) {
-            return self::$running['names'];
-        }
-
-        $names = null;
-        try {
-            $out = (new System)->exec(Privileged::docker()->runningContainerNames(), [], 15);
-            $names = array_fill_keys(array_filter(array_map('trim', explode("\n", $out))), true);
-        } catch (Throwable $e) {
-            Log::warning('Could not list running containers: '.$e->getMessage());
-        }
-        self::$running = ['at' => $now, 'names' => $names];
-
-        return $names;
     }
 }

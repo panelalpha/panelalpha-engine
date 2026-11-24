@@ -123,12 +123,6 @@ class InfoTest(ContainerTest):
 
 
 class ListingTest(ContainerTest):
-    def test_running_container_names_are_listed_without_the_leading_slash(self):
-        self.routes[('GET', '/containers/json')] = (200, LISTED)
-        result = self.pa_root('docker.runningContainerNames')
-        self.assert_asked('GET', '/containers/json', {'filters': ['{}']})
-        self.assertEqual((result.returncode, result.stdout), (0, b'alice\nbob\n'), result.stderr)
-
     def test_container_images_are_listed_with_all(self):
         self.routes[('GET', '/containers/json')] = (200, LISTED)
         result = self.pa_root('docker.containerImages')
@@ -189,7 +183,7 @@ class ListingTest(ContainerTest):
 
     def test_a_daemon_error_is_told_in_the_cli_s_words(self):
         self.routes[('GET', '/containers/json')] = (500, {'message': 'the daemon  fell over'})
-        result = self.pa_root('docker.runningContainerNames')
+        result = self.pa_root('docker.containerImages')
         self.assertEqual((result.returncode, result.stdout), (1, b''))
         self.assertEqual(result.stderr, b'Error response from daemon: the daemon fell over\n')
 

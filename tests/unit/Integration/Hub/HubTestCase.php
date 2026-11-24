@@ -6,7 +6,6 @@ use App\Lib\Deploy\Telemetry\HostFacts;
 use App\Lib\Hub\HubGrants;
 use App\Lib\Hub\HubTokens;
 use App\Lib\Hub\SpkiPin;
-use App\Lib\Project\ProjectOverview;
 use App\Models\Admin;
 use App\Models\HubConnection;
 use App\Models\Setting;
@@ -65,7 +64,6 @@ abstract class HubTestCase extends TestCase
 
         Setting::setRuntimeSettings(['default_ipv4' => self::engineIp()]);
         $this->fakeDockerInfo(['Name' => 'srv1.acme.com', 'OperatingSystem' => 'Ubuntu 24.04.1 LTS', 'KernelVersion' => '6.8.0-45-generic']);
-        ProjectOverview::fakeRunning([]);
 
         $this->certificate = $this->makeCertificate();
         SpkiPin::$servedPathOverride = $this->certificate;
@@ -77,7 +75,6 @@ abstract class HubTestCase extends TestCase
     {
         SpkiPin::$servedPathOverride = null;
         Setting::clearRuntimeSettings();
-        ProjectOverview::fakeRunning(false);
         HostFacts::resetProbeCache();
         @unlink($this->certificate);
         FirewallFactory::reset();

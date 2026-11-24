@@ -4,7 +4,7 @@ namespace Tests\Integration\Hub;
 
 use App\Jobs\DeployProject;
 use App\Lib\Host\ProjectStats;
-use App\Lib\Project\ProjectOverview;
+use App\Lib\Project\ProjectDeployState;
 use App\Models\Task;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Carbon;
@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\DB;
 /** The project list Connect polls every minute reads its `app` and `usage` blocks once per table, not per project. */
 class ProjectListQueriesTest extends HubTestCase
 {
-    private const PER_PROJECT_TABLES = ['tasks', 'tunnels', 'domains', 'project_metrics'];
+    private const PER_PROJECT_TABLES = ['tasks', 'tunnels', 'domains', 'project_metrics', 'project_deploy_states', 'project_sample_runs'];
 
     protected function tearDown(): void
     {
@@ -29,7 +29,6 @@ class ProjectListQueriesTest extends HubTestCase
     public function test_each_project_still_gets_its_own_app_and_usage(): void
     {
         Carbon::setTestNow('2026-10-26 12:00:00');
-        ProjectOverview::fakeRunning(['shop', 'blog', 'docs']);
         $shop = $this->project('shop', ['deploy_strategy' => 'php', 'deployment_status' => 'success']);
         $blog = $this->project('blog', ['deploy_strategy' => 'php', 'deployment_status' => 'success']);
         $this->project('docs', ['deploy_strategy' => 'php', 'deployment_status' => 'success']);
@@ -37,10 +36,13 @@ class ProjectListQueriesTest extends HubTestCase
         $domain = $this->domain($shop->id, 'shop.example.com');
         $this->domain($blog->id, 'blog.example.com', ['ssl_disabled' => true]);
         DB::table('tunnels')->insert(['domain_id' => $domain, 'user_id' => $shop->id, 'provider' => 'panelalpha', 'hostname' => 'shop-a1.panelalpha.online']);
+        $this->project('started', ['deploy_strategy' => 'php', 'deployment_status' => 'success']);
         $this->queuedDeploy('queued');
+        ProjectDeployState::record('started', ['id' => 'd1', 'status' => 'running']);
         $this->metrics('shop', '-90 seconds', 4.0);
         $this->metrics('shop', '-30 seconds', 6.5);
         $this->metrics('blog', '-10 minutes', 9.0);
+        DB::table('project_sample_runs')->insert(['timestamp' => Carbon::now('UTC')->modify('-30 seconds')->format('Y-m-d H:i:s'), 'listed' => true]);
 
         $projects = collect($this->withToken($this->adminToken())->getJson('/api/projects/all')->assertOk()->json('data'))->keyBy('username');
 
@@ -48,7 +50,9 @@ class ProjectListQueriesTest extends HubTestCase
         $this->assertSame('http://blog.example.com', $projects['blog']['app']['public_url']);
         $this->assertSame('https://docs.example.com', $projects['docs']['app']['public_url']);
         $this->assertSame('building', $projects['queued']['app']['status']);
+        $this->assertSame('building', $projects['started']['app']['status']);
         $this->assertSame('live', $projects['shop']['app']['status']);
+        $this->assertSame('down', $projects['docs']['app']['status']);
         $this->assertSame(6.5, $projects['shop']['usage']['cpu_percent']);
         $this->assertNull($projects['blog']['usage'], 'stale samples are not "now"');
 
@@ -75,7 +79,7 @@ class ProjectListQueriesTest extends HubTestCase
     /** @return array<string, int> queries per table while listing $count projects */
     private function listQueries(int $count): array
     {
-        foreach (['tunnels', 'domains', 'project_metrics', 'users'] as $table) {
+        foreach (['tunnels', 'domains', 'project_metrics', 'project_deploy_states', 'users'] as $table) {
             DB::table($table)->delete();
         }
         foreach (range(1, $count) as $n) {
@@ -83,6 +87,7 @@ class ProjectListQueriesTest extends HubTestCase
             $domain = $this->domain($user->id, "p{$n}.example.com");
             DB::table('tunnels')->insert(['domain_id' => $domain, 'user_id' => $user->id, 'provider' => 'panelalpha', 'hostname' => "p{$n}-{$count}.panelalpha.online"]);
             $this->metrics("p{$n}", '-30 seconds', 1.0);
+            ProjectDeployState::record("p{$n}", ['id' => "d{$n}", 'status' => 'success', 'finished_at' => 1]);
         }
         $token = $this->adminToken();
 

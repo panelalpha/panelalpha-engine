@@ -32,6 +32,14 @@ class ProjectMetricsTest extends HubTestCase
             'username' => 'shop', 'id' => self::INNER, 'name' => 'project-app-1', 'service' => 'app',
             'memory' => 52000000, 'limit' => 1073741824, 'usec' => 900000,
         ], $read['containers'][0]);
+        $this->assertFalse($read['listed'], 'no L line, so a project it did not name may still run');
+    }
+
+    public function test_the_l_line_says_every_running_container_was_checked(): void
+    {
+        $this->assertTrue(ProjectStats::parse("P\tshop\t1\tmax\t0\t1\nL\n")['listed']);
+        $this->assertTrue(ProjectStats::parse("L\n")['listed'], 'nothing running is a full listing too');
+        $this->assertFalse(ProjectStats::parse("L\tx\n")['listed']);
     }
 
     public function test_a_container_limit_above_its_project_is_reported_as_the_project_limit(): void
@@ -96,13 +104,36 @@ class ProjectMetricsTest extends HubTestCase
         $this->assertSame('app', $inner[1]->service);
     }
 
-    public function test_a_failing_host_read_writes_nothing(): void
+    public function test_each_sample_records_whether_it_saw_every_running_container(): void
+    {
+        $this->project('shop');
+        $listed = true;
+        $stats = new ProjectStats(function () use (&$listed): string {
+            return "P\tshop\t100\t1000\t0\t1\n" . ($listed ? "L\n" : '');
+        });
+        $first = Carbon::parse('2026-10-01 10:00:00', 'UTC');
+
+        $stats->sample($first);
+        $listed = false;
+        $stats->sample($first->copy()->addMinute());
+
+        $this->assertSame(
+            [['2026-10-01 10:00:00', 1], ['2026-10-01 10:01:00', 0]],
+            DB::table('project_sample_runs')->orderBy('timestamp')->get()->map(fn ($r) => [$r->timestamp, (int) $r->listed])->all()
+        );
+        $this->assertSame('2026-10-01 10:00:00', ProjectStats::listedAt($first->copy()->addMinutes(2))?->format('Y-m-d H:i:s'));
+        $this->assertNull(ProjectStats::listedAt($first->copy()->addMinutes(6)), 'older than a recent sample');
+    }
+
+    public function test_a_failing_host_read_writes_nothing_but_the_run(): void
     {
         $this->project('shop');
         $stats = new ProjectStats(fn (): string => throw new \RuntimeException('nsenter failed'));
 
         $this->assertSame(['projects' => 0, 'containers' => 0], $stats->sample());
         $this->assertSame(0, DB::table('project_metrics')->count());
+        $this->assertSame([0], DB::table('project_sample_runs')->pluck('listed')->map(fn ($v) => (int) $v)->all());
+        $this->assertNull(ProjectStats::listedAt());
     }
 
     public function test_the_project_carries_its_latest_usage(): void

@@ -5,7 +5,6 @@ namespace Tests\Integration\Hub;
 use App\Auth\TokenAbilities;
 use App\Lib\Deploy\Telemetry\HostFacts;
 use App\Lib\Hub\HubGrants;
-use App\Lib\Project\ProjectOverview;
 use App\Models\Backup;
 use App\Models\BackupContainer;
 use App\System;
@@ -111,7 +110,6 @@ class HubContractTest extends HubTestCase
             'health_healthy' => true,
         ]);
         $this->project('api', ['deploy_strategy' => 'express', 'deployment_status' => 'failed'], 'suspended');
-        ProjectOverview::fakeRunning(['shop']);
 
         $body = $this->withToken($this->token)->getJson('/api/projects/all')->assertOk()->json();
         $this->assertArrayNotHasKey('meta', $body, 'not paginated');

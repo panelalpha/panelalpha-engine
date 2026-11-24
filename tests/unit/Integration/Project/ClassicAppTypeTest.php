@@ -3,7 +3,6 @@
 namespace Tests\Integration\Project;
 
 use App\Lib\Project\ClassicAppType;
-use App\Lib\Project\ProjectOverview;
 use App\Models\Admin;
 use App\Models\Domain;
 use App\Models\User;
@@ -30,13 +29,6 @@ class ClassicAppTypeTest extends TestCase
         DB::reconnect('sqlite');
         DB::setDefaultConnection('sqlite');
         Artisan::call('migrate', ['--database' => 'sqlite', '--force' => true]);
-        ProjectOverview::fakeRunning([]);
-    }
-
-    protected function tearDown(): void
-    {
-        ProjectOverview::fakeRunning(false);
-        parent::tearDown();
     }
 
     public function test_the_host_script_is_valid_bash_and_quotes_every_project(): void

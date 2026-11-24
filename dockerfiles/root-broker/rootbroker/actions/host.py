@@ -267,7 +267,8 @@ def egress_unblock(daemon, output, owner):
 
 
 def project_stats(context, seconds, usernames):
-    """Every account's CPU, memory and I/O from the kernel's cgroups, its containers named by its own daemon."""
+    """Every account's CPU, memory and I/O from the kernel's cgroups, its containers named by its own daemon, then `L`
+    once every running container was checked."""
     return projectstats.Reading(int(seconds), usernames, context.policy.accounts_directory)
 
 

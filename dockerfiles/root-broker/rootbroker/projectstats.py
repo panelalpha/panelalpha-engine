@@ -1,7 +1,8 @@
 """The lines `host.projectStats` writes: cgroup files on the host, and container names from the Engine API.
 
 Each container the host's daemon names counts once it is confirmed as the account's own, and a DinD account's inner
-containers come from its own daemon. Every number is a host cgroup file, never a daemon's data file.
+containers come from its own daemon. Every number is a host cgroup file, never a daemon's data file. The last line is
+`L` once every running container was checked, so an account without a `P` line is known not to run.
 """
 
 import http.client
@@ -30,6 +31,8 @@ MEMORY_STAT = 'memory.stat'
 CPU_STAT = 'cpu.stat'
 INACTIVE_FILE = 'inactive_file'
 USAGE_USEC = 'usage_usec'
+LISTED = 'L'
+UNREAD = 'unread'
 
 
 class Budget:
@@ -61,7 +64,8 @@ class Reading:
 
     def __call__(self, output):
         budget = Budget(self.seconds)
-        for name, outer, kind in self.own(budget):
+        own, listed = self.own(budget)
+        for name, outer, kind in own:
             directory = cgroup(outer)
             if directory is None:
                 continue
@@ -72,22 +76,31 @@ class Reading:
                 container_name, service = names.get(container, ('', ''))
                 output.stdout(line('C', name, container, container_name, service,
                                    *readings(posixpath.join(directory, INSIDE, container))))
+        if listed:
+            output.stdout(line(LISTED))
         return 0
 
     def own(self, budget):
-        """Each running container that is the account's own, as its name, its id and which kind it is."""
+        """Each running container that is the account's own, as its name, its id and which kind it is, and whether
+        every running container was checked."""
+        listing = host_listing(budget.take())
+        if listing is None:
+            return [], False
         own = []
         asked = set()
-        for container in host_listing(budget.take()):
-            for listed in container.get('Names') or []:
-                name = listed.removeprefix('/')
+        listed = True
+        for container in listing:
+            for named in container.get('Names') or []:
+                name = named.removeprefix('/')
                 if name not in self.usernames or name in asked:
                     continue
                 asked.add(name)
                 kind = kind_of(name, container['Id'], self.accounts_directory, budget.take())
-                if kind is not None:
+                if kind == UNREAD:
+                    listed = False
+                elif kind is not None:
                     own.append((name, container['Id'], kind))
-        return own
+        return own, listed
 
     def named(self, name, budget):
         """The containers a DinD account's daemon lists, by id, with the name and compose service each has."""
@@ -105,27 +118,30 @@ class Reading:
 
 
 def host_listing(seconds):
-    """The running containers the host's daemon lists, bounded and checked; none when it does not answer."""
+    """The running containers the host's daemon lists, bounded and checked; None when it does not answer."""
     if seconds is None:
-        return []
+        return None
     try:
         status, body = dockerapi.request('GET', '/containers/json', SOCKET, seconds)
-        return replies.containers(json.loads(body)) if status == 200 else []
+        return replies.containers(json.loads(body)) if status == 200 else None
     except (OSError, ValueError, http.client.HTTPException):
-        return []
+        return None
 
 
 def kind_of(name, container_id, accounts_directory, seconds):
-    """`DIND`, `CLASSIC` or None: whether the host's daemon describes this container as the account's own."""
+    """`DIND`, `CLASSIC` or None: whether the host's daemon describes this container as the account's own; `UNREAD`
+    when it could not be asked."""
     if seconds is None:
-        return None
+        return UNREAD
     try:
         status, body = dockerapi.request('GET', f'/containers/{container_id}/json', SOCKET, seconds)
-        container = json.loads(body) if status == 200 else None
+        if status != 200:
+            return None
+        container = json.loads(body)
     except (OSError, ValueError, http.client.HTTPException):
-        return None
+        return UNREAD
     if not isinstance(container, dict):
-        return None
+        return UNREAD
     if accountdaemon.is_account_container(container, name, accounts_directory):
         return DIND
     return CLASSIC if accountdaemon.is_classic_container(container, name, accounts_directory) else None

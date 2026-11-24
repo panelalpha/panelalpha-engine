@@ -50,7 +50,6 @@ final class DockerBrokerCases
 
         yield 'info' => [fn () => $d()->info(), false];
         yield 'registryMirrors' => [fn () => $d()->registryMirrors(), false];
-        yield 'runningContainerNames' => [fn () => $d()->runningContainerNames(), false];
         yield 'containerImages' => [fn () => $d()->containerImages(), false];
         yield 'containerNamed' => [fn () => $d()->containerNamed('alice.1'), false];
         yield 'containerNamedWithLabel' => [fn () => $d()->containerNamedWithLabel('alice.1', $label, self::ENGINE.'/users/alice.1'), false];

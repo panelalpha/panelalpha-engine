@@ -3,10 +3,12 @@
 namespace App\Lib\Deploy\DeployLog;
 
 use App\Lib\Findings\Finding;
+use App\Lib\Project\ProjectDeployState;
 
 /**
  * `latest.json`: which deploy an account is on, how far it got and whether it is still going. Written whole
- * and renamed into place, because a polling request reads it while the deploy writes it.
+ * and renamed into place, because a polling request reads it while the deploy writes it, and mirrored into
+ * {@see ProjectDeployState} for the project list.
  */
 final class DeployStatus
 {
@@ -33,6 +35,7 @@ final class DeployStatus
     {
         LogStorage::ensureDirectory($this->paths->directory());
         LogStorage::replace($this->paths->latest(), (string) json_encode($data));
+        ProjectDeployState::record($this->paths->username, $data);
     }
 
     /**

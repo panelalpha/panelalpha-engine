@@ -40,15 +40,16 @@ class ProjectStats
             return ['projects' => 0, 'containers' => 0];
         }
 
+        $at = $now->format('Y-m-d H:i:s');
         try {
             $read = self::parse(($this->runOnHost)(Privileged::host()->projectStats($usernames, self::HOST_TIMEOUT_SECONDS)));
         } catch (\Throwable $e) {
             Log::warning('Could not read project stats: '.$e->getMessage());
+            self::recordRun($at, false);
 
             return ['projects' => 0, 'containers' => 0];
         }
 
-        $at = $now->format('Y-m-d H:i:s');
         $previous = $this->previous($now);
 
         $projects = self::projectRows($read['projects'], $previous['projects'], $at, $now);
@@ -56,6 +57,7 @@ class ProjectStats
 
         self::insertChunks('project_metrics', $projects);
         self::insertChunks('project_container_metrics', $containers);
+        self::recordRun($at, $read['listed']);
 
         return ['projects' => count($projects), 'containers' => count($containers)];
     }
@@ -105,6 +107,27 @@ class ProjectStats
         }
 
         return $containers;
+    }
+
+    private static function recordRun(string $at, bool $listed): void
+    {
+        DB::table('project_sample_runs')->upsert([['timestamp' => $at, 'listed' => $listed]], ['timestamp'], ['listed']);
+    }
+
+    /**
+     * When the newest recent sample saw every running container: a project with no row from then on is not running.
+     * Null when no recent sample did, so nothing is known.
+     */
+    public static function listedAt(?Carbon $now = null): ?Carbon
+    {
+        $since = ($now ?? Carbon::now('UTC'))->copy()->setTimezone('UTC')->subSeconds(self::STALE_SECONDS)->format('Y-m-d H:i:s');
+        try {
+            $at = DB::table('project_sample_runs')->where('listed', true)->where('timestamp', '>=', $since)->max('timestamp');
+        } catch (QueryException) {
+            return null;
+        }
+
+        return is_string($at) ? Carbon::parse($at, 'UTC') : null;
     }
 
     /** @param  list<array<string, mixed>>  $rows */
@@ -395,19 +418,25 @@ class ProjectStats
     }
 
     /**
+     * `listed` is the host's word that every running container was checked, so a project it did not name is not running.
+     *
      * @return array{
      *   projects: array<string, array{memory: ?int, limit: ?int, usec: ?int}>,
-     *   containers: list<array{username: string, id: string, name: ?string, service: ?string, memory: ?int, limit: ?int, usec: ?int}>
+     *   containers: list<array{username: string, id: string, name: ?string, service: ?string, memory: ?int, limit: ?int, usec: ?int}>,
+     *   listed: bool
      * }
      */
     public static function parse(string $out): array
     {
         $projects = [];
         $containers = [];
+        $listed = false;
 
         foreach (preg_split('/\R/', $out) ?: [] as $line) {
             $f = explode("\t", $line);
-            if (($f[0] ?? '') === 'P' && count($f) === 6 && $f[1] !== '') {
+            if ($f === ['L']) {
+                $listed = true;
+            } elseif (($f[0] ?? '') === 'P' && count($f) === 6 && $f[1] !== '') {
                 $projects[$f[1]] = self::usage($f[2], $f[3], $f[4], $f[5]);
             } elseif (($f[0] ?? '') === 'C' && count($f) === 9 && $f[1] !== '' && preg_match('/^[0-9a-f]{12,64}$/', $f[2]) === 1) {
                 $containers[] = [
@@ -419,7 +448,7 @@ class ProjectStats
             }
         }
 
-        return ['projects' => $projects, 'containers' => self::heldToProjectLimit($containers, $projects)];
+        return ['projects' => $projects, 'containers' => self::heldToProjectLimit($containers, $projects), 'listed' => $listed];
     }
 
     /**

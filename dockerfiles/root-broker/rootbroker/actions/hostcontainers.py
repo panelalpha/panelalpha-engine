@@ -54,11 +54,6 @@ def name_filter(name):
     return '^/' + re.escape(name) + '$'
 
 
-def running_container_names(daemon, output):
-    """`docker ps --format {{.Names}}`."""
-    return cli.printed(output, map(cli.names, listed(daemon, False, {})))
-
-
 def container_images(daemon, output):
     """`docker ps -a --format {{.Image}}`."""
     return cli.printed(output, (container.get('Image', '') for container in listed(daemon, True, {})))
@@ -262,7 +257,6 @@ def wipe_registry_storage(daemon, output, container):
 ACTIONS = {
     'info': asking(nothing, info),
     'registryMirrors': asking(nothing, registry_mirrors),
-    'runningContainerNames': asking(nothing, running_container_names),
     'containerImages': asking(nothing, container_images),
     'containerNamed': asking(reads(values.name), container_named),
     'containerNamedWithLabel': asking(reads(values.name, values.name, values.operand), container_named_with_label),

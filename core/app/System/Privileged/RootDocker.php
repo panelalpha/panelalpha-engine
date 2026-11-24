@@ -22,12 +22,6 @@ final class RootDocker
     }
 
     /** @return list<string> */
-    public function runningContainerNames(): array
-    {
-        return $this->docker(__FUNCTION__, []);
-    }
-
-    /** @return list<string> */
     public function containerImages(): array
     {
         return $this->docker(__FUNCTION__, []);

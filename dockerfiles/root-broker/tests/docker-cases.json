@@ -1,7 +1,6 @@
 [
 {"name":"info","host":false,"broker":["/usr/local/lib/panelalpha/pa-root","docker.info","--"]},
 {"name":"registryMirrors","host":false,"broker":["/usr/local/lib/panelalpha/pa-root","docker.registryMirrors","--"]},
-{"name":"runningContainerNames","host":false,"broker":["/usr/local/lib/panelalpha/pa-root","docker.runningContainerNames","--"]},
 {"name":"containerImages","host":false,"broker":["/usr/local/lib/panelalpha/pa-root","docker.containerImages","--"]},
 {"name":"containerNamed","host":false,"broker":["/usr/local/lib/panelalpha/pa-root","docker.containerNamed","--","alice.1"]},
 {"name":"containerNamedWithLabel","host":false,"broker":["/usr/local/lib/panelalpha/pa-root","docker.containerNamedWithLabel","--","alice.1","com.docker.compose.project.working_dir","/opt/panelalpha/shared-hosting/users/alice.1"]},
