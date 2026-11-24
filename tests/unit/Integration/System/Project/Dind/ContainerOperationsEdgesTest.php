@@ -2,11 +2,13 @@
 
 namespace Tests\Integration\System\Project\Dind;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Platform\Strategies;
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\Filesystem;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\ContainerOperations;
@@ -14,6 +16,7 @@ use App\System\Project\Dind\DeployStrategy;
 use App\System\Project\Dind\InnerBuildGuard;
 use App\System\Project\Dind\ShellOperations;
 use Symfony\Component\Process\Process;
+use Symfony\Component\Yaml\Yaml;
 use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
@@ -38,6 +41,11 @@ class ContainerOperationsEdgesTest extends TestCase
     private ?string $strategy = null;
 
     private bool $markFails = false;
+
+    private ?string $runFile = null;
+
+    /** @var list<array{string, string}> */
+    private array $written = [];
 
     protected function setUp(): void
     {
@@ -73,6 +81,34 @@ class ContainerOperationsEdgesTest extends TestCase
         $this->assertSame(0, $result['exit_code'], $result['stderr']);
         $this->assertSame([['/home/alice/project', '1001:1001']], $this->refreshed);
         $this->assertContains('compose up', $this->ran);
+    }
+
+    public function test_an_empty_projects_up_makes_its_welcome_site_start_without_an_env_file(): void
+    {
+        $this->runFile = "services:\n  app:\n    image: nginx:alpine\n    env_file:\n      - .env\n    labels:\n      panelalpha.generated: static-bootstrap\n";
+
+        $result = $this->operations()->projectAction('up');
+
+        $this->assertSame(0, $result['exit_code'], $result['stderr']);
+        $this->assertSame([], $this->refreshed);
+        $this->assertCount(1, $this->written);
+        $this->assertSame('/home/alice/project/'.EngineArtifacts::RUN_COMPOSE, $this->written[0][0]);
+        $this->assertSame(
+            [['path' => '.env', 'required' => false]],
+            Yaml::parse($this->written[0][1])['services']['app']['env_file']
+        );
+        $this->assertLessThan(array_search('compose up', $this->ran, true), array_search('write run file', $this->ran, true));
+    }
+
+    public function test_a_deployed_projects_up_leaves_its_run_file_to_the_deploy(): void
+    {
+        $this->strategy = Strategies::STATIC;
+        $this->runFile = "services:\n  app:\n    env_file:\n      - .env\n    labels:\n      panelalpha.generated: static-bootstrap\n";
+
+        $result = $this->operations()->projectAction('up');
+
+        $this->assertSame(0, $result['exit_code'], $result['stderr']);
+        $this->assertSame([], $this->written);
     }
 
     public function test_a_down_whose_volume_cleanup_fails_still_succeeds(): void
@@ -156,6 +192,16 @@ class ContainerOperationsEdgesTest extends TestCase
             }
         );
 
+        $runPath = '/home/alice/project/'.EngineArtifacts::RUN_COMPOSE;
+        $fs = $this->createStub(Filesystem::class);
+        $fs->method('fileExists')->willReturnCallback(fn (string $path): bool => $path === $runPath && $this->runFile !== null);
+        $fs->method('fileGetContents')->willReturnCallback(fn (): string => (string) $this->runFile);
+        $fs->method('writeFileReplacingPath')->willReturnCallback(function (string $path, string $contents): void {
+            $this->ran[] = 'write run file';
+            $this->written[] = [$path, $contents];
+        });
+        $system->method('filesystem')->willReturn($fs);
+
         $engine = $this->createStub(ContainerEngine::class);
         $engine->method('hostBuilder')->willReturn(new DindHostBuilder('8192m', ''));
 
@@ -163,6 +209,7 @@ class ContainerOperationsEdgesTest extends TestCase
         $user->method('effectiveMemoryLimit')->willReturn(1024);
         $user->method('getDeployStrategy')->willReturn($this->strategy);
         $user->method('getChownString')->willReturn('1001:1001');
+        $user->method('linuxIds')->willReturn([1001, 1001]);
         if ($this->markFails) {
             $user->method('markAppStoppedByRequest')->willThrowException(new \RuntimeException('database gone'));
         }

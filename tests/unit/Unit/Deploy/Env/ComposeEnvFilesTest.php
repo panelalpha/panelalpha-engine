@@ -373,4 +373,36 @@ class ComposeEnvFilesTest extends TestCase
 
         $this->assertSame(['recipe', 'own'], ComposeEnvFiles::outrankingEnv($compose, '.env', EngineArtifacts::ENV_OVERRIDES));
     }
+
+    public function test_made_optional_turns_every_required_entry_naming_the_file_into_the_long_form(): void
+    {
+        $compose = ['services' => [
+            'short' => ['image' => 'nginx', 'env_file' => '.env'],
+            'list' => ['env_file' => ['./.env', '.env.production']],
+            'long' => ['env_file' => [['path' => '.env', 'format' => 'raw']]],
+            'other' => ['env_file' => ['.env.production']],
+            'none' => ['image' => 'redis'],
+        ]];
+
+        [$updated, $changed] = ComposeEnvFiles::madeOptional($compose, '.env');
+
+        $this->assertTrue($changed);
+        $this->assertSame([
+            'short' => ['image' => 'nginx', 'env_file' => [['path' => '.env', 'required' => false]]],
+            'list' => ['env_file' => [['path' => './.env', 'required' => false], '.env.production']],
+            'long' => ['env_file' => [['path' => '.env', 'format' => 'raw', 'required' => false]]],
+            'other' => ['env_file' => ['.env.production']],
+            'none' => ['image' => 'redis'],
+        ], $updated['services']);
+    }
+
+    public function test_made_optional_reports_nothing_changed_when_the_file_is_already_optional(): void
+    {
+        $compose = ['services' => ['app' => ['env_file' => [['path' => '.env', 'required' => false], '.env.panelalpha']]]];
+
+        [$updated, $changed] = ComposeEnvFiles::madeOptional($compose, '.env');
+
+        $this->assertFalse($changed);
+        $this->assertSame($compose, $updated);
+    }
 }

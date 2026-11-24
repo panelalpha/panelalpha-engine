@@ -42,16 +42,26 @@ class DeployComposeTest extends TestCase
     /**
      * A static site reads the account's variables from `.env`, which every deploy writes,
      * so a rebuild keeps them; `.env.panelalpha` follows the same `env_file:` as elsewhere.
+     * Optional, so the welcome site of an account with no sources starts without one.
      */
     public function test_static_compose_loads_the_projects_env_files(): void
     {
         $parsed = Yaml::parse(DeployCompose::staticNginx());
 
-        $this->assertSame(['.env'], $parsed['services']['app']['env_file']);
+        $this->assertSame([['path' => '.env', 'required' => false]], $parsed['services']['app']['env_file']);
 
         [$attached, $services] = ComposeEnvFiles::attach($parsed, EngineArtifacts::ENV_OVERRIDES);
         $this->assertSame(['app'], $services);
-        $this->assertSame(['.env', '.env.panelalpha'], $attached['services']['app']['env_file']);
+        $this->assertSame(
+            [['path' => '.env', 'required' => false], '.env.panelalpha'],
+            $attached['services']['app']['env_file']
+        );
+    }
+
+    /** A deploy still creates the `.env` the static site loads, as it does for every file a compose file names. */
+    public function test_static_compose_still_declares_the_projects_env_for_a_deploy_to_write(): void
+    {
+        $this->assertSame(['.env'], ComposeEnvFiles::declaredIn(DeployCompose::staticNginx()));
     }
 
     public function test_dockerfile_compose_builds_named_file(): void

@@ -5,6 +5,7 @@ namespace App\Lib\Deploy\Compose;
 use App\Lib\Deploy\CacheManager\BuildCache;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
 use App\Lib\Deploy\DetectProjectStrategy;
+use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Platform\Runtime\HostRunProject;
@@ -71,7 +72,8 @@ class DeployCompose
      * mounted because the image default serves only `index.html`, and the sites
      * that reach this recipe have a differently named front page. A missing mount
      * source would make Docker create a directory where nginx expects a file. It loads `.env`
-     * as the other recipes do, where the deploy writes the account's variables.
+     * as the other recipes do, where the deploy writes the account's variables; optional, since the
+     * welcome page of an account with no sources is written without one.
      */
     public static function staticNginx(): string
     {
@@ -82,7 +84,7 @@ class DeployCompose
                 './:/usr/share/nginx/html/:ro',
                 './'.NginxConfig::FILENAME.':/etc/nginx/conf.d/default.conf:ro',
             ],
-            'env_file' => ['.env'],
+            'env_file' => [ComposeEnvFiles::optional('.env')],
             'labels' => [GeneratedCompose::LABEL => DetectProjectStrategy::COMPOSE_GENERATED_LABEL],
         ]);
     }

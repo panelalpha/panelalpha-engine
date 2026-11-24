@@ -12,6 +12,7 @@ use App\System\Privileged;
 use App\System\Project\Dind;
 use App\System\Project\Dind\Paths;
 use App\System\Project\Dind\WelcomeBootstrap;
+use Symfony\Component\Yaml\Yaml;
 use Tests\TestCase;
 
 /** An account with no sources and no repository gets a static nginx compose and a welcome page. */
@@ -25,6 +26,12 @@ class WelcomeBootstrapTest extends TestCase
 
     /** @var list<string> */
     private array $existing = [];
+
+    /** @var array<string, string> */
+    private array $contents = [];
+
+    /** @var list<string> */
+    private array $symlinks = [];
 
     public function test_an_empty_account_gets_the_static_site_and_the_welcome_page(): void
     {
@@ -56,6 +63,57 @@ class WelcomeBootstrapTest extends TestCase
         $this->assertSame([], $this->written);
     }
 
+    public function test_a_welcome_site_written_with_a_required_env_loads_it_optionally_and_keeps_the_rest(): void
+    {
+        $this->existingRunFile(self::REQUIRED_ENV_RUN_FILE);
+
+        $this->bootstrap(hasGitProject: false)->refreshRunFile();
+
+        $this->assertCount(1, $this->written);
+        [$path, $yaml, $owner, $mode] = $this->written[0];
+        $this->assertSame(['/home/alice/project/'.EngineArtifacts::RUN_COMPOSE, '1001:1002', '644'], [$path, $owner, $mode]);
+        $app = Yaml::parse($yaml)['services']['app'];
+        $this->assertSame([['path' => '.env', 'required' => false]], $app['env_file']);
+        $this->assertSame(['GREETING' => 'hello'], $app['environment']);
+        $this->assertSame(['8080:80'], $app['ports']);
+        $this->assertSame(['panelalpha.generated' => 'static-bootstrap'], $app['labels']);
+    }
+
+    public function test_a_welcome_site_written_as_it_is_now_is_left_alone(): void
+    {
+        $this->existingRunFile(DeployCompose::staticNginx());
+
+        $this->bootstrap(hasGitProject: false)->refreshRunFile();
+
+        $this->assertSame([], $this->written);
+    }
+
+    public function test_a_run_file_that_is_not_the_welcome_site_is_left_alone(): void
+    {
+        $this->existingRunFile(str_replace('static-bootstrap', 'dockerfile', self::REQUIRED_ENV_RUN_FILE));
+
+        $this->bootstrap(hasGitProject: false)->refreshRunFile();
+
+        $this->assertSame([], $this->written);
+    }
+
+    public function test_a_run_file_replaced_by_a_link_is_not_followed(): void
+    {
+        $this->existingRunFile(self::REQUIRED_ENV_RUN_FILE);
+        $this->symlinks = ['/home/alice/project/'.EngineArtifacts::RUN_COMPOSE];
+
+        $this->bootstrap(hasGitProject: false)->refreshRunFile();
+
+        $this->assertSame([], $this->written);
+    }
+
+    private function existingRunFile(string $yaml): void
+    {
+        $path = '/home/alice/project/'.EngineArtifacts::RUN_COMPOSE;
+        $this->existing[] = $path;
+        $this->contents[$path] = $yaml;
+    }
+
     private function bootstrap(bool $hasGitProject): WelcomeBootstrap
     {
         $user = $this->createStub(User::class);
@@ -64,6 +122,8 @@ class WelcomeBootstrapTest extends TestCase
 
         $fs = $this->createStub(Filesystem::class);
         $fs->method('fileExists')->willReturnCallback(fn (string $path): bool => in_array($path, $this->existing, true));
+        $fs->method('isSymlink')->willReturnCallback(fn (string $path): bool => in_array($path, $this->symlinks, true));
+        $fs->method('fileGetContents')->willReturnCallback(fn (string $path): string => $this->contents[$path] ?? '');
         $fs->method('writeFileReplacingPath')->willReturnCallback(
             function (string $path, string $contents, ?string $chown = null, ?string $chmod = null): void {
                 $this->written[] = [$path, $contents, $chown, $chmod];
@@ -84,6 +144,25 @@ class WelcomeBootstrapTest extends TestCase
 
         return new WelcomeBootstrap($project, new Paths($project));
     }
+
+    private const REQUIRED_ENV_RUN_FILE = <<<'YAML'
+services:
+  app:
+    image: nginx:alpine
+    ports:
+      - '8080:80'
+    volumes:
+      - './:/usr/share/nginx/html/:ro'
+      - './panelalpha.nginx.conf:/etc/nginx/conf.d/default.conf:ro'
+    env_file:
+      - .env
+    labels:
+      panelalpha.generated: static-bootstrap
+    restart: unless-stopped
+    environment:
+      GREETING: hello
+
+YAML;
 
     private const WELCOME_HTML = <<<'HTML'
 <!DOCTYPE html>

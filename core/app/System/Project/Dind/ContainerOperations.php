@@ -214,12 +214,24 @@ final class ContainerOperations
         );
     }
 
+    /** Whether the project is still the welcome site: no strategy, no repository and no compose file of its own. */
+    private static function isWelcomeAccount(DindProject $project): bool
+    {
+        $user = $project->userModel();
+
+        return $user->getDeployStrategy() === null
+            && $user->getGitRepo() === null
+            && $project->userAppExistingComposeFilePath() === null;
+    }
+
     /**
      * Rewrites the run file only; no clone, no image build, no prepare.
      */
     private function refreshRunFileBefore(string $action): void
     {
         if (! self::actionRegeneratesRunFile($this->project, $action)) {
+            $this->refreshWelcomeRunFile();
+
             return;
         }
 
@@ -227,6 +239,17 @@ final class ContainerOperations
             $this->project->userAppDirPath(),
             $this->project->userModel()->getChownString(),
         );
+    }
+
+    /** Best effort: a run file left as it was fails in compose with compose's own error. */
+    private function refreshWelcomeRunFile(): void
+    {
+        try {
+            if (self::isWelcomeAccount($this->project)) {
+                (new WelcomeBootstrap($this->project, new Paths($this->project)))->refreshRunFile();
+            }
+        } catch (\Throwable) {
+        }
     }
 
     /**
@@ -244,6 +267,7 @@ final class ContainerOperations
             if (in_array($action, self::STARTING_SERVICE_ACTIONS, true)) {
                 (new AccountMapping($this->project))->ensureMapped();
             }
+            $this->refreshWelcomeRunFile();
             $output = $this->shell->execAsUser(
                 $this->project->userAppComposeCommand([$action, '--', $service]),
                 [],

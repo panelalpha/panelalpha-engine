@@ -2,8 +2,12 @@
 
 namespace App\System\Project\Dind;
 
+use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\DeployCompose;
+use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Detect\PlaceholderPage;
+use App\Lib\Deploy\DetectProjectStrategy;
+use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
@@ -29,6 +33,36 @@ final class WelcomeBootstrap
         }
 
         $this->writeWelcomeSite($appDir);
+    }
+
+    /** Have the welcome site's run file load `.env` optionally, as {@see DeployCompose::staticNginx()} writes it. */
+    public function refreshRunFile(): void
+    {
+        $path = $this->paths->composeFile();
+        $fs = $this->project->system()->filesystem();
+        if (! $fs->fileExists($path) || $fs->isSymlink($path)) {
+            return;
+        }
+        $raw = $fs->fileGetContents($path);
+        $compose = ComposeYaml::parse($raw);
+        if ($compose === null || ! self::isWelcomeSite($compose)) {
+            return;
+        }
+        [$optional, $changed] = ComposeEnvFiles::madeOptional($compose, '.env');
+        if ($changed) {
+            $owner = implode(':', $this->project->userModel()->linuxIds());
+            $fs->writeFileReplacingPath($path, ComposeYaml::dump($optional, $raw, 6, 2), $owner, '644');
+        }
+    }
+
+    /**
+     * @param  array<mixed>  $compose
+     */
+    private static function isWelcomeSite(array $compose): bool
+    {
+        $labels = $compose['services'][GeneratedCompose::APP_SERVICE]['labels'] ?? null;
+
+        return is_array($labels) && ($labels[GeneratedCompose::LABEL] ?? null) === DetectProjectStrategy::COMPOSE_GENERATED_LABEL;
     }
 
     /** Root makes ~/project for the account, which writes every file in it. */

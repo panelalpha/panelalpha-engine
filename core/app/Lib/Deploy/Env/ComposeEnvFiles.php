@@ -169,12 +169,65 @@ final class ComposeEnvFiles
             }
             $declared = $service['env_file'] ?? null;
             $entries = is_array($declared) ? array_values($declared) : ($declared === null ? [] : [$declared]);
-            $entries[] = ['path' => $envFile, 'required' => false];
+            $entries[] = self::optional($envFile);
             $compose['services'][$name]['env_file'] = $entries;
             $changed[] = $name;
         }
 
         return [$compose, $changed];
+    }
+
+    /**
+     * An `env_file:` entry Compose skips when the file is missing.
+     *
+     * @return array{path: string, required: false}
+     */
+    public static function optional(string $envFile): array
+    {
+        return ['path' => $envFile, 'required' => false];
+    }
+
+    /**
+     * Every `env_file:` entry naming $envFile made {@see optional()}, so the services start without it.
+     *
+     * @param  array<string, mixed>  $compose  a decoded compose file
+     * @return array{0: array<string, mixed>, 1: bool} the compose file, and whether an entry changed
+     */
+    public static function madeOptional(array $compose, string $envFile): array
+    {
+        if (! is_array($compose['services'] ?? null)) {
+            return [$compose, false];
+        }
+
+        $changed = false;
+        foreach ($compose['services'] as &$service) {
+            if (! is_array($service) || ! isset($service['env_file'])) {
+                continue;
+            }
+            $entries = is_array($service['env_file']) ? array_values($service['env_file']) : [$service['env_file']];
+            $optional = array_map(static fn (mixed $entry): mixed => self::optionalIfNaming($entry, $envFile), $entries);
+            if ($optional !== $entries) {
+                $service['env_file'] = $optional;
+                $changed = true;
+            }
+        }
+        unset($service);
+
+        return [$compose, $changed];
+    }
+
+    /** $entry as {@see optional()} when it names $envFile and Compose would require it; any other entry as it is. */
+    private static function optionalIfNaming(mixed $entry, string $envFile): mixed
+    {
+        $path = is_array($entry) ? ($entry['path'] ?? null) : $entry;
+        if (! is_string($path) || self::projectRelative($path) !== $envFile) {
+            return $entry;
+        }
+        if (is_array($entry)) {
+            return ($entry['required'] ?? true) === false ? $entry : array_merge($entry, ['required' => false]);
+        }
+
+        return self::optional($path);
     }
 
     /**
