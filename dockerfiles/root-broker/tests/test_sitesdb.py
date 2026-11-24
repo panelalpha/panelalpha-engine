@@ -24,8 +24,12 @@ class LeadingDashTest(unittest.TestCase):
         ):
             with self.subTest(action=name):
                 script = build(*registry()[name].check([ENGINE, *given])[1:])
-                self.assertIn("-- '-patest'", script)
                 self.assertNotIn(" '-patest' -", script)
+                if name == 'compose.sitesDbRestoreCopy':
+                    self.assertIn("\nD='-patest'\n", script)
+                    self.assertTrue(script.endswith(' -- "$D"'))
+                else:
+                    self.assertIn("-- '-patest'", script)
 
 
 class RefusalTest(unittest.TestCase):
@@ -61,19 +65,23 @@ class RefusalTest(unittest.TestCase):
         self.refused('compose.sitesDbDropTable', 'alice_wp', '')
 
     def test_the_import_account_is_only_a_plain_account_and_never_root(self):
-        for account in ("a'b", 'b`b', 'b@%', '', 'root', 'ROOT', 'a b'):
+        for account in ("a'b", 'b`b', 'b@%', 'root', 'ROOT', 'a b', 'pa.import.x'):
             with self.subTest(account=account):
                 self.refused('compose.sitesDbCopy', 'alice_wp', 'bob_wp', '', account)
                 self.refused('compose.sitesDbRestoreCopy', 'alice_wp', 'bob_wp', account)
         self.refused('compose.sitesDbCopy', 'alice_wp', 'bob_wp', '', 'bob_app', 'bob_shop')
         self.refused('compose.sitesDbRestoreCopy', 'alice_wp', 'bob_wp', 'bob_app', 'bob_shop')
 
+    def test_an_empty_import_account_asks_for_a_temporary_one(self):
+        found = registry()['compose.sitesDbCopy']
+        self.assertEqual(list(found.check([self.engine, 'alice_wp', 'bob_wp', '', ''])[1:]), ['alice_wp', 'bob_wp', '', ''])
+
     def test_the_import_signs_in_as_the_account_and_only_the_dump_and_its_sign_in_are_root_s(self):
         copy = engineservices.sites_db_copy('alice_wp', 'bob_wp', '', 'bob_app')
         restore_copy = engineservices.sites_db_restore_copy('alice_wp', 'bob_wp', 'bob_app')
         for script in (copy, restore_copy):
-            self.assertTrue(script.endswith(' | MYSQL_PWD="$T" mariadb --sandbox --user="$A" -- \'bob_wp\''))
-            self.assertIn("A='bob_app'\n", script)
+            self.assertTrue(script.endswith(' | MYSQL_PWD="$T" mariadb --sandbox --user="$A" -- "$D"'))
+            self.assertIn("A='bob_app'\nD='bob_wp'\n", script)
             self.assertNotIn('export', script)
         self.assertIn('MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mariadb-dump ', copy)
         self.assertNotIn('mariadb-dump', restore_copy)
@@ -88,8 +96,9 @@ class RefusalTest(unittest.TestCase):
 @unittest.skipUnless(shutil.which('sed'), 'needs sed')
 class RewriteTest(unittest.TestCase):
     def rewrite(self, dump, source='alice_wp', target='bob_wp', account=ACCOUNT):
-        script = engineservices.schema_rewrite(source, target, account)
-        result = subprocess.run(['sh', '-c', script], input=dump.encode(), capture_output=True, check=True)
+        script = engineservices.schema_rewrite(source, target)
+        result = subprocess.run(['sh', '-c', script], input=dump.encode(), capture_output=True, check=True,
+                                env={**os.environ, 'A': account})
         return result.stdout.decode()
 
     def test_row_data_stays_untouched_and_the_trigger_moves_to_the_target(self):
@@ -152,7 +161,7 @@ class RewriteTest(unittest.TestCase):
                 self.assertTrue(out.endswith(body.split('`c`', 1)[1]))
 
     def test_a_database_name_is_escaped_for_the_pattern(self):
-        script = engineservices.schema_rewrite('alice-wp', 'bob-wp', 'bob_app')
+        script = engineservices.schema_rewrite('alice-wp', 'bob-wp')
         self.assertIn('alice\\-wp', script)
         self.assertNotIn('s/\\balice-wp\\.', script)
         self.assertEqual(self.rewrite('CREATE TABLE `alice-wp`.`t` (x int);', 'alice-wp', 'bob-wp'),
@@ -165,17 +174,30 @@ case " $* " in
 *" --sandbox "*)
     printf 'import pwd=%s %s\n' "$MYSQL_PWD" "$*" >> "$d/log"
     if flock -n "$d/lock" true; then echo 'lock free during import' >> "$d/log"; else echo 'lock held during import' >> "$d/log"; fi
+    printf 'grant during import: %s\n' "$(cat "$d/grant" 2>/dev/null)" >> "$d/log"
     cat > "$d/imported"
+    [ -e "$d/import-changes-grant" ] && cp "$d/import-changes-grant" "$d/grant"
     [ -e "$d/import-kill" ] && kill -KILL $$
     exit "$(cat "$d/import-exit" 2>/dev/null || echo 0)" ;;
 *" -e "*)
     sql="${@: -1}"
     printf 'query pwd=%s %s\n' "$MYSQL_PWD" "$sql" >> "$d/log"
-    if [[ $sql == SELECT* ]]; then
+    case $sql in
+    SELECT*)
         n=$(( $(cat "$d/reads" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/reads"
-        method=$(sed -n "${n}p" "$d/methods"); [ -n "$method" ] || method=$(tail -n 1 "$d/methods"); echo "$method"
-    fi
-    [[ $sql == ALTER* && -e "$d/restore-fails" ]] && exit 1
+        method=$(sed -n "${n}p" "$d/methods"); [ -n "$method" ] || method=$(tail -n 1 "$d/methods"); echo "$method" ;;
+    "SHOW GRANTS FOR "*)
+        echo 'GRANT USAGE ON *.* TO `bob_app`@`%`'; [ -s "$d/grant" ] && cat "$d/grant" ;;
+    "GRANT ALL PRIVILEGES ON "*" TO '"*)
+        printf '%s\n' "$sql" | sed "s/ TO '\([^']*\)'@'%'/ TO \`\1\`@\`%\`/" > "$d/grant" ;;
+    GRANT*)
+        printf '%s\n' "$sql" > "$d/grant" ;;
+    REVOKE*)
+        [ -e "$d/restore-fails" ] && exit 1
+        : > "$d/grant" ;;
+    ALTER*)
+        [ -e "$d/restore-fails" ] && exit 1 ;;
+    esac
     exit 0 ;;
 *)
     printf 'stdin pwd=%s %s\n' "$MYSQL_PWD" "$(cat)" >> "$d/log" ;;
@@ -183,6 +205,9 @@ esac
 '''
 HASH = '*' + '0123456789ABCDEF' * 2 + '01234567'
 NEWER = '*' + 'FEDCBA9876543210' * 2 + '76543210'
+OWN_GRANT = 'GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP ON `bob_wp`.* TO `bob_app`@`%`'
+ALL_GRANT = 'GRANT ALL PRIVILEGES ON `bob_wp`.* TO `bob_app`@`%`'
+DUMP = '#!/bin/sh\necho "CREATE DEFINER=\\`root\\`@\\`localhost\\` PROCEDURE p() SELECT 1;"\n'
 
 
 @unittest.skipUnless(shutil.which('flock') and shutil.which('bash'), 'needs flock and bash')
@@ -192,12 +217,13 @@ class ImportScriptTest(unittest.TestCase):
     def setUp(self):
         self.stub = tempfile.mkdtemp(prefix='broker-import-')
         os.mkdir(os.path.join(self.stub, 'bin'))
-        for name, body in (('mariadb', STUB_MARIADB), ('mariadb-dump', '#!/bin/sh\necho "CREATE TABLE t (x int);"\n')):
+        for name, body in (('mariadb', STUB_MARIADB), ('mariadb-dump', DUMP)):
             path = os.path.join(self.stub, 'bin', name)
             with open(path, 'w') as f:
                 f.write(body)
             os.chmod(path, 0o755)
         self.methods(f'mysql_native_password {HASH}')
+        self.flag('grant', OWN_GRANT + '\n')
 
     def tearDown(self):
         shutil.rmtree(self.stub)
@@ -210,18 +236,27 @@ class ImportScriptTest(unittest.TestCase):
         with open(os.path.join(self.stub, name), 'w') as f:
             f.write(content)
 
+    def read(self, name):
+        with open(os.path.join(self.stub, name)) as f:
+            return f.read()
+
+    def fresh(self):
+        for name in ('log', 'reads', 'imported'):
+            if os.path.exists(os.path.join(self.stub, name)):
+                os.remove(os.path.join(self.stub, name))
+
     def run_script(self, script):
-        lock = engineservices.IMPORT_LOCK_DIR + '/panelalpha-sites-db-import-bob_app'
-        script = script.replace(lock, os.path.join(self.stub, 'lock'))
+        for lock in ('bob_app', 'database-bob_wp'):
+            script = script.replace(f'{engineservices.IMPORT_LOCK_DIR}/panelalpha-sites-db-import-{lock}',
+                                    os.path.join(self.stub, 'lock'))
         env = {'PATH': os.path.join(self.stub, 'bin') + ':' + os.environ['PATH'], 'STUB': self.stub,
                'MYSQL_ROOT_PASSWORD': 'r00t'}
-        result = subprocess.run(['bash', '-c', script], input=b'CREATE TABLE t (x int);\n', env=env,
-                                capture_output=True, timeout=30)
-        with open(os.path.join(self.stub, 'log')) as f:
-            return result, f.read().splitlines()
+        result = subprocess.run(['bash', '-c', script], input=b'CREATE DEFINER=`alice_wp`@`%` VIEW v AS SELECT 1;\n',
+                                env=env, capture_output=True, timeout=30)
+        return result, self.read('log').splitlines()
 
-    def copy(self):
-        return self.run_script(engineservices.sites_db_copy('alice_wp', 'bob_wp', '', 'bob_app'))
+    def copy(self, account='bob_app'):
+        return self.run_script(engineservices.sites_db_copy('alice_wp', 'bob_wp', '', account))
 
     def restored(self, lines, hash_=HASH):
         return f"query pwd=r00t ALTER USER 'bob_app'@'%' IDENTIFIED VIA mysql_native_password USING '{hash_}'" in lines
@@ -230,32 +265,63 @@ class ImportScriptTest(unittest.TestCase):
         for script in (engineservices.sites_db_copy('alice_wp', 'bob_wp', '', 'bob_app'),
                        engineservices.sites_db_restore_copy('alice_wp', 'bob_wp', 'bob_app')):
             with self.subTest(script=script[-60:]):
-                for name in ('log', 'reads'):
-                    if os.path.exists(os.path.join(self.stub, name)):
-                        os.remove(os.path.join(self.stub, name))
+                self.fresh()
                 result, lines = self.run_script(script)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 added = next(line for line in lines if line.startswith('stdin pwd=r00t ALTER USER'))
                 temporary = added.rsplit("PASSWORD('", 1)[1].rstrip("')")
                 self.assertRegex(temporary, r'\A[A-Za-z0-9]{32}\Z')
                 self.assertIn(f"IDENTIFIED VIA mysql_native_password USING '{HASH}' OR mysql_native_password USING", added)
-                self.assertEqual(lines.index(added) + 1, lines.index(f'import pwd={temporary} --sandbox --user=bob_app -- bob_wp'))
+                imported = f'import pwd={temporary} --sandbox --user=bob_app -- bob_wp'
+                self.assertLess(lines.index(added), lines.index(imported))
                 self.assertIn('lock held during import', lines)
-                self.assertTrue(self.restored(lines))
                 self.assertEqual(lines[-1], f"query pwd=r00t ALTER USER 'bob_app'@'%' IDENTIFIED VIA mysql_native_password USING '{HASH}'")
-                self.assertEqual([line for line in lines if temporary in line], [added, lines[lines.index(added) + 1]])
+                self.assertEqual([line for line in lines if temporary in line], [added, imported])
+                self.assertIn('DEFINER=`bob_app`@`%`', self.read('imported'))
 
-    def test_a_failed_import_still_takes_the_sign_in_back_and_fails_with_its_code(self):
+    def test_the_account_has_every_privilege_on_the_target_while_importing_and_its_own_grant_back_after(self):
+        result, lines = self.copy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f'grant during import: {ALL_GRANT}', lines)
+        self.assertEqual(self.read('grant'), OWN_GRANT + '\n')
+        self.assertIn("query pwd=r00t GRANT ALL PRIVILEGES ON `bob_wp`.* TO 'bob_app'@'%'", lines)
+        self.assertNotIn('ON *.*', ' '.join(line for line in lines if 'GRANT ALL' in line))
+
+    def test_an_account_with_no_grant_on_the_target_has_none_again_after(self):
+        self.flag('grant')
+        result, lines = self.copy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f'grant during import: {ALL_GRANT}', lines)
+        self.assertEqual(self.read('grant'), '')
+
+    def test_an_account_that_already_had_every_privilege_keeps_it_untouched(self):
+        self.flag('grant', ALL_GRANT + '\n')
+        result, lines = self.copy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse([line for line in lines if 'REVOKE' in line])
+        self.assertEqual(self.read('grant'), ALL_GRANT + '\n')
+
+    def test_a_grant_changed_during_the_import_is_kept(self):
+        changed = 'GRANT SELECT ON `bob_wp`.* TO `bob_app`@`%`'
+        self.flag('import-changes-grant', changed + '\n')
+        result, lines = self.copy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse([line for line in lines if 'REVOKE' in line])
+        self.assertEqual(self.read('grant'), changed + '\n')
+
+    def test_a_failed_import_still_takes_the_sign_in_and_the_grant_back_and_fails_with_its_code(self):
         self.flag('import-exit', '3')
         result, lines = self.copy()
         self.assertEqual(result.returncode, 3)
         self.assertTrue(self.restored(lines))
+        self.assertEqual(self.read('grant'), OWN_GRANT + '\n')
 
-    def test_a_killed_import_still_takes_the_sign_in_back(self):
+    def test_a_killed_import_still_takes_the_sign_in_and_the_grant_back(self):
         self.flag('import-kill')
         result, lines = self.copy()
         self.assertEqual(result.returncode, 137)
         self.assertTrue(self.restored(lines))
+        self.assertEqual(self.read('grant'), OWN_GRANT + '\n')
 
     def test_the_sign_in_is_put_back_as_it_is_by_then_so_a_password_changed_meanwhile_is_kept(self):
         self.methods(f'mysql_native_password {HASH}', f'mysql_native_password {NEWER}')
@@ -268,19 +334,47 @@ class ImportScriptTest(unittest.TestCase):
         for method in ('NULL', 'ed25519 abc', f'mysql_native_password {HASH}x', "mysql_native_password ' OR 1"):
             with self.subTest(method=method):
                 self.methods(method)
-                for name in ('log', 'reads'):
-                    if os.path.exists(os.path.join(self.stub, name)):
-                        os.remove(os.path.join(self.stub, name))
+                self.fresh()
                 result, lines = self.copy()
                 self.assertEqual(result.returncode, 1)
                 self.assertIn(b'refused', result.stderr)
                 self.assertEqual([line for line in lines if not line.startswith('query pwd=r00t SELECT')], [])
+                self.assertEqual(self.read('grant'), OWN_GRANT + '\n')
 
     def test_a_sign_in_that_cannot_be_taken_back_fails_the_import_and_says_so(self):
         self.flag('restore-fails')
         result, lines = self.copy()
         self.assertEqual(result.returncode, 1)
         self.assertIn(b'was not taken back', result.stderr)
+
+    def test_with_no_account_a_temporary_one_imports_owns_every_definer_and_is_dropped(self):
+        for exit_code in ('0', '3'):
+            with self.subTest(exit_code=exit_code):
+                self.fresh()
+                self.flag('import-exit', exit_code)
+                result, lines = self.copy(account='')
+                self.assertEqual(result.returncode, int(exit_code), result.stderr)
+                created = next(line for line in lines if line.startswith("stdin pwd=r00t CREATE USER 'pa.import."))
+                name = created.split("'")[1]
+                password = created.rsplit("IDENTIFIED BY '", 1)[1].rstrip("'")
+                self.assertRegex(name, r'\Apa\.import\.[0-9a-f]{16}\Z')
+                self.assertRegex(password, r'\A[A-Za-z0-9]{32}\Z')
+                self.assertIn(f"query pwd=r00t GRANT ALL PRIVILEGES ON `bob_wp`.* TO '{name}'@'%'", lines)
+                self.assertIn(f'import pwd={password} --sandbox --user={name} -- bob_wp', lines)
+                self.assertIn('lock held during import', lines)
+                self.assertIn(f'DEFINER=`{name}`@`%`', self.read('imported'))
+                self.assertNotIn('`root`', self.read('imported'))
+                self.assertEqual(lines[-1], f"query pwd=r00t DROP USER IF EXISTS '{name}'@'%'")
+                self.assertFalse([line for line in lines if 'SHOW GRANTS' in line or 'ALTER USER' in line])
+                self.assertEqual(self.read('grant'), ALL_GRANT.replace('bob_app', name) + '\n')
+
+    def test_each_import_has_its_own_temporary_account(self):
+        names = set()
+        for _ in range(2):
+            self.fresh()
+            result, lines = self.copy(account='')
+            names.add(next(line for line in lines if 'CREATE USER' in line).split("'")[1])
+        self.assertEqual(len(names), 2)
 
 
 if __name__ == '__main__':

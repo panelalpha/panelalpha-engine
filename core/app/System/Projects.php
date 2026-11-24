@@ -1704,6 +1704,61 @@ class Projects
     }
 
     /**
+     * A target database the push would load as an account sites-db cannot give a sign-in of its own for the import.
+     *
+     * @param  array<int, mixed>|null  $tables
+     * @return list<array{field: string, code: string, message: string}>
+     */
+    public static function importAccountProblems(ModelsUser $from, ModelsUser $to, bool $databases, ?array $tables, Mysql $mysql): array
+    {
+        if (! $databases) {
+            return [];
+        }
+
+        $problems = [];
+        foreach (self::pushedTargetDatabases($from, $to, $tables) as $database) {
+            $account = $mysql->importAccount($to, $database);
+            if ($account->user !== '' && ! $mysql->users()->signsInNatively($account->user)) {
+                $problems[] = [
+                    'field' => 'databases',
+                    'code' => 'import_account_unsupported',
+                    'message' => "'{$database}' is loaded as its account '{$account->user}', which does not exist or does "
+                        .'not sign in with mysql_native_password, so it cannot be pushed into.',
+                ];
+            }
+        }
+
+        return $problems;
+    }
+
+    /**
+     * The target's existing databases a push would load into.
+     *
+     * @param  array<int, mixed>|null  $tables
+     * @return list<string>
+     */
+    private static function pushedTargetDatabases(ModelsUser $from, ModelsUser $to, ?array $tables): array
+    {
+        if (self::isDind($to)) {
+            return AppDatabase::isOwnedBy($from) && AppDatabase::isOwnedBy($to) ? [AppDatabase::nameFor($to)] : [];
+        }
+
+        $sources = $tables === null
+            ? $from->mysqlDatabases()->pluck('database')->all()
+            : array_map(static fn (mixed $selection): mixed => is_array($selection) ? ($selection['database'] ?? null) : null, $tables);
+        $owned = $to->mysqlDatabases()->pluck('database')->all();
+        $targets = [];
+        foreach ($sources as $source) {
+            $target = is_string($source) ? DatabaseCopier::mapName($source, $from->getMysqlPrefix(), $to->getMysqlPrefix()) : null;
+            if ($target !== null && in_array($target, $owned, true)) {
+                $targets[$target] = $target;
+            }
+        }
+
+        return array_values($targets);
+    }
+
+    /**
      * @return list<array{field: string, code: string, message: string}>
      */
     public static function pushProblems(ModelsUser $from, ModelsUser $to): array

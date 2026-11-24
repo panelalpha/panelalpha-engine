@@ -102,7 +102,7 @@ SITES_DB_DUMP = ['bash', '-c', 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; mariadb
 SITES_DB_REWRITE = (
     'sed -e \'/^INSERT INTO /!{/^(/!s/`alice_wp`\\./`bob_wp`./g}\' '
     '-e \'/^INSERT INTO /!{/^(/!s/\\balice_wp\\./bob_wp./g}\' '
-    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`\\([^`\'\\\'\'"\\\\]\\|``\\)*`\\(@`\\([^`\'\\\'\'"\\\\]\\|``\\)*`\\)\\{0,1\\}/DEFINER=`bob_app`@`%`/g}\''
+    '-e \'/^INSERT INTO /!{/^(/!s/DEFINER=`\\([^`\'\\\'\'"\\\\]\\|``\\)*`\\(@`\\([^`\'\\\'\'"\\\\]\\|``\\)*`\\)\\{0,1\\}/DEFINER=`\'\"$A\"\'`@`%`/g}\''
 )
 SITES_DB_COPY = ['bash', '-c', engineservices.import_as(
     'bob_app', 'bob_wp',

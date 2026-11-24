@@ -61,11 +61,7 @@ class DatabaseRenamerTest extends TestCase
         );
         $this->assertSame(['shop_new'], $record->created);
         $this->assertSame(['shop_old'], $record->deleted);
-        $this->assertSame(
-            [['shop_user', 'shop_new', 'SELECT, INSERT'], ['shop_user', 'shop_new', 'SELECT, INSERT']],
-            $record->grants,
-            'granted once so the copy can be loaded as shop_user, then again as the grants move',
-        );
+        $this->assertSame([['shop_user', 'shop_new', 'SELECT, INSERT']], $record->grants);
         $this->assertSame('shop_new', $row->fresh()->database);
     }
 
@@ -76,10 +72,7 @@ class DatabaseRenamerTest extends TestCase
 
         $this->renamer($record)->rename($user, $row, 'shop_new');
 
-        $this->assertSame(
-            ['revoke shop_user shop_old', 'kill shop_user', 'grant shop_user shop_new', 'copy'],
-            array_slice($record->steps, 0, 4),
-        );
+        $this->assertSame(['revoke shop_user shop_old', 'kill shop_user', 'copy'], array_slice($record->steps, 0, 3));
         $this->assertSame(['shop_user'], $record->killed);
     }
 
@@ -112,8 +105,7 @@ class DatabaseRenamerTest extends TestCase
 
         $this->assertSame(['shop_new'], $record->deleted);
         $this->assertNotContains('shop_old', $record->deleted);
-        $this->assertSame([['shop_user', 'shop_new', 'ALL PRIVILEGES'], ['shop_user', 'shop_old', 'ALL PRIVILEGES']], $record->grants);
-        $this->assertContains(['shop_user', 'shop_new'], $record->revokes);
+        $this->assertSame([['shop_user', 'shop_old', 'ALL PRIVILEGES']], $record->grants);
         $this->assertSame('shop_old', $row->fresh()->database);
     }
 

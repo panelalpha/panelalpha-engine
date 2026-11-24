@@ -24,6 +24,7 @@ FTP_PASSWORD_PIPE = 'printf \'%s\\n%s\\n\' "$' + FTP_PASSWORD + '" "$' + FTP_PAS
 LITESPEED_PASSWORD = 'PA_LITESPEED_ADMIN_PASSWORD'
 SITES_DB_PASSWORD = 'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; '
 IMPORT_LOCK_DIR = '/run/lock'
+ACCOUNT_WORD = '@A@'
 # a definer never spans a quote or a backslash, so rewriting one inside a string cannot move where the string ends
 DEFINER_PART = r'''\([^`'"\\]\|``\)*'''
 ANY_DEFINER = 'DEFINER=`' + DEFINER_PART + '`\\(@`' + DEFINER_PART + '`\\)\\{0,1\\}'
@@ -31,34 +32,71 @@ PREG_SPECIAL = set('.\\+*?[^]$(){}=!<>|:-#/')
 
 IMPORT_SCRIPT = r'''set -o pipefail
 A=@ACCOUNT@
+D=@DATABASE@
+TEMPORARY= G0= GSET= GRANTED=
 query() { MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mariadb -uroot -N -B -e "$1" </dev/null; }
+secret() { MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mariadb -uroot; }
 own() {
     local method
     method=$(query "SELECT CONCAT(JSON_VALUE(priv, '\$.plugin'), ' ', JSON_VALUE(priv, '\$.authentication_string')) FROM mysql.global_priv WHERE user = '$A' AND host = '%'") || return 2
     [[ $method =~ ^mysql_native_password\ (\*[0-9A-F]{40})?$ ]] || return 1
     H=${BASH_REMATCH[1]}
 }
+grant() {
+    local all
+    all=$(query "SHOW GRANTS FOR '$A'@'%'") || return 1
+    G=$(printf '%s\n' "$all" | grep -F " ON \`$D\`.* TO \`$A\`@\`%\`")
+    return 0
+}
+give_back_grant() {
+    grant || return 1
+    [ -n "$GRANTED" ] || return 0
+    [ -n "$GSET" ] || GSET=$G
+    [ "$G" = "$GSET" ] && [ "$G0" != "$GSET" ] || return 0
+    query "REVOKE ALL PRIVILEGES ON \`$D\`.* FROM '$A'@'%'" || return 1
+    [ -z "$G0" ] || query "$G0"
+}
 restore() {
-    local status=$?
+    local status=$? failed=
     trap - EXIT
     trap '' HUP INT TERM
-    own
-    case $? in
-        0) query "ALTER USER '$A'@'%' IDENTIFIED VIA mysql_native_password USING '$H'" && exit $status ;;
-        1) exit $status ;;
-    esac
-    echo "the temporary sign-in of '$A'@'%' was not taken back; the next import as it takes it back" >&2
+    if [ -n "$TEMPORARY" ]; then
+        query "DROP USER IF EXISTS '$A'@'%'" || failed=1
+    else
+        give_back_grant || failed=1
+        own
+        case $? in
+            0) query "ALTER USER '$A'@'%' IDENTIFIED VIA mysql_native_password USING '$H'" || failed=1 ;;
+            2) failed=1 ;;
+        esac
+    fi
+    [ -z "$failed" ] && exit $status
+    echo "the temporary sign-in or grant of '$A'@'%' on '$D' was not taken back; the next import as it takes them back" >&2
     exit 1
 }
-exec 9>@LOCK@ && flock -w 600 9 || { echo "another import as '$A'@'%' is still running" >&2; exit 1; }
-own || { echo "refused: '$A'@'%' does not exist or does not sign in with mysql_native_password" >&2; exit 1; }
+exec 9>@LOCK@ && flock -w 600 9 || { echo "another import into '$D' or as its account is still running" >&2; exit 1; }
+if [ -z "$A" ]; then
+    TEMPORARY=1
+    A=pa.import.$(tr -dc a-f0-9 </dev/urandom | head -c 16)
+else
+    own || { echo "refused: '$A'@'%' does not exist or does not sign in with mysql_native_password" >&2; exit 1; }
+    grant || { echo "the grants of '$A'@'%' could not be read" >&2; exit 1; }
+    G0=$G
+fi
 T=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 32)
 trap restore EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-printf "ALTER USER '%s'@'%%' IDENTIFIED VIA mysql_native_password USING '%s' OR mysql_native_password USING PASSWORD('%s')" "$A" "$H" "$T" | MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mariadb -uroot || exit
-@STREAM@ | MYSQL_PWD="$T" mariadb --sandbox --user="$A" -- @DATABASE@'''
+if [ -n "$TEMPORARY" ]; then
+    printf "CREATE USER '%s'@'%%' IDENTIFIED BY '%s'" "$A" "$T" | secret || exit
+else
+    printf "ALTER USER '%s'@'%%' IDENTIFIED VIA mysql_native_password USING '%s' OR mysql_native_password USING PASSWORD('%s')" "$A" "$H" "$T" | secret || exit
+fi
+GRANTED=1
+query "GRANT ALL PRIVILEGES ON \`$D\`.* TO '$A'@'%'" || exit
+[ -n "$TEMPORARY" ] || { grant || exit; GSET=$G; }
+@STREAM@ | MYSQL_PWD="$T" mariadb --sandbox --user="$A" -- "$D"'''
 
 MODSECURITY_CHECK_SCRIPT = '''T=$1
 nginx -t -q -c "$T/nginx.conf" || exit
@@ -315,17 +353,20 @@ def definer(user):
     return f'`{user}`@`%`'
 
 
-def schema_rewrite(source, target, account):
-    """sed renaming the schema and giving every DEFINER to `account`, on schema lines only, so a data row holding
-    `source.` survives."""
+def schema_rewrite(source, target):
+    """sed renaming the schema and giving every DEFINER to the import's account `$A`, on schema lines only, so a data
+    row holding `source.` survives."""
     replacement = target.replace('\\', '\\\\').replace('&', '\\&').replace('/', '\\/')
     pattern = preg_quote(source)
     expressions = [
         f's/`{pattern}`\\./`{replacement}`./g',
         f's/\\b{pattern}\\./{replacement}./g',
-        f's/{ANY_DEFINER}/DEFINER={definer(account)}/g',
+        f's/{ANY_DEFINER}/DEFINER={definer(ACCOUNT_WORD)}/g',
     ]
-    return 'sed' + ''.join(' -e ' + escapeshellarg(f'/^INSERT INTO /!{{/^(/!{expression}}}') for expression in expressions)
+    return 'sed' + ''.join(
+        ' -e ' + escapeshellarg(f'/^INSERT INTO /!{{/^(/!{expression}}}').replace(ACCOUNT_WORD, '\'"$A"\'')
+        for expression in expressions
+    )
 
 
 def sites_db_dump(name, only):
@@ -339,22 +380,24 @@ def sites_db_restore(name):
 
 
 def import_as(account, name, stream):
-    """`stream` loaded into `name` signed in as `account` with a password made here for this import, which the trap
-    takes back however the script ends; root only reads and sets the account's sign-in."""
+    """`stream` loaded into `name` as `account`, which gets a password made here and `ALL PRIVILEGES` on `name` for
+    this import only; the trap puts back its sign-in and its grant on `name` as they are by then. With no `account` a
+    temporary one is made and dropped, so what it defined is left with a definer that no longer exists."""
+    lock = f'{IMPORT_LOCK_DIR}/panelalpha-sites-db-import-' + (account or f'database-{name}')
     return (IMPORT_SCRIPT
             .replace('@ACCOUNT@', escapeshellarg(account))
-            .replace('@LOCK@', escapeshellarg(f'{IMPORT_LOCK_DIR}/panelalpha-sites-db-import-{account}'))
+            .replace('@LOCK@', escapeshellarg(lock))
             .replace('@STREAM@', stream)
             .replace('@DATABASE@', escapeshellarg(name)))
 
 
 def sites_db_copy(source, target, only, account):
     dump = 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" ' + sites_db_dump(source, only)
-    return import_as(account, target, f'{dump} | {schema_rewrite(source, target, account)}')
+    return import_as(account, target, f'{dump} | {schema_rewrite(source, target)}')
 
 
 def sites_db_restore_copy(source, target, account):
-    return import_as(account, target, schema_rewrite(source, target, account))
+    return import_as(account, target, schema_rewrite(source, target))
 
 
 def sites_db_drop_table(name, only):
@@ -366,9 +409,11 @@ ACTIONS = {
     'sitesDbCacheSizes': in_service(SITES_DB, nothing, lambda context: ['sh', '-c', SITES_DB_CACHE_SIZES]),
     'sitesDbDump': sites_db(reads(database, values.optional(table)), sites_db_dump),
     'sitesDbRestore': sites_db(database, sites_db_restore, stdin=dockerapi.CLIENT),
-    'sitesDbCopy': sites_db_import(reads(database, database, values.optional(table), import_account), sites_db_copy),
+    'sitesDbCopy': sites_db_import(
+        reads(database, database, values.optional(table), values.optional(import_account)), sites_db_copy,
+    ),
     'sitesDbRestoreCopy': sites_db_import(
-        reads(database, database, import_account), sites_db_restore_copy, stdin=dockerapi.CLIENT,
+        reads(database, database, values.optional(import_account)), sites_db_restore_copy, stdin=dockerapi.CLIENT,
     ),
     'sitesDbDropTable': sites_db(reads(database, table), sites_db_drop_table),
     'nginxConfigTest': fixed(SITES_HTTP, 'nginx', '-t', on_host=True),

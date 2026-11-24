@@ -148,27 +148,36 @@ class Mysql
         $this->runInCore($this->sitesDb()->sitesDbCopy($from, $to, $table, $account->user), $failurePrefix);
     }
 
-    /** The account a copy into $database imports as: the application database's, else the one user granted on it. */
+    /**
+     * The account a copy into $database imports as: the application database's own; else of $owner's users granted on
+     * it the one named like it, or the first by name; a temporary one when none is.
+     */
     public function importAccount(User $owner, string $database): ImportAccount
     {
         if ($database === AppDatabase::nameFor($owner)) {
             return new ImportAccount($database);
         }
 
+        $granted = $this->usersGrantedOn($owner, $database);
+        if ($granted === []) {
+            return ImportAccount::temporary();
+        }
+
+        return new ImportAccount(in_array($database, $granted, true) ? $database : $granted[0]);
+    }
+
+    /** @return list<string> sorted by name */
+    private function usersGrantedOn(User $owner, string $database): array
+    {
         $granted = [];
         foreach ($owner->mysqlUsers()->pluck('user') as $user) {
             if (is_string($user) && isset($this->privileges()->showPrivileges($user)[$database])) {
                 $granted[] = $user;
             }
         }
-        if (count($granted) !== 1) {
-            throw new RuntimeException(
-                "Database '{$database}' cannot be copied into: a copy is imported as the database's one MariaDB account, "
-                    .'and '.count($granted).' of the project\'s accounts are granted on it.'
-            );
-        }
+        sort($granted, SORT_STRING);
 
-        return new ImportAccount($granted[0]);
+        return $granted;
     }
 
     public function dropTableInSitesDb(string $database, string $table): void

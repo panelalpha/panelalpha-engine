@@ -2,13 +2,15 @@
 
 namespace App\System\Services\Mysql;
 
-/** The target's own MariaDB account a copy's import signs in as, so the stream can do only what that account can. */
+/** The MariaDB account a copy's import signs in as, so the stream can do only what that account can on the target. */
 final readonly class ImportAccount
 {
-    public function __construct(public string $user)
+    /** An empty $user asks sites-db for an account of its own, made and dropped around the import. */
+    public function __construct(public string $user) {}
+
+    /** For a database no account of its project is granted on. */
+    public static function temporary(): self
     {
-        if ($user === '') {
-            throw new \RuntimeException('A database copy imports as a named account');
-        }
+        return new self('');
     }
 }

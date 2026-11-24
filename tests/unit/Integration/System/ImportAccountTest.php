@@ -10,7 +10,7 @@ use PDO;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
-/** Which account a copy into a project's database is imported as; no password is ever involved. */
+/** Which account a copy into a project's database is imported as; no password is ever involved, and no database is refused one. */
 class ImportAccountTest extends TestCase
 {
     use InMemoryDatabase;
@@ -38,25 +38,21 @@ class ImportAccountTest extends TestCase
         $this->assertSame('bob_wp', $account->user);
     }
 
-    public function test_a_database_with_no_or_several_granted_accounts_is_refused(): void
+    public function test_a_database_no_account_is_granted_on_is_imported_as_a_temporary_account(): void
     {
         $bob = $this->projectWithUsers('bob_wp', 'bob_shop');
-        foreach ([[], ['bob_wp' => ['bob_wp' => 'ALL PRIVILEGES'], 'bob_shop' => ['bob_wp' => 'SELECT']]] as $grants) {
-            try {
-                $this->mysql($grants)->importAccount($bob, 'bob_wp');
-                $this->fail('a database without exactly one account was given one');
-            } catch (\RuntimeException $e) {
-                $this->assertStringContainsString("Database 'bob_wp' cannot be copied into", $e->getMessage());
-                $this->assertStringContainsString(count($grants).' of the project', $e->getMessage());
-            }
-        }
+
+        $this->assertSame('', $this->mysql(['bob_shop' => ['bob_shop' => 'ALL PRIVILEGES']])->importAccount($bob, 'bob_wp')->user);
+        $this->assertSame('', ImportAccount::temporary()->user);
     }
 
-    public function test_an_account_without_a_name_is_refused(): void
+    public function test_of_several_granted_accounts_the_one_named_like_the_database_is_chosen_else_the_first_by_name(): void
     {
-        $this->expectException(\RuntimeException::class);
+        $bob = $this->projectWithUsers('bob_zed', 'bob_wp', 'bob_shop');
+        $all = ['bob_wp' => 'ALL PRIVILEGES'];
 
-        new ImportAccount('');
+        $this->assertSame('bob_wp', $this->mysql(['bob_zed' => $all, 'bob_wp' => ['bob_wp' => 'SELECT'], 'bob_shop' => $all])->importAccount($bob, 'bob_wp')->user);
+        $this->assertSame('bob_shop', $this->mysql(['bob_zed' => $all, 'bob_shop' => $all])->importAccount($bob, 'bob_wp')->user);
     }
 
     private function projectWithUsers(string ...$users): User

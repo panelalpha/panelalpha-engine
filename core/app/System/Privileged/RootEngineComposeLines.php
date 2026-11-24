@@ -26,7 +26,7 @@ final class RootEngineComposeLines
         return $this->line(__FUNCTION__, [self::database($database)]);
     }
 
-    /** Imported as $account, which every DEFINER is rewritten to, under a sign-in sites-db makes and takes back. */
+    /** Imported as $account, or an account sites-db makes when it is empty; every DEFINER is rewritten to it. */
     public function sitesDbCopy(string $from, string $to, ?string $table, string $account): string
     {
         return $this->line(__FUNCTION__, [
@@ -66,6 +66,9 @@ final class RootEngineComposeLines
 
     private static function account(string $name): string
     {
+        if ($name === '') {
+            return $name;
+        }
         if (strtolower($name) === 'root') {
             throw InvalidArgument::of('import account', $name);
         }

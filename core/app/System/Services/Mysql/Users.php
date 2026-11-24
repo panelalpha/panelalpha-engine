@@ -21,6 +21,16 @@ class Users
         return ! empty($result);
     }
 
+    /** Whether $name exists and signs in first with mysql_native_password, the method a copy's import can add to. */
+    public function signsInNatively(string $name): bool
+    {
+        $conn = new Connection($this->pdo);
+        $query = "SELECT JSON_VALUE(Priv, '$.plugin') AS plugin FROM mysql.global_priv WHERE User = ? AND Host = ?";
+        $row = $conn->selectOne($query, [$name, $this->host]);
+
+        return is_object($row) && ($row->plugin ?? null) === 'mysql_native_password';
+    }
+
     public function createUser(string $name, string $password): void
     {
         $conn = new Connection($this->pdo);

@@ -27,7 +27,7 @@ class DatabaseRenamer
         $moved = [];
 
         try {
-            $moved = $this->copy($user, $oldName, $newName, $grants);
+            $moved = $this->copy($user, $oldName, $newName, array_keys($grants));
             $this->moveGrants($grants, $oldName, $newName);
         } catch (\Throwable $e) {
             throw $this->undo($grants, $oldName, $newName, $moved, $e);
@@ -48,17 +48,15 @@ class DatabaseRenamer
      * A database of only base tables moves by metadata alone, in one atomic statement. Anything else -- a view,
      * trigger, routine or event -- cannot, and is streamed over by a dump and an import as the database's own account.
      *
-     * @param  array<string, string>  $grants  the project's MySQL users granted on $from => their privileges
+     * @param  list<string>  $users  the project's MySQL users granted on $from
      * @return list<string> the tables moved out of $from, none for a copy
      */
-    private function copy(User $owner, string $from, string $to, array $grants): array
+    private function copy(User $owner, string $from, string $to, array $users): array
     {
         if ($this->mysql->databases()->hasObjectsBeyondTables($from)) {
             $account = $this->mysql->importAccount($owner, $from);
-            $this->closeToUsers($from, array_keys($grants));
-            $this->mysql->databases()->createDatabase($to);
-            $this->mysql->privileges()->updatePrivileges($account->user, $to, $grants[$account->user]);
-            $this->copier->copyInto($from, $to, $account);
+            $this->closeToUsers($from, $users);
+            $this->copier->copyDatabase($from, $to, $account);
 
             return [];
         }

@@ -64,6 +64,7 @@ class ProjectPushRequest extends FormRequest
             }
 
             $this->assertTablesApplicable($from);
+            $this->assertImportAccounts($from, $to);
         });
     }
 
@@ -91,6 +92,21 @@ class ProjectPushRequest extends FormRequest
         }
 
         $problems = Projects::tableProblems($from, $tables, app(System::class)->mysql()->tables());
+        if ($problems !== []) {
+            throw ProblemException::of($problems);
+        }
+    }
+
+    private function assertImportAccounts(User $from, User $to): void
+    {
+        $tables = $this->input('tables');
+        $problems = Projects::importAccountProblems(
+            $from,
+            $to,
+            $this->boolean('databases', true),
+            is_array($tables) ? array_values($tables) : null,
+            app(System::class)->mysql(),
+        );
         if ($problems !== []) {
             throw ProblemException::of($problems);
         }

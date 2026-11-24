@@ -53,29 +53,28 @@ class ProjectsPushRollbackTest extends TestCase
         $this->assertFileDoesNotExist($this->rollbackDir().'/live_wp.sql.gz');
     }
 
-    public function test_a_push_into_a_database_no_account_of_the_target_is_granted_on_touches_nothing(): void
+    public function test_a_push_and_a_table_push_load_as_the_target_account_chosen_for_the_database(): void
     {
-        $this->assertPushTouchesNothingWithoutAnAccount(null);
-    }
+        $cases = [
+            'one account' => [['live_wp' => ['live_wp' => 'ALL PRIVILEGES']], ' live_wp'],
+            'none: a temporary one' => [[], " ''"],
+            'two: the one named like the database' => [['live_wp' => ['live_wp' => 'SELECT'], 'live_a' => ['live_wp' => 'ALL PRIVILEGES']], ' live_wp'],
+            'two: the first by name' => [['live_b' => ['live_wp' => 'SELECT'], 'live_a' => ['live_wp' => 'SELECT']], ' live_a'],
+        ];
+        $this->stagingPair();
+        $live = User::findByUsernameOrFail('live');
+        $live->mysqlUsers()->create(['user' => 'live_a']);
+        $live->mysqlUsers()->create(['user' => 'live_b']);
+        foreach ($cases as $case => [$privileges, $suffix]) {
+            foreach ([null, [['database' => 'stg_wp', 'name' => 'wp_posts']]] as $tables) {
+                $record = $this->recorder(failStart: true, knownAccounts: false);
+                $record->privileges = $privileges;
 
-    public function test_a_table_push_into_a_database_no_account_of_the_target_is_granted_on_touches_nothing(): void
-    {
-        $this->assertPushTouchesNothingWithoutAnAccount([['database' => 'stg_wp', 'name' => 'wp_posts']]);
-    }
+                $this->pushFails($record, 'start exploded', $tables);
 
-    public function test_a_push_and_a_table_push_load_as_the_one_target_account_granted_on_the_database(): void
-    {
-        foreach ([null, [['database' => 'stg_wp', 'name' => 'wp_posts']]] as $tables) {
-            $record = $this->recorder(failStart: true, knownAccounts: false);
-            $record->privileges = ['live_wp' => ['live_wp' => 'ALL PRIVILEGES']];
-            if ($tables === null) {
-                $this->stagingPair();
+                $this->assertStringEndsWith($suffix, $record->scripts[0], $case);
+                $this->assertStringContainsString(' compose.sitesDbCopy -- ', $record->scripts[0], $case);
             }
-
-            $this->pushFails($record, 'start exploded', $tables);
-
-            $this->assertStringEndsWith(' live_wp', $record->scripts[0]);
-            $this->assertStringContainsString(' compose.sitesDbCopy -- ', $record->scripts[0]);
         }
     }
 
@@ -191,21 +190,6 @@ class ProjectsPushRollbackTest extends TestCase
         }
 
         $this->fail('the push should have failed');
-    }
-
-    /** @param  list<array{database: string, name: string}>|null  $tables */
-    private function assertPushTouchesNothingWithoutAnAccount(?array $tables): void
-    {
-        $record = $this->recorder(knownAccounts: false);
-        $this->stagingPair();
-
-        $this->pushFails($record, "Database 'live_wp' cannot be copied into", $tables);
-
-        $this->assertSame([], $record->scripts);
-        $this->assertSame([], $record->deleted);
-        $this->assertSame([], $record->restores);
-        $this->assertFileDoesNotExist($this->rollbackDir().'/live_wp.sql.gz');
-        $this->assertFileDoesNotExist($this->rollbackDir().'/live_wp.wp_posts.sql.gz');
     }
 
     private function rollbackDir(): string

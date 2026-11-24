@@ -81,24 +81,20 @@ class DatabaseCopierTest extends TestCase
         $this->assertSame([['bob_wp', 1]], $record->imports);
     }
 
-    public function test_a_project_copy_refuses_a_database_without_exactly_one_copied_account_to_import_as(): void
+    public function test_a_project_copy_imports_a_database_without_one_copied_account_as_the_chosen_or_a_temporary_one(): void
     {
-        foreach (['no account' => [], 'two accounts' => ['alice_wp' => 'ALL PRIVILEGES']] as $case => $sharedGrant) {
+        foreach (['no account' => [[], "''"], 'two accounts' => [['alice_wp' => 'ALL PRIVILEGES'], 'bob_wp']] as $case => [$sharedGrant, $account]) {
             $source = $this->sourceWithDatabaseAndUser('alice');
             if ($sharedGrant !== []) {
-                $source->mysqlUsers()->create(['user' => 'alice_wp2']);
+                $source->mysqlUsers()->create(['user' => 'alice_a']);
             }
             $this->makeUser('bob', ['mysql_prefix' => 'bob_']);
-            $record = $this->recorder(sourcePrivileges: $case === 'no account' ? [] : $sharedGrant);
+            $record = $this->recorder(sourcePrivileges: $sharedGrant);
             $copier = new DatabaseCopier($this->mysqlDouble($record, sharedSourcePrivileges: $sharedGrant !== []));
 
-            try {
-                $copier->copyProjectDatabases($source->refresh(), User::findByUsernameOrFail('bob'), fn (string $line) => null);
-                $this->fail("{$case}: the copy ran without one account to import as");
-            } catch (\RuntimeException $e) {
-                $this->assertStringContainsString("Database 'bob_wp' cannot be copied", $e->getMessage(), $case);
-            }
-            $this->assertSame([], $record->scripts, $case);
+            $copier->copyProjectDatabases($source->refresh(), User::findByUsernameOrFail('bob'), fn (string $line) => null);
+
+            $this->assertStringEndsWith(" alice_wp bob_wp '' {$account}", $record->scripts[0], $case);
 
             User::query()->delete();
         }

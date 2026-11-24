@@ -24,6 +24,7 @@ final class SitesDbBrokerTest extends TestCase
             "{$client} compose.sitesDbCopy -- ".self::ENGINE." alice_wp bob_wp '' bob_app",
             "{$client} compose.sitesDbCopy -- ".self::ENGINE.' alice-wp bob-wp wp_posts bob_app',
             "{$client} compose.sitesDbRestoreCopy -- ".self::ENGINE.' alice_wp bob_wp bob_app',
+            "{$client} compose.sitesDbCopy -- ".self::ENGINE." alice_wp bob_wp '' ''",
             "{$client} compose.sitesDbDropTable -- ".self::ENGINE.' bob_wp wp_posts',
         ], [
             $lines->sitesDbDump('alice_wp', null),
@@ -32,6 +33,7 @@ final class SitesDbBrokerTest extends TestCase
             $lines->sitesDbCopy('alice_wp', 'bob_wp', null, 'bob_app'),
             $lines->sitesDbCopy('alice-wp', 'bob-wp', 'wp_posts', 'bob_app'),
             $lines->sitesDbRestoreCopy('alice_wp', 'bob_wp', 'bob_app'),
+            $lines->sitesDbCopy('alice_wp', 'bob_wp', null, ''),
             $lines->sitesDbDropTable('bob_wp', 'wp_posts'),
         ]);
     }
@@ -47,7 +49,6 @@ final class SitesDbBrokerTest extends TestCase
         yield 'import account with a backtick' => [fn (RootEngineComposeLines $l) => $l->sitesDbCopy('a', 'b', null, 'b`u')];
         yield 'import account with a quote' => [fn (RootEngineComposeLines $l) => $l->sitesDbCopy('a', 'b', null, "b'u")];
         yield 'import account that is root' => [fn (RootEngineComposeLines $l) => $l->sitesDbCopy('a', 'b', null, 'root')];
-        yield 'empty import account' => [fn (RootEngineComposeLines $l) => $l->sitesDbCopy('a', 'b', null, '')];
         yield 'restored copy into a database with a quote' => [fn (RootEngineComposeLines $l) => $l->sitesDbRestoreCopy('a', "b'", 'b_u')];
         yield 'restored copy import account with a backtick' => [fn (RootEngineComposeLines $l) => $l->sitesDbRestoreCopy('a', 'b', 'b`u')];
         yield 'restored copy import account that is root' => [fn (RootEngineComposeLines $l) => $l->sitesDbRestoreCopy('a', 'b', 'Root')];
