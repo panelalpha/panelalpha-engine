@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform;
 
+use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
 use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
@@ -64,7 +65,8 @@ final class PlatformCandidates
 
     /**
      * The recipes a failed start falls back through, in the order a deploy tries them: the detected ones, by priority,
-     * without the placeholder, which runs nothing, Railpack, or a static site below a Dockerfile or Compose file.
+     * without the placeholder, which runs nothing, Railpack, a static site below a Dockerfile or Compose file, or
+     * anything below a Compose file that starts more than one service.
      * None when a source recipe names the platform, or when an app config chose what runs without naming one
      * ({@see choosesWhatRuns()}).
      *
@@ -90,10 +92,29 @@ final class PlatformCandidates
             if (! $buildsItself || $candidate['strategy'] !== Strategies::STATIC) {
                 $ids[] = $candidate['id'];
             }
+            if ($candidate['strategy'] === Strategies::COMPOSE && self::composeStartsSeveral($candidate['id'], $context, $directory)) {
+                break;
+            }
             $buildsItself = $buildsItself || in_array($candidate['strategy'], self::BUILDS_ITSELF, true);
         }
 
         return $ids;
+    }
+
+    /** Whether the compose file this recipe detected starts more than one service, which no recipe below it runs. */
+    private static function composeStartsSeveral(string $id, ProjectContext $context, ?string $directory): bool
+    {
+        $manifest = PlatformRegistry::find($id, $directory);
+        $matcher = new PlatformMatcher(ProbeRegistry::all());
+        if ($manifest === null || ! $matcher->matches($manifest->detect, $context)) {
+            return false;
+        }
+        $path = $matcher->lastProbeData()['compose_path'] ?? null;
+        $prefix = $context->projectDir.'/';
+        $raw = is_string($path) && str_starts_with($path, $prefix) ? $context->contents(substr($path, strlen($prefix))) : null;
+        $profiles = ComposeFileInspector::profilesFromEnvFile($context->contents('.env'));
+
+        return $raw !== null && ComposeFileInspector::startsSeveralServicesYaml($raw, $profiles);
     }
 
     /**

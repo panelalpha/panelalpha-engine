@@ -283,6 +283,24 @@ class RecipeFallbackTest extends TestCase
         $this->assertSame(1, $result['exit_code']);
     }
 
+    /** A compose app with its database that fails to start is not run without the database by its Dockerfile. */
+    public function test_a_failed_compose_file_with_a_datastore_is_not_replaced_by_its_dockerfile(): void
+    {
+        foreach (['composer.json', 'index.php', 'package.json', 'server.js'] as $file) {
+            unlink($this->dir . '/' . $file);
+        }
+        file_put_contents($this->dir . '/Dockerfile', "FROM python:3.12-slim\nCOPY . /app\nCMD [\"python\", \"/app/app.py\"]\n");
+        file_put_contents($this->dir . '/docker-compose.yml', "services:\n  app:\n    build: .\n    depends_on: [db]\n  db:\n    image: postgres:16\n");
+        $this->model->setDetails(['deploy_platform' => 'compose']);
+        $error = 'environment variable "DB_PASSWORD" required by secret "project_db_password" is not set';
+
+        $result = $this->fallback()->start($this->starts([$this->failed($error), $this->ok()]), $this->prepare());
+
+        $this->assertSame([null], $this->started);
+        $this->assertSame(0, $this->prepared);
+        $this->assertSame($error, $result['stderr']);
+    }
+
     /** Falling back to the recipe detection picks first is not worth remembering. */
     public function test_a_start_on_the_detected_recipe_forgets_an_older_fallback(): void
     {

@@ -44,6 +44,18 @@ class ComposeFileInspectorShapesTest extends TestCase
         $this->assertNull(ComposeFileInspector::startsNothingReasonYaml("include:\n  - stack/compose.yaml\n"));
     }
 
+    public function test_only_the_services_compose_up_starts_count_as_several(): void
+    {
+        $withDb = "services:\n  app:\n    build: .\n  db:\n    image: postgres:16\n";
+
+        $this->assertTrue(ComposeFileInspector::startsSeveralServicesYaml($withDb));
+        $this->assertFalse(ComposeFileInspector::startsSeveralServicesYaml("services:\n  app:\n    build: .\n  junk: hello\n"));
+        $this->assertFalse(ComposeFileInspector::startsSeveralServicesYaml(str_replace("postgres:16\n", "postgres:16\n    profiles: [db]\n", $withDb)));
+        $this->assertTrue(ComposeFileInspector::startsSeveralServicesYaml(str_replace("postgres:16\n", "postgres:16\n    profiles: [db]\n", $withDb), ['db']));
+        $this->assertTrue(ComposeFileInspector::startsSeveralServicesYaml("include:\n  - stack/compose.yaml\nservices:\n  app:\n    build: .\n"));
+        $this->assertFalse(ComposeFileInspector::startsSeveralServicesYaml("services: [\n"));
+    }
+
     public function test_a_service_that_is_not_a_map_does_not_count_as_a_datastore(): void
     {
         $this->assertTrue(ComposeFileInspector::isSidecarsOnlyComposeYaml("services:\n  junk: hello\n  db:\n    image: postgres:16\n"));

@@ -21,6 +21,26 @@ use Tests\Support\TestNetwork;
  */
 class PlatformCandidatesTest extends TestCase
 {
+    private const APP_WITH_DATABASE = <<<'YAML'
+        services:
+          app:
+            build: .
+            ports:
+              - "8080:8080"
+            environment:
+              DATABASE_URL: postgres://app@db/app
+            depends_on: [db]
+          db:
+            image: postgres:16
+            environment:
+              POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+            secrets: [db_password]
+        secrets:
+          db_password:
+            environment: DB_PASSWORD
+
+        YAML;
+
     private string $tmpDir = '';
 
     protected function setUp(): void
@@ -286,6 +306,39 @@ class PlatformCandidatesTest extends TestCase
         $this->writeFile('docker-compose.yml', "services:\n  web:\n    build: .\n    ports:\n      - \"80:80\"\n");
 
         $this->assertSame(['compose', 'dockerfile'], PlatformCandidates::fallbackOrder(ProjectContext::at($this->tmpDir, null)));
+    }
+
+    /**
+     * A compose file that starts its app with a datastore is the whole deployment: a recipe below it would run the app
+     * alone, so a failed start of the compose file is the deploy's result.
+     */
+    public function test_a_compose_file_with_a_datastore_is_the_last_recipe(): void
+    {
+        $this->writeFile('Dockerfile', "FROM python:3.12-slim\nCOPY . /app\nCMD [\"python\", \"/app/app.py\"]\n");
+        $this->writeFile('app.py', 'print("hi")');
+        $this->writeFile('requirements.txt', "pg8000\n");
+        $this->writeFile('docker-compose.yml', self::APP_WITH_DATABASE);
+
+        $this->assertSame(['compose'], PlatformCandidates::fallbackOrder(ProjectContext::at($this->tmpDir, null)));
+        $this->assertSame(['compose', 'dockerfile', 'python'], array_slice(array_column($this->candidates(), 'id'), 0, 3));
+    }
+
+    /** A service `docker compose up` does not start is not part of what a recipe below would drop. */
+    public function test_a_compose_file_whose_other_services_sit_behind_a_profile_keeps_its_fallbacks(): void
+    {
+        $this->writeFile('Dockerfile', "FROM nginx:1.27-alpine\n");
+        $this->writeFile('docker-compose.yml', "services:\n  app:\n    build: .\n    ports:\n      - \"8080:80\"\n  db:\n    image: postgres:16\n    profiles: [tools]\n");
+
+        $this->assertSame(['compose', 'dockerfile'], PlatformCandidates::fallbackOrder(ProjectContext::at($this->tmpDir, null)));
+    }
+
+    /** A workstation compose is not the recipe at all: the Dockerfile runs, keeping the compose file's datastores. */
+    public function test_a_workstation_compose_with_a_datastore_leaves_the_dockerfile_first(): void
+    {
+        $this->writeFile('Dockerfile', "FROM nginx:1.27-alpine\n");
+        $this->writeFile('docker-compose.yml', str_replace("    build: .\n", "    build: .\n    volumes:\n      - .:/app\n", self::APP_WITH_DATABASE));
+
+        $this->assertSame(['dockerfile'], PlatformCandidates::fallbackOrder(ProjectContext::at($this->tmpDir, null)));
     }
 
     /** Documents claimed first keep the recipes below them: a named Dockerfile ranks under the static site. */

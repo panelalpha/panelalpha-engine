@@ -317,6 +317,29 @@ class ComposeFileInspector
     }
 
     /**
+     * Whether `docker compose up` starts more than one service from this file, as an app with its datastore does; a
+     * file that includes others counts as one that does.
+     *
+     * @param  list<string>  $activeProfiles  COMPOSE_PROFILES the repository sets
+     */
+    public static function startsSeveralServicesYaml(string $raw, array $activeProfiles = []): bool
+    {
+        $parsed = self::parseOrNull($raw);
+        if ($parsed !== null && isset($parsed['include'])) {
+            return true;
+        }
+        $started = 0;
+        foreach (self::servicesOf($parsed) ?? [] as $service) {
+            $profiles = is_array($service) && is_array($service['profiles'] ?? null) ? $service['profiles'] : [];
+            if (is_array($service) && ($profiles === [] || array_intersect($profiles, $activeProfiles) !== [])) {
+                $started++;
+            }
+        }
+
+        return $started > 1;
+    }
+
+    /**
      * COMPOSE_PROFILES as the repository's committed `.env` sets it.
      *
      * @return list<string>
