@@ -40,7 +40,7 @@ Connect then shows "Engine connected". A code works once. If it has expired or b
 
 | Option | What it does |
 |---|---|
-| `--ip=203.0.113.10` | The address the engine is known by, when the server's main IPv4 is not the public one. It must be a public address. |
+| `--ip=203.0.113.10` | The address PanelAlpha Connect shows for the engine, when it should not be the server's main IPv4. Any IP works, a private one behind NAT too: Connect never connects to the engine. |
 | `--replace` | Connect an engine that is already connected. The old connection is dropped only once the new one works. |
 
 ### Install and connect in one step
@@ -84,7 +84,7 @@ Stops reporting and forgets the connection immediately, then tells Connect. It w
 | Message | What to do |
 |---|---|
 | `The first report to PanelAlpha Connect failed` | The server cannot reach `https://hub.panelalpha.com`, or its clock is off. Fix that, create a new code and connect again. |
-| `… is not a public address` | The server's main address is private (NAT). Pass the public one with `--ip`. |
+| `… is not an IP address` | `--ip` names a host, not an address. Pass an IP, or leave `--ip` out. |
 | `That code is not valid any more` | The code expired, was cancelled or was already used. Create a new one in Connect. |
 | `The code expired` | Create a new code in Connect and run the command within 10 minutes. |
 | `Denied on the Hub.` | The code was cancelled in Connect. Create a new one. |

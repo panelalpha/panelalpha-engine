@@ -68,12 +68,13 @@ class HubPrimitivesTest extends TestCase
         SpkiPin::fromFile('/nonexistent/server.cert');
     }
 
-    public function test_public_addresses_pass(): void
+    /** The Hub only shows the address (push): any IP passes, a private one behind NAT too. */
+    public function test_any_ip_address_passes_and_a_host_name_does_not(): void
     {
-        foreach ([TestNetwork::routable(34), TestNetwork::routable(8), '2a01:4f8::10', '2606:4700::1111'] as $ip) {
+        foreach ([TestNetwork::routable(34), TestNetwork::private(5), TestNetwork::CGNAT, '2a01:4f8::10', 'fd00::1'] as $ip) {
             $this->assertNull(EngineAddress::problem($ip), $ip);
         }
-        foreach (['example.com', TestNetwork::DOCUMENTATION_3, TestNetwork::DOCUMENTATION_1, TestNetwork::ANY, TestNetwork::MULTICAST, '2001:db8::1', 'ff02::1'] as $ip) {
+        foreach (['example.com', 'engine.local', '10.0.0', ''] as $ip) {
             $this->assertNotNull(EngineAddress::problem($ip), $ip);
         }
     }

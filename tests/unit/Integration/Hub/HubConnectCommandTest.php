@@ -317,13 +317,25 @@ class HubConnectCommandTest extends HubTestCase
         $this->assertSame('2a01:4f8::10', $this->sentTo('/api/engine/v1/connect-sessions')['ip']);
     }
 
+    /** The Hub never connects to the engine (push), so an engine behind NAT sends its private address as it is. */
     #[DataProvider('notPublic')]
-    public function test_private_loopback_and_link_local_addresses_are_refused_locally(string $ip): void
+    public function test_a_private_address_is_sent_as_it_is(string $ip): void
+    {
+        $this->fakeHub([$this->error('access_denied')]);
+
+        $this->artisan('hub:connect', ['code' => self::CODE, '--ip' => $ip])
+            ->doesntExpectOutputToContain('is not a public address')
+            ->assertExitCode(1);
+
+        $this->assertSame($ip, $this->sentTo('/api/engine/v1/connect-sessions')['ip']);
+    }
+
+    public function test_a_host_name_is_refused_locally(): void
     {
         Http::fake();
 
-        $this->artisan('hub:connect', ['code' => self::CODE, '--ip' => $ip])
-            ->expectsOutputToContain('is not a public address')
+        $this->artisan('hub:connect', ['code' => self::CODE, '--ip' => 'engine.example.com'])
+            ->expectsOutputToContain('is not an IP address')
             ->assertExitCode(1);
 
         Http::assertNothingSent();

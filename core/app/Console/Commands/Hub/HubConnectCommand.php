@@ -36,7 +36,7 @@ class HubConnectCommand extends Command
 {
     protected $signature = 'hub:connect
                             {code : One-time code from Connect engine in PanelAlpha Connect}
-                            {--ip= : The public address PanelAlpha Connect reaches this engine at (default: the main IPv4)}
+                            {--ip= : The address PanelAlpha Connect shows for this engine (default: the main IPv4; a private one is fine, the Hub never connects to it)}
                             {--replace : Replace the current connection once the new one completes}';
 
     protected $description = 'Connect this engine to a PanelAlpha Connect account';
@@ -165,7 +165,7 @@ class HubConnectCommand extends Command
         $ip = $this->option('ip');
         $ip = is_string($ip) && trim($ip) !== '' ? trim($ip) : EngineAddress::default();
         if ($ip === null) {
-            throw new HubException('This engine has no main IPv4 on record. Pass its public address with --ip.');
+            throw new HubException('This engine has no main IPv4 on record. Pass its address with --ip.');
         }
         if (($problem = EngineAddress::problem($ip)) !== null) {
             throw new HubException($problem);
