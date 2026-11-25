@@ -176,7 +176,7 @@ pae connect
 | `أعدّ نفق Cloudflare لـ n8n.mydomain.com.` | إعداد DNS والنفق، وهي أيضاً طريقة التقديم من خادم خلف NAT. |
 | `كم كان الزيارات الأسبوع الماضي؟` | الاستهلاك والسجلات والحدود لذلك المشروع، وللخادم كله. |
 
-أمثلة أوفى: [ماذا تطلب](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). القائمة الكاملة لما يصل إليه مساعدك: [320 أداة](docs/04-connecting-your-ai/your-assistant.md).
+أمثلة أوفى: [ماذا تطلب](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). القائمة الكاملة لما يصل إليه مساعدك: [323 أداة](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 
