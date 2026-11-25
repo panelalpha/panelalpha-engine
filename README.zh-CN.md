@@ -38,7 +38,7 @@
 <p>
 <a href="#第-1-步在自己的-vps-上安装-engine"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="一行命令安装"></a>
 <a href="#第-1-步在自己的-vps-上安装-engine"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="支持的系统"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-320_tools-6f42c1" alt="320 个 MCP 工具"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-323_tools-6f42c1" alt="320 个 MCP 工具"></a>
 <a href="#许可证"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="加入 Discord"></a>
 </p>
