@@ -20,7 +20,7 @@ You need a VPS that meets all five:
 
 The installer checks the operating system and refuses anything else. It does not check the rest, so check them yourself.
 
-> **Why the VPS has to be brand new.** The installer takes the machine over: it installs Docker, a firewall and a watchdog, turns on disk quota and mounts `/home` with `nosuid,nodev` (see [Troubleshooting](#troubleshooting)), and it takes over how the machine looks up domain names. That is fine on an empty VPS and destructive on one already doing a job. Do not use your laptop, a VPS already running a website or control panel, or anything you would mind reinstalling.
+> **Why the VPS has to be brand new.** The installer takes the machine over: it installs Docker with the Sysbox runtime (0.7.2 or newer), a firewall and a watchdog, turns on disk quota and mounts `/home` with `nosuid,nodev` (see [Troubleshooting](#troubleshooting)), and it takes over how the machine looks up domain names. That is fine on an empty VPS and destructive on one already doing a job. Do not use your laptop, a VPS already running a website or control panel, or anything you would mind reinstalling.
 
 **With no public IPv4 address,** the engine still works, but the install command is different. Read [Troubleshooting](#troubleshooting) before you install.
 

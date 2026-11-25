@@ -99,6 +99,7 @@ A token you mint or change over the API stays within the token that makes the ca
 - It gets only what your token has: MCP only if your token has MCP, only the operations, MCP commands and projects your token is limited to, and an expiry no later than your token's. Asking for MCP your token lacks is refused with 403. Asking for more of the rest is refused with 422, naming the field.
 - Your token sees, changes, revokes and deletes only the tokens that stay within it, itself included. Any other token is refused with 403 and left out of the list.
 - Your token can narrow itself but never widen itself.
+- `routes` names at least one operation. An empty list is refused with 422. Leave it out or send `null` for every operation your token has, or revoke the token to stop it.
 - A token scoped to some projects is refused on these routes altogether.
 - Revoking a token does not revoke the tokens it minted; revoke those too.
 

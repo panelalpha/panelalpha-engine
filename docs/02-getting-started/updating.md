@@ -22,6 +22,7 @@ An update installs only a newer release than the one running. This holds for an 
 - The webserver for your sites is restarted only when its configuration changed.
 - The SFTP service is recreated only when the start-up script a release ships for it changed, so a fix to how uploads are written reaches a server on its own. An SFTP session that is open at that moment ends.
 - The engine's own certificate is not requested again unless it is due for renewal.
+- Container projects stop for a moment only when the update upgrades Sysbox, the runtime their containers run on. Those that were running start again on their own: [Before you update to 2.4](#before-you-update-to-24).
 - While the engine's database is being migrated, its scheduler and background workers wait, so no job runs new code against the old database.
 - The engine's own images are downloaded for the version being installed, and a newer build of them for the same version, such as one with operating system security fixes, is downloaded on the next update. An image is built on the server only when none is published for exactly that version's sources.
 
@@ -37,6 +38,18 @@ An update that fails after it started replacing the engine's files puts the prev
 Once the new release is running and has migrated, a later failure leaves the new release in place instead of taking the code back from under its database.
 
 Every update is recorded with the versions it moved between, how it ended and why. The engine information your assistant reads shows the last run. Its result is one of `installed`, `updated`, `up_to_date`, `refused`, `rolled_back` or `failed`.
+
+## Before you update to 2.4
+
+Read this if you update from 2.3 or earlier.
+
+- **The update takes longer.** It builds the engine's images again, which takes about 10 minutes. The engine is down for only a few seconds of that, and your sites keep running.
+- **Sysbox 0.7.2 or newer is required.** Older Sysbox releases have a security issue. The update installs 0.7.2 when the server has an older one, and checks the downloaded package against the checksum GitHub publishes for it. While Sysbox is upgraded, the container projects that are running stop and then start again, so their sites are offline for a moment. A project you stopped stays stopped, and every project still starts after a reboot. Traditional PHP hosting projects are not affected.
+- **Software that calls the engine's API** should check these changes:
+  - A deploy can now be `waiting`: the first deploy of an empty container project, until its files arrive: [How a deploy works](how-a-deploy-works.md).
+  - An API token's `routes` must name at least one operation. `"routes": []` is refused with 422; before, it meant every operation. Leave `routes` out or send `null` for every operation, or revoke the token to stop it.
+  - Limiting the operations of an older all-access (`*`) token keeps it to the REST API, and limiting its commands keeps it to MCP.
+  - A token can no longer be created or changed to reach more than the token that makes the call: [Configure the engine](configure-the-engine.md#from-the-api).
 
 ## Before you update to 2.3
 
@@ -98,13 +111,13 @@ It prints the running version, the newest release with the day it was published 
 curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
-It runs on its own for a few minutes and finishes with:
+It runs on its own for a few minutes, or about 10 when a release builds the engine's images again, and finishes with:
 
 ```text
 PanelAlpha engine has been successfully updated!
 ```
 
-While it runs, your AI assistant loses its connection for about a minute and reconnects on its own. The websites you host stay up throughout.
+While it runs, your AI assistant loses its connection for about a minute and reconnects on its own. The websites you host stay up throughout. Only when the update upgrades Sysbox do running container projects stop for a moment and start again.
 
 `pae system:update` starts the same update from the engine instead. It shows both versions, asks before it starts (`--force` does not), and runs in the background. `pae system:update --status` says how it ended.
 
