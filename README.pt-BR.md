@@ -174,7 +174,7 @@ Não há comandos para decorar, nem frases mágicas. Isto mostra o nível de det
 | `Configura um túnel Cloudflare para n8n.mydomain.com.` | DNS e túnel prontos, que é também como você serve de um servidor atrás de NAT. |
 | `Quanto tráfego tivemos na semana passada?` | Uso, logs e limites daquele projeto, e do servidor inteiro. |
 
-Mais exemplos prontos: [o que pedir](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). A lista completa do que seu assistente alcança: [320 ferramentas](docs/04-connecting-your-ai/your-assistant.md).
+Mais exemplos prontos: [o que pedir](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). A lista completa do que seu assistente alcança: [323 ferramentas](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 

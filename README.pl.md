@@ -174,7 +174,7 @@ Nie ma komend do nauczenia się i nie ma magicznych formułek. To przykłady poz
 | `Zrób tunel Cloudflare dla n8n.mydomain.com.` | DNS i tunel, czyli też sposób, żeby serwować stronę z serwera za NAT-em. |
 | `Ile ruchu mieliśmy w zeszłym tygodniu?` | Użycie, logi i limity tego projektu, i serwera jako całości. |
 
-Więcej przykładów: [o co poprosić](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Pełna lista tego, do czego asystent ma dostęp: [320 narzędzi](docs/04-connecting-your-ai/your-assistant.md).
+Więcej przykładów: [o co poprosić](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Pełna lista tego, do czego asystent ma dostęp: [323 narzędzi](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 

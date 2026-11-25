@@ -174,7 +174,7 @@ Geen commando's om te leren, en ook geen toverformules. Dit zijn voorbeelden van
 | `Zet een Cloudflare-tunnel op voor n8n.mydomain.com.` | DNS en tunnel geregeld, en zo serveer je ook vanaf een server achter NAT. |
 | `Hoeveel verkeer kregen we vorige week?` | Verbruik, logs en limieten voor dat project, en voor de hele server. |
 
-Meer uitgewerkte voorbeelden: [waar je om kunt vragen](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). De volledige lijst van wat je assistent kan bereiken: [320 tools](docs/04-connecting-your-ai/your-assistant.md).
+Meer uitgewerkte voorbeelden: [waar je om kunt vragen](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). De volledige lijst van wat je assistent kan bereiken: [323 tools](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 

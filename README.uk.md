@@ -174,7 +174,7 @@ pae connect
 | `Налаштуй тунель Cloudflare для n8n.mydomain.com.` | DNS і тунель налаштовано, і це ж спосіб віддавати сайт із сервера за NAT. |
 | `Скільки трафіку ми отримали минулого тижня?` | Використання, логи й ліміти цього проєкту, а також усього сервера. |
 
-Більше готових прикладів: [про що просити](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Повний перелік того, до чого має доступ ваш асистент: [320 інструментів](docs/04-connecting-your-ai/your-assistant.md).
+Більше готових прикладів: [про що просити](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Повний перелік того, до чого має доступ ваш асистент: [323 інструментів](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 

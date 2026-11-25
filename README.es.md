@@ -174,7 +174,7 @@ No hay comandos que aprender, ni frases mágicas. Esto solo muestra el nivel de 
 | `Monta un túnel de Cloudflare para n8n.mydomain.com.` | DNS y túnel configurados, que además es como sirves desde un servidor detrás de NAT. |
 | `¿Cuánto tráfico recibimos la semana pasada?` | Uso, logs y límites de ese proyecto, y del servidor entero. |
 
-Más ejemplos trabajados: [qué pedir](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). La lista completa de lo que tu asistente puede alcanzar: [320 herramientas](docs/04-connecting-your-ai/your-assistant.md).
+Más ejemplos trabajados: [qué pedir](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). La lista completa de lo que tu asistente puede alcanzar: [323 herramientas](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 

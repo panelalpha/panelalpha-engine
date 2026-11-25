@@ -174,7 +174,7 @@ pae connect
 | `给 n8n.mydomain.com 配一个 Cloudflare 隧道。` | DNS 和隧道都配好，这也是从 NAT 后面的服务器对外提供服务的办法。 |
 | `上周我们有多少流量？` | 该项目以及整台服务器的用量、日志和限额。 |
 
-更多现成的例子：[该怎么问](docs/04-connecting-your-ai/your-assistant.md#what-to-ask)。助手能够触达的完整清单：[320 个工具](docs/04-connecting-your-ai/your-assistant.md)。
+更多现成的例子：[该怎么问](docs/04-connecting-your-ai/your-assistant.md#what-to-ask)。助手能够触达的完整清单：[323 个工具](docs/04-connecting-your-ai/your-assistant.md)。
 
 ---
 

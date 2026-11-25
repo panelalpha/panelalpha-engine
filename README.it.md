@@ -174,7 +174,7 @@ Nessun comando da imparare, e nemmeno formule magiche. Questi esempi mostrano il
 | `Configura un tunnel Cloudflare per n8n.mydomain.com.` | DNS e tunnel pronti, ed è anche il modo di servire da un server dietro NAT. |
 | `Quanto traffico abbiamo ricevuto la settimana scorsa?` | Utilizzo, log e limiti di quel progetto, e di tutto il server. |
 
-Altri esempi pronti: [cosa chiedere](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). L'elenco completo di ciò che il tuo assistente può raggiungere: [320 strumenti](docs/04-connecting-your-ai/your-assistant.md).
+Altri esempi pronti: [cosa chiedere](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). L'elenco completo di ciò che il tuo assistente può raggiungere: [323 strumenti](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 
