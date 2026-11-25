@@ -39,6 +39,14 @@ final class StaticBuildOutput
         return self::outermost(array_values(array_filter($dirs, static fn (string $dir): bool => $dir !== '')));
     }
 
+    /** A regular file modified at or after $since; a link is refused, since the checkout is the account's. */
+    public static function fileWrittenSince(string $path, int $since): bool
+    {
+        clearstatcache(true, $path);
+
+        return is_file($path) && ! is_link($path) && filemtime($path) >= $since;
+    }
+
     /** The marker's path in a relocated output. */
     public static function markerIn(string $outputDir): string
     {

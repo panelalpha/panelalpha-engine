@@ -1208,6 +1208,12 @@ class DeployFailureExplainer
                         ."applications at once. Build only the one that is the site and have it write {$m[1]}/index.html, "
                         .'or deploy the project with a strategy that runs its own server.',
             ],
+
+            'build-for-another-recipe' => [
+                '/The build wrote (\S+): it is an? (\S+) build, not an? (\S+) one/',
+                static fn (array $m): string => "The build succeeded but wrote {$m[1]}, which the {$m[2]} recipe serves, not "
+                        ."the {$m[3]} recipe this deploy asked for. Deploy it without naming a recipe, or with {$m[2]}.",
+            ],
         ];
     }
 

@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind;
 
 use App\Exceptions\BuildFailedAfterInstallException;
+use App\Exceptions\BuildHandedOverException;
 use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\Compose\AppRoot;
@@ -19,6 +20,7 @@ use App\Lib\Deploy\Engine\HostBuilder;
 use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\PlatformManifest;
+use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Deploy\Platform\Runtime\GoEmbeddedFrontends;
@@ -66,6 +68,9 @@ class HostCompile
     /** Where a static output found elsewhere waits while the predicted directory is cleared for it. */
     private const STATIC_OUTPUT_STAGING = '.panelalpha-static-output';
 
+    /** Where a recipe's app listens, which differs between recipes that build alike. */
+    private const SERVING_ENV = ['HOST', 'HOSTNAME', 'PORT'];
+
     private DindProject $project;
 
     /** The deploy and figure last announced, so each is said once per deploy. */
@@ -85,6 +90,12 @@ class HostCompile
 
     /** When this deploy's compile started; a static output found elsewhere must be newer. */
     private ?int $buildStartedAt = null;
+
+    /** What the last compile was built from, {@see buildInputs()}. */
+    private ?string $lastBuildInputs = null;
+
+    /** A build handed to another recipe, which its compile from the same inputs keeps instead of redoing. */
+    private ?string $reusableBuildInputs = null;
 
     public function __construct(DindProject $project)
     {
@@ -139,6 +150,7 @@ class HostCompile
             $this->bundleRustRuntimeLibraries($projectDir, $image, trim((string) ($decision['image'] ?? '')));
         }
 
+        $this->handOverToOtherRecipe($decision, $appDir, $output);
         $this->assertBuildProduced($appDir, $output, $isNitro, $isMounted && ! $isNginx, $isNode);
         $this->chownCompiled($appDir, $output, $isMounted, $isNitro, $isNode);
         $logger?->ok($isNginx ? 'Static assets compiled' : 'Application compiled');
@@ -166,6 +178,13 @@ class HostCompile
         $image = $this->compileImage($decision, $projectDir, $appDir, $install, $nodeImage, $isNode, $shipsNodeModules);
         $decision = $this->withOwnAddressBuildEnv($logger, $decision, $appDir);
         $mayRetryOnNode = $isNode && ! $shipsNodeModules && $image !== $nodeImage;
+        $inputs = self::buildInputs($appDir, $image, $install, $build, $decision);
+        if ($this->reusesBuild($inputs)) {
+            $logger?->info('Keeping the build the previous recipe made from the same sources and commands');
+
+            return $image;
+        }
+        $this->lastBuildInputs = $inputs;
         $this->prepareSources($decision, $projectDir, $appDir, $isNitro, $cached);
         $this->compileWithFallbacks(
             $logger,
@@ -182,6 +201,54 @@ class HostCompile
         );
 
         return $image;
+    }
+
+    /**
+     * The directory, image, commands and recipe env a compile ran with, less the serving address; the same inputs build
+     * the same tree.
+     *
+     * @param  array<string, mixed>  $decision
+     */
+    private static function buildInputs(string $appDir, string $image, string $install, string $build, array $decision): string
+    {
+        $env = is_array($decision['env'] ?? null) ? array_diff_key($decision['env'], array_flip(self::SERVING_ENV)) : [];
+        ksort($env);
+
+        return (string) json_encode([$appDir, $image, $install, $build, $env]);
+    }
+
+    /** Only the compile right after the refusal, so a later deploy never trusts a tree it did not see built. */
+    private function reusesBuild(string $inputs): bool
+    {
+        $reusable = $this->reusableBuildInputs;
+        $this->reusableBuildInputs = null;
+
+        return $reusable !== null && $reusable === $inputs;
+    }
+
+    /**
+     * A build that left no page in the output directory but this build's `hand_over` marker made what the recipe the
+     * manifest names serves; that recipe keeps it.
+     *
+     * @param  array<string, mixed>  $decision
+     *
+     * @throws BuildHandedOverException
+     */
+    private function handOverToOtherRecipe(array $decision, string $appDir, string $output): void
+    {
+        $manifest = PlatformRegistry::forDecision($decision);
+        $handOver = $manifest?->handOver;
+        if ($handOver === null || $this->buildStartedAt === null
+            || $this->project->system()->filesystem()->fileExists($appDir.'/'.$output.'/index.html')) {
+            return;
+        }
+        $marker = $handOver->markerBeside($output);
+        if (! StaticBuildOutput::fileWrittenSince($appDir.'/'.$marker, $this->buildStartedAt)) {
+            return;
+        }
+        $this->reusableBuildInputs = $this->lastBuildInputs;
+
+        throw new BuildHandedOverException($handOver->recipe, $manifest->id, $marker);
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace Tests\Integration\System\Project\Deployment;
 
+use App\Exceptions\BuildHandedOverException;
 use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\Platform\PlatformCandidates;
 use App\Lib\Deploy\Platform\ProjectContext;
@@ -137,6 +138,38 @@ class RecipeFallbackTest extends TestCase
 
         $this->assertSame([null, 'express'], $this->started);
         $this->assertSame(0, $result['exit_code']);
+    }
+
+    /** A build handed over goes to the recipe that serves it, past the ones ranked between. */
+    public function test_a_handed_over_build_goes_to_the_recipe_that_serves_it(): void
+    {
+        $this->expectCleanup()->expects($this->never())->method('abortRunningDeploy');
+
+        $result = $this->fallback()->start(
+            $this->starts([new BuildHandedOverException('node', 'php', '.next/BUILD_ID'), $this->ok()]),
+            $this->prepare()
+        );
+
+        $this->assertSame([null, 'node'], $this->started);
+        $this->assertSame(0, $result['exit_code']);
+        $this->assertSame('node', $this->model->getDetails()[RecipeFallback::DETAIL_RECIPE]);
+        $this->assertSame(
+            ['recipe' => 'php', 'package_manager' => null, 'failed' => true, 'rule' => 'build-for-another-recipe'],
+            $this->model->getDetails()[RecipeFallback::DETAIL_REPORT]['attempts'][0]
+        );
+    }
+
+    public function test_a_requested_recipe_keeps_its_hand_over_failure(): void
+    {
+        app(RecipeChoiceContext::class)->set('php');
+
+        try {
+            $this->fallback()->start($this->starts([new BuildHandedOverException('node', 'php', '.next/BUILD_ID')]), $this->prepare());
+            $this->fail('expected the hand-over failure');
+        } catch (BuildHandedOverException) {
+        }
+
+        $this->assertSame(['php'], $this->started);
     }
 
     /**

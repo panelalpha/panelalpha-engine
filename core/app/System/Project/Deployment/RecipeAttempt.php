@@ -42,6 +42,12 @@ final class RecipeAttempt
         return $this->exception !== null || ($this->result['exit_code'] ?? null) !== 0;
     }
 
+    /** What the start threw; null when it returned. */
+    public function exception(): ?\Exception
+    {
+        return $this->exception;
+    }
+
     /** @param  class-string<\Exception>  $class */
     public function threw(string $class): bool
     {

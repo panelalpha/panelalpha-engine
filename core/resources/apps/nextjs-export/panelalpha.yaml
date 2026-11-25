@@ -23,3 +23,7 @@ commands:
     run: '{{js.build:npx next build}}'
     description: "The project's own build script wins over this default when package.json defines one."
 output_from: next-workspace
+# A build that did not export leaves a server build, which nextjs serves.
+hand_over:
+  marker: .next/BUILD_ID
+  recipe: nextjs

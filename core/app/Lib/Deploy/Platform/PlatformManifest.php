@@ -53,6 +53,7 @@ final class PlatformManifest
         'system_packages',
         'frontend_build',
         'credentials',
+        'hand_over',
     ];
 
     /** Databases a manifest can ask the engine to provision. */
@@ -134,7 +135,8 @@ final class PlatformManifest
         public readonly array $commands,
         public readonly array $env,
         public readonly array $extra,
-        public readonly string $source
+        public readonly string $source,
+        public readonly ?HandOver $handOver = null
     ) {}
 
     /** Is this a runtime the engine knows how to build for? */
@@ -200,7 +202,8 @@ final class PlatformManifest
             self::readCommands($reader),
             self::readEnv($reader),
             $reader->passthrough('extra'),
-            $source
+            $source,
+            HandOver::read($reader, $runtime)
         );
     }
 

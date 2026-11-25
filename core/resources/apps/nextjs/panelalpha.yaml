@@ -25,3 +25,7 @@ commands:
     run: '{{js.start:npx next start -H 0.0.0.0 -p 3000}}'
     description: "The project's own start script wins over this default when package.json defines one."
 output_from: next-workspace
+# An `output: "export"` detection could not read leaves static pages, which nextjs-export serves.
+hand_over:
+  marker: out/index.html
+  recipe: nextjs-export

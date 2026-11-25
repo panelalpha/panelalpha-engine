@@ -101,6 +101,23 @@
         }
       ]
     },
+    "hand_over": {
+      "description": "A file a host compile leaves when it made what another recipe serves, and that recipe: a build with no index.html in the output directory but a fresh `marker` (relative to the output directory's parent) is served by `recipe`, which keeps the build. `next build` writes `.next/BUILD_ID` without `output: \"export\"` and `out/index.html` with it. `runtime: nginx` or `node`.",
+      "type": "object",
+      "required": ["marker", "recipe"],
+      "additionalProperties": false,
+      "properties": {
+        "marker": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(^|/)\\.{1,2}(/|$)).+$"
+        },
+        "recipe": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        }
+      }
+    },
     "credentials": {
       "description": "The login the application is seeded with (an admin username and password). The engine generates the values once, keeps them on the project (encrypted), writes them to ~/.panelalpha/app-credentials.env (0600) before the recipe's prepare hook on every deploy, and returns them from GET /projects/{name}/app-credentials. A compose service reads them with `env_file: ../.panelalpha/app-credentials.env`; a hook with `. ~/.panelalpha/app-credentials.env`. Stored values are kept across deploys, a newly declared field is generated once, a field the project's own env_vars set takes that value, and a field no longer declared is dropped. Passwords are masked in the deploy log.",
       "$ref": "#/definitions/credentials"

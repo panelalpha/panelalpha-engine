@@ -4,6 +4,7 @@ namespace App\Lib\Deploy\Platform\Runtime;
 
 use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
+use App\Lib\Deploy\Platform\Strategies;
 use Illuminate\Container\Container;
 
 /**
@@ -733,7 +734,7 @@ class JsPackageManager
             return self::scriptCommand($pm, $kind.':'.$slug);
         }
 
-        if (self::hasScript($scripts, $kind)) {
+        if (self::hasScript($scripts, $kind) && ! self::startsNextDevServer($kind, $scripts, $partial)) {
             $body = trim((string) $scripts[$kind]);
             if (self::turboNeedsPackageFilter($body) && $pkg !== '') {
                 return self::turboFilteredCommand($pm, $kind, $pkg, $body);
@@ -751,6 +752,25 @@ class JsPackageManager
         return $relative === ''
             ? (string) $partial[$defaultKey]
             : self::inWorkspace((string) $partial[$defaultKey], $relative);
+    }
+
+    /**
+     * A Next.js app whose `start` runs `next dev`, which compiles each page on its first request; the recipe's own
+     * `next start` serves the build instead.
+     *
+     * @param  array<string, mixed>  $scripts
+     * @param  array<string, mixed>  $partial
+     */
+    private static function startsNextDevServer(string $kind, array $scripts, array $partial): bool
+    {
+        if ($kind !== 'start' || ($partial['strategy'] ?? null) !== Strategies::NEXTJS || empty($partial['default_start'])) {
+            return false;
+        }
+        $script = static fn (string $name): string => is_string($scripts[$name] ?? null) ? trim($scripts[$name]) : '';
+        $start = $script('start');
+
+        return ScriptChain::mentions($start, '/\bnext\s+dev\b/', $script)
+            && ! ScriptChain::mentions($start, '/\bnext\s+start\b/', $script);
     }
 
     /** True for `turbo` with no `--filter`/`--scope` of its own. */
