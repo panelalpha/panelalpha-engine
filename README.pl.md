@@ -38,7 +38,7 @@ Open source. Self-hosted. Łatwy dla każdego, nie tylko dla sysadminów.
 <p>
 <a href="#krok-1-zainstaluj-engine-na-swoim-vps-ie"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="Instalacja jedną komendą"></a>
 <a href="#krok-1-zainstaluj-engine-na-swoim-vps-ie"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Wspierane systemy"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-323_tools-6f42c1" alt="320 narzędzi MCP"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-323_tools-6f42c1" alt="323 narzędzi MCP"></a>
 <a href="#licencja"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Dołącz do Discorda"></a>
 </p>
