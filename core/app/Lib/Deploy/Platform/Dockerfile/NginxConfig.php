@@ -17,6 +17,9 @@ final class NginxConfig
      * A path nginx can be handed inside double quotes: relative, no traversal, and none of the characters that would end the
      * string. Spaces and parentheses are allowed: `plan (1).html` is a real deployed filename.
      */
+    /** `/docs`, `/a/b`: segments of URL-safe characters, none `.` or `..`. */
+    private const SAFE_BASE_PATH = '/^(?:\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9._~-]+)+$/';
+
     private const SAFE_ENTRY = '/^(?!\/)(?!.*\.\.)[^\x00-\x1f"\'\\\\$;{}]+$/u';
 
     /** The single-page-app config: same contents for every account. */
@@ -38,6 +41,14 @@ final class NginxConfig
     public static function site(?string $entry = null): string
     {
         return Template::named('nginx-site')->render(['entry' => self::safeEntry($entry)]);
+    }
+
+    /** A Next.js export: a page per route, its own 404.html, and `$basePath` stripped when set. */
+    public static function nextExport(?string $basePath = null): string
+    {
+        $basePath = $basePath !== null && preg_match(self::SAFE_BASE_PATH, $basePath) === 1 ? $basePath : null;
+
+        return Template::named('nginx-next-export')->render(['base_path' => $basePath]);
     }
 
     private static function safeEntry(?string $entry): ?string

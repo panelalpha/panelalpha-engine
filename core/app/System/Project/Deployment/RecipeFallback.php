@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Deployment;
 
+use App\Exceptions\BuildHandedOverException;
 use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
@@ -86,13 +87,8 @@ final class RecipeFallback
         $tried = [$this->deployed(null)];
         $outcomes = [$first];
         $last = $first;
-        while ($last->failed() && $this->fallsBack($last) && ($next = $this->nextAttempt($tried)) !== null) {
-            $this->logger()?->warn(sprintf(
-                'Recipe %s failed (%s); trying %s',
-                self::describe($tried[array_key_last($tried)]),
-                $last->reason(),
-                self::describe($next)
-            ));
+        while ($last->failed() && $this->fallsBack($last) && ($next = $this->nextAttempt($tried, $last)) !== null) {
+            $this->announce($tried[array_key_last($tried)], $last, $next);
             $this->logger()?->throwIfCancelled();
             $this->clear($last);
             $this->choose($next);
@@ -141,15 +137,39 @@ final class RecipeFallback
     }
 
     /**
-     * Another package manager for the last recipe, when it installed with one, else the next recipe with the one
-     * detection picks for it.
+     * @param  array{recipe: ?string, manager: ?string}  $failed
+     * @param  array{recipe: ?string, manager: ?string}  $next
+     */
+    private function announce(array $failed, RecipeAttempt $last, array $next): void
+    {
+        $handedOver = self::handedOver($last);
+        if ($handedOver !== null) {
+            $this->logger()?->info(sprintf('%s; serving it with %s', $handedOver->getMessage(), self::describe($next)));
+
+            return;
+        }
+        $this->logger()?->warn(sprintf(
+            'Recipe %s failed (%s); trying %s',
+            self::describe($failed),
+            $last->reason(),
+            self::describe($next)
+        ));
+    }
+
+    /**
+     * The recipe whose build the last attempt made, with the package manager it built with, else another package manager
+     * for the last recipe, when it installed with one, else the next recipe with the one detection picks for it.
      *
      * @param  non-empty-list<array{recipe: ?string, manager: ?string}>  $tried
      * @return ?array{recipe: ?string, manager: ?string}
      */
-    private function nextAttempt(array $tried): ?array
+    private function nextAttempt(array $tried, ?RecipeAttempt $last = null): ?array
     {
         $requested = $this->choice()->requested();
+        $built = $last === null || $requested !== null ? null : self::handedOver($last)?->recipe;
+        if ($built !== null && ! in_array($built, array_column($tried, 'recipe'), true)) {
+            return ['recipe' => $built, 'manager' => $this->choice()->packageManager()];
+        }
         if ($requested === null && $this->candidates() === []) {
             return null;
         }
@@ -228,6 +248,13 @@ final class RecipeFallback
         $this->choice()->fallToPackageManager($attempt['manager']);
     }
 
+    private static function handedOver(RecipeAttempt $attempt): ?BuildHandedOverException
+    {
+        $exception = $attempt->exception();
+
+        return $exception instanceof BuildHandedOverException ? $exception : null;
+    }
+
     /** @param  array{recipe: ?string, manager: ?string}  $attempt */
     private static function describe(array $attempt): string
     {
@@ -236,11 +263,17 @@ final class RecipeFallback
         return $attempt['manager'] === null ? $recipe : "{$recipe} with {$attempt['manager']}";
     }
 
-    /** A release that failed or a version kept serving started nothing to take down; anything else half-started did. */
+    /**
+     * A release that failed, a version kept serving or a build handed over before its start started nothing to take
+     * down, and the version online keeps serving; anything else half-started did.
+     */
     private function clear(RecipeAttempt $attempt): void
     {
         $result = $attempt->resultOrNull();
         if ($result !== null && (! empty($result[AppLauncher::RELEASE_FAILED]) || ZeroDowntimeRedeploy::keptServing($result) !== null)) {
+            return;
+        }
+        if (self::handedOver($attempt) !== null) {
             return;
         }
         try {

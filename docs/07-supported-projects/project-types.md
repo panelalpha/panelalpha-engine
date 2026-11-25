@@ -52,6 +52,8 @@ They start from the `start` script when there is one.
 
 Vite, Angular, Create React App, Astro when it builds a static site and Next.js when it exports static files. The engine builds the files, then shows them as a website.
 
+Next.js counts as a static export when `next.config` sets `output: "export"` for every build, or when the `build` script runs `next export`. A setting that applies only under a condition, such as `GITHUB_PAGES=1`, does not count: the app runs as a Next.js server. The build has the last word. A build expected to export that makes a server build (`.next/BUILD_ID` and no `out/index.html`) is served with `next start`. A build expected to run as a server that writes `out/index.html` is served as static files. Either way the engine keeps that build and does not build again.
+
 ### If package.json is almost empty
 
 No known framework, no `start` script, and no server file: the engine does not recognise it. A [general build](#if-the-engine-does-not-recognise-it) is there if you ask for one.

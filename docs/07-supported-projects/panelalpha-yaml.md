@@ -71,7 +71,7 @@ health:
 | `build_args` | `ARG` values for the repository's own Dockerfile, such as `BASE: apache`. |
 | `system_packages` | PHP only: `ffmpeg` or `mediainfo` added to the PHP image. |
 | `frontend_build` | PHP only: `false` skips the frontend build; a command runs instead of `package.json`'s `build` script. |
-| `output_directory`, `output_from`, `commands_from`, `extra` | Build details the engine's recipes use. Rarely needed in a repository. |
+| `output_directory`, `output_from`, `commands_from`, `hand_over`, `extra` | Build details the engine's recipes use. Rarely needed in a repository. |
 | `check`, `check_skip` | Extra health checks to run, and shipped ones to skip, each with a reason. |
 
 ## Environment values

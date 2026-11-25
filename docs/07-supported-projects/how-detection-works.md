@@ -63,6 +63,13 @@ The deploy log names every attempt:
 Recipe php failed (composer-unresolvable); trying express
 ```
 
+A Next.js build that made the other kind of output goes straight to the recipe that serves it, which keeps that build:
+
+```text
+The build wrote .next/BUILD_ID: it is a nextjs build, not a nextjs-export one; serving it with nextjs
+Keeping the build the previous recipe made from the same sources and commands
+```
+
 What started is remembered, and the next deploy starts with it. If nothing starts, the deploy fails with the error of the first match.
 
 The engine does not try again when the problem is the server, not the project: a full disk, too little memory, a build that ran out of time, a registry limit or a network failure. It does not try another kind of project when you named one (`Deploy … as php`) or the repository has a `panelalpha.yaml`. With a named one, it still tries the other package managers. Railpack and the "Project not configured" page are never tried this way. A repository with its own Dockerfile or Compose file is never served as a plain site of files instead: if it does not start, the deploy fails. A Compose file that starts more than one service, such as the app and its database, is not replaced by anything that would run the app alone: if it does not start, the deploy fails with its error.

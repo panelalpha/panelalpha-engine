@@ -78,6 +78,7 @@ class DeployFailureExplainerRuleOrderTest extends TestCase
             'npm-dependency-tree-crash',
             'dependency-conflict',
             'static-build-several-sites',
+            'build-for-another-recipe',
             'git-binary-missing',
             'prepare-script-failed',
             'git-exec-failed',

@@ -1,0 +1,39 @@
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # A Next.js export writes a page per route, `about.html` or `about/index.html`
+    # by trailingSlash, and its own 404.html: a wrong URL is a 404, never the
+    # front page.
+    error_page 404 /404.html;
+
+    location ^~ /.well-known/ {
+    }
+
+    location ~ /\. {
+        deny all;
+    }
+    {{# base_path }}
+
+    # Pages and assets are written without basePath and link to it, so the prefix
+    # is stripped before the file is looked up.
+    location = / {
+        return 302 {{ base_path }}/;
+    }
+
+    location = {{ base_path }} {
+        return 301 {{ base_path }}/;
+    }
+
+    location {{ base_path }}/ {
+        rewrite ^{{ base_path }}(/.*)$ $1 break;
+        try_files $uri $uri.html $uri/ =404;
+    }
+    {{/ base_path }}
+
+    location / {
+        try_files $uri $uri.html $uri/ =404;
+    }
+}

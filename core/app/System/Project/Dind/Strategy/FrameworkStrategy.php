@@ -8,6 +8,7 @@ use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Platform\DockerfileBuilder;
 use App\Lib\Deploy\Platform\PlatformManifest;
+use App\Lib\Deploy\Platform\Probes\NextExportConfig;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
 use App\Lib\Deploy\Platform\Runtime\HostRunProject;
@@ -16,6 +17,7 @@ use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 use App\Lib\Deploy\Platform\Runtime\SpaApiServe;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 use App\Lib\Deploy\Platform\StageScript;
+use App\Lib\Deploy\Platform\Strategies;
 use App\System;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\HostCompile;
@@ -81,7 +83,7 @@ class FrameworkStrategy
         if ($isNginx) {
             $system->filesystem()->writeFileReplacingPath(
                 $projectDir.'/'.NginxConfig::FILENAME,
-                NginxConfig::contents(),
+                self::staticSiteConfig($decision, $projectDir),
                 $chown,
                 '644'
             );
@@ -102,6 +104,23 @@ class FrameworkStrategy
         }
 
         $this->writeCompose($decision, $projectDir, $chown, $port);
+    }
+
+    /**
+     * A Next.js export is a site of pages under its `basePath`, read from the next.config beside its output; anything else
+     * on nginx is a single-page app.
+     *
+     * @param  array<string, mixed>  $decision
+     */
+    private static function staticSiteConfig(array $decision, string $projectDir): string
+    {
+        if (($decision['strategy'] ?? null) !== Strategies::NEXTJS) {
+            return NginxConfig::contents();
+        }
+        $parent = dirname(trim((string) ($decision['output_directory'] ?? 'out'), '/'));
+        $config = NextExportConfig::read($parent === '.' ? $projectDir : rtrim($projectDir, '/').'/'.$parent);
+
+        return NginxConfig::nextExport($config === null ? null : NextExportConfig::basePath($config));
     }
 
     /**
